@@ -31,28 +31,93 @@ window.ShopView = (function () {
   var actors = [];       // 客
   var staffActors = [];
   var queue = [];        // 入店待ちの客
-  var timers = [];
+  var timers = [];       // {fn, remaining(ms), id, startedAt} v09: 残り時間を持たせ、凍結中は完全に止める
   var spawnTimer = null;
   var builtSig = "";
   var traffic = { pool: [], occupancy: 0, queueLevel: 0, satBySeg: {} };
+  // v09-1: 中央の pauseReasons(js/screens/loop.js)から setPaused() で渡される、唯一の一時停止フラグ。
+  // 以前は state.speed===0 を「止まっている」の代用にしていたが、v09で速度の選択と一時停止を
+  // 分離したため(停止中でも「選んでいる速度」自体は保持し続ける)、ここでは専用のフラグを持つ。
+  var frozen = false;
 
   function spd() { return state && state.speed > 0 ? state.speed : 1; }
-  function paused() { return !state || state.speed === 0; }
+  function paused() { return frozen; }
+
+  // 凍結中は新規タイマーを仕込むだけで実際にはarmしない(unfreezeで一括再開する)。
+  function armTimer(rec) {
+    rec.startedAt = Date.now();
+    rec.id = setTimeout(function () {
+      var i = timers.indexOf(rec);
+      if (i >= 0) timers.splice(i, 1);
+      rec.fn();
+    }, Math.max(16, rec.remaining));
+  }
 
   function later(fn, ms) {
-    var t = setTimeout(function () {
-      var i = timers.indexOf(t);
-      if (i >= 0) timers.splice(i, 1);
-      fn();
-    }, Math.max(16, ms / spd()));
-    timers.push(t);
-    return t;
+    var rec = { fn: fn, remaining: Math.max(16, ms / spd()), id: null, startedAt: 0 };
+    timers.push(rec);
+    if (!frozen) armTimer(rec);
+    return rec;
   }
 
   function clearTimers() {
-    timers.forEach(clearTimeout);
+    timers.forEach(function (rec) { if (rec.id) clearTimeout(rec.id); });
     timers = [];
     if (spawnTimer) { clearTimeout(spawnTimer); spawnTimer = null; }
+  }
+
+  // ---------- v09-1: 一時停止(パネル・モーダル・週末停止・非表示タブ)----------
+  // 「止めるのは日付タイマーだけではない。客の歩行・食事・退店、店員の往復、行列、すべて止める」
+  // という指示への対応。setTimeoutは止めて残り時間を覚えておき、CSSトランジション中の客も
+  // その場でピン留めする(見た目が一瞬で目的地へワープしてしまわないよう、計算上の現在地を読み取って
+  // 固定する)。再開時は同じ目的地へ向けて動きを作り直す(中断した瞬間の正確な残り時間の再現はしていない。
+  // 距離から所要時間を作り直す簡易措置。プロトタイプの検証用途としては十分と判断した)。
+  function pinActor(a) {
+    if (a.gone || !stage) return;
+    var cs = getComputedStyle(a.el);
+    var leftPx = parseFloat(cs.left), topPx = parseFloat(cs.top);
+    var rect = stage.getBoundingClientRect();
+    var leftPct = rect.width ? (leftPx / rect.width) * 100 : parseFloat(a.el.dataset.x || 0);
+    var topPct = rect.height ? (topPx / rect.height) * 100 : (a.tgtY || 0);
+    a.el.style.transitionDuration = "0s";
+    a.el.style.left = leftPct + "%";
+    a.el.style.top = topPct + "%";
+  }
+
+  function resumeActor(a) {
+    if (a.gone) return;
+    a.el.style.transitionDuration = ""; // 一旦解除。moveが必要ならすぐ上書きする
+    var curX = parseFloat(a.el.style.left);
+    var curY = parseFloat(a.el.style.top);
+    var tgtX = parseFloat(a.el.dataset.x);
+    var tgtY = a.tgtY != null ? a.tgtY : curY;
+    if (isNaN(tgtX)) return;
+    if (Math.abs(curX - tgtX) < 0.5 && Math.abs(curY - tgtY) < 0.5) return; // 既に目的地
+    move(a, tgtX, tgtY, Math.max(200, walkMs(curX, tgtX) + Math.abs(curY - tgtY) * 6));
+  }
+
+  function freeze() {
+    if (frozen) return;
+    frozen = true;
+    var now = Date.now();
+    timers.forEach(function (rec) {
+      if (!rec.id) return;
+      clearTimeout(rec.id);
+      rec.remaining = Math.max(0, rec.remaining - (now - rec.startedAt));
+      rec.id = null;
+    });
+    if (spawnTimer) { clearTimeout(spawnTimer); spawnTimer = null; }
+    actors.forEach(pinActor);
+    syncSpeed(); // stage の .paused クラスを更新(店員の往復・食事の弾みも一括で止まる)
+  }
+
+  function unfreeze() {
+    if (!frozen) return;
+    frozen = false;
+    timers.forEach(armTimer);
+    actors.forEach(resumeActor);
+    syncSpeed();
+    if (!spawnTimer && stage) spawnLoop();
   }
 
   // ---------- 静物(店の躯体・設備) ----------
@@ -229,7 +294,7 @@ window.ShopView = (function () {
     if (a.gone) return;
     a.el.style.transitionDuration = Math.max(16, ms / spd()) + "ms";
     a.el.style.left = x + "%";
-    if (y != null) a.el.style.top = y + "%";
+    if (y != null) { a.el.style.top = y + "%"; a.tgtY = y; } // v09: 凍結からの再開(resumeActor)で目的地を辿るために覚えておく
     a.el.classList.toggle("flip", x > (parseFloat(a.el.dataset.x || GEO.offX)));
     a.el.dataset.x = x;
   }
@@ -349,9 +414,8 @@ window.ShopView = (function () {
 
   // ---------- 送り出し(客の湧き) ----------
   function spawnLoop() {
-    if (!stage) { spawnTimer = null; return; }
+    if (!stage || frozen) { spawnTimer = null; return; } // 凍結中はこの周期タイマー自体を止める(unfreezeが再度呼ぶ)
     spawnTimer = setTimeout(spawnLoop, Math.max(80, 620 / spd()));
-    if (paused()) return;
     if (!traffic.pool.length) return;
 
     var occupied = seats.filter(function (s) { return !!s.occupant; }).length;
@@ -387,7 +451,9 @@ window.ShopView = (function () {
     builtSig = sig;
     clearTimers();
     buildScenery();
-    spawnLoop();
+    // v09-1: 凍結中(パネルを開いたまま設備を買った、等)に組み直した場合は湧きループを起こさない。
+    // unfreeze() 側が再開時にちゃんと spawnLoop() を呼ぶ。
+    if (!frozen) spawnLoop();
   }
 
   // finance / customers は processWeek の計算結果。無い場合(開業直後)は空の店にする。
@@ -429,7 +495,11 @@ window.ShopView = (function () {
     queue = [];
     staffActors = [];
     builtSig = "";
+    frozen = false;
   }
 
-  return { mount: mount, update: update, syncSpeed: syncSpeed, destroy: destroy };
+  // v09-1: 中央のpauseReasons(js/screens/loop.js)から呼ばれる、唯一の一時停止スイッチ。
+  function setPaused(on) { if (on) freeze(); else unfreeze(); }
+
+  return { mount: mount, update: update, syncSpeed: syncSpeed, destroy: destroy, setPaused: setPaused };
 })();

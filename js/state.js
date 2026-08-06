@@ -1,10 +1,10 @@
 // ゲーム状態の定義とlocalStorage永続化
 window.GameState = (function () {
-  // v07 で営業ループの時間進行が根本的に変わった(週末で完全停止+定休日アクションが必須の手順に
-  // なった)ため、旧セーブは読ませない。キーごと変えているので、旧キーのデータが残っていても
-  // 「続きから」に出てこない。
-  var SAVE_KEY = "ramen_v07_save";
-  var SAVE_VERSION = 3;
+  // v09 で時間の持ち方が「週+週内の日」から「開業からの通算日数(state.day)」1本に変わり、
+  // 停止の仕組みも state.running を廃して pauseReasons(js/screens/loop.js)へ一本化したため、
+  // 旧セーブは読ませない。キーごと変えているので、旧キーのデータが残っていても「続きから」に出てこない。
+  var SAVE_KEY = "ramen_v09_save";
+  var SAVE_VERSION = 4;
 
   function freshState() {
     return {
@@ -20,8 +20,7 @@ window.GameState = (function () {
       price: 850,
       money: 0,
       loan: { monthlyRepay: 0, monthsLeft: 0 },
-      week: 1,
-      weekDay: 1, // v07-1: 週の中の日(1〜7)。演出のみ。計算は週単位のまま
+      day: 1, // v09-3: 開業からの通算日数(1始まり)。時間はこれ1本だけで持つ。月日は表示時にUtilsで逆算する
       reputation: 50,
       relationships: { menya: 0, reporter: 0, landlord: 0, oldman: 0, lender: 0 },
       staffState: {}, // id -> {morale, rel, lowMoraleWeeks, statBonus}
@@ -44,8 +43,10 @@ window.GameState = (function () {
       eventLog: [], // {week, id, title}
       pendingEvents: [], // このtickで表示すべきイベントのキュー
       currentEvent: null,
-      speed: 1, // 0=停止,1,2,4
-      running: false,
+      speed: 1, // 0=停止,1,2,4。v09: 「進んでいるか」はこの値とpauseReasons(loop.js)から決まるので、
+      // 別に running フラグは持たない(以前はweekEndActive中にspeedを0へ強制的に書き換えて流用していたが、
+      // それだと「選んでいた速度」を覚えていられなかった。v09で廃止)。
+      weekEndActive: false, // 週末シーケンス中(「次の週へ」を押すまでtrue)。UIの表示・安全な再開判定に使う
       gameOverReason: null
     };
   }

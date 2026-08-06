@@ -59,7 +59,7 @@ window.Guide = (function () {
   // それ以降は自動では出さない（常に喋る相手がいると鬱陶しいため）。
   function checkAuto(state, weekCtx) {
     var f = state.flags;
-    if (!f.guideIntroShown && state.week <= 3) {
+    if (!f.guideIntroShown && U.weekOfRun(state.day) <= 3) {
       f.guideIntroShown = true;
       return LINES.loop.intro;
     }

@@ -9,10 +9,13 @@ window.EventEngine = (function () {
   function getEvent(id) { return U.findById(EVENTS, id); }
 
   function initRun(state) {
-    // 開業時に一度だけ、カードの登場ウィンドウを決めておく(密度が偏らないよう分散させる)
-    state.flags.menyaTargetWeek = U.randInt(U.monthStartWeek(2), U.monthEndWeek(4));
-    state.flags.reporterWindowStart = U.monthStartWeek(5);
-    state.flags.reporterWindowEnd = U.monthEndWeek(9);
+    // 開業時に一度だけ、カードの登場ウィンドウを決めておく(密度が偏らないよう分散させる)。
+    // v09-3: 「開業からNヶ月目」という相対的な間隔なので、実カレンダー月ではなく
+    // monthSeqStartDay/EndDay(開業月を1とした通し月)を使う。週番号に変換して保持するのは
+    // 判定側(checkWeeklyEvents)が引き続き週単位で比較しているため。
+    state.flags.menyaTargetWeek = U.randInt(U.weekOfRun(U.monthSeqStartDay(2)), U.weekOfRun(U.monthSeqEndDay(4)));
+    state.flags.reporterWindowStart = U.weekOfRun(U.monthSeqStartDay(5));
+    state.flags.reporterWindowEnd = U.weekOfRun(U.monthSeqEndDay(9));
     state.tempBoosts = {};
   }
 
@@ -266,46 +269,53 @@ window.EventEngine = (function () {
   // v05: 全イベントが「1周で1回」になったのでクールダウン機構は使っていない。
   // 季節ものを複数回出したくなったときのために枠だけ残してある(entry.cooldownKey)。
   function setCooldown(state, key) {
-    state.flags["cooldown_" + key] = state.week;
+    state.flags["cooldown_" + key] = U.weekOfRun(state.day);
   }
 
   // v05 密度制御: 月2〜3回 / 年25〜35回。1週に出すのは最大1件。
   // fixed(開店初日・夏・向かいの店・家賃・決算)だけはクォータを無視して必ず出す。
+  // v09-3: 「今月」は表示上の月(実カレンダー月)で数える。イベントは週末(週番号×7日目)にしか
+  // 発生しないので、ログの週番号を7倍すればその発生日に戻せる(近似ではなく厳密に一致する)。
   var MONTHLY_EVENT_CAP = 3;
   function eventsThisMonth(state) {
-    var m = U.weekToMonth(state.week);
+    var m = U.calMonth(state.day);
     var n = 0;
-    state.eventLog.forEach(function (e) { if (U.weekToMonth(e.week) === m) n++; });
+    state.eventLog.forEach(function (e) { if (U.calMonth(e.week * 7) === m) n++; });
     return n;
   }
 
   // 週次でどのイベントが発生するかを判定する。density検証のため呼び出し側でログを残す。
+  // v09-3: state.week は廃止(内部の時計は state.day 1本)。この関数は週末(state.day = 週番号×7)に
+  // 呼ばれる前提で、週番号はここで一度だけ導出してローカル変数で使い回す。
   function checkWeeklyEvents(state, weekStats) {
     var candidates = []; // {ev, ctx, kind}
+    var week = U.weekOfRun(state.day);
 
     // --- fixed ---
-    if (state.week === 1 && !state.firedEventIds.ev_open_day) {
+    if (week === 1 && !state.firedEventIds.ev_open_day) {
       candidates.push({ ev: getEvent("ev_open_day"), ctx: {}, kind: "fixed" });
     }
-    if (U.weekToMonth(state.week) === 7 && U.isFirstWeekOfMonth(state.week) && !state.firedEventIds.ev_summer) {
+    // v09-3: 季節ものは表示上の月(実カレンダー月)で判定する。「その月に入って最初の週」という
+    // 判定は不要になった(once系フラグで単発化しているため、月内の他の週では自然に再発火しない)。
+    if (U.calMonth(state.day) === 7 && !state.firedEventIds.ev_summer) {
       candidates.push({ ev: getEvent("ev_summer"), ctx: {}, kind: "fixed" });
     }
-    if (U.weekToMonth(state.week) === 8 && U.isFirstWeekOfMonth(state.week) && !state.firedEventIds.ev_rival_arrive) {
+    if (U.calMonth(state.day) === 8 && !state.firedEventIds.ev_rival_arrive) {
       candidates.push({ ev: getEvent("ev_rival_arrive"), ctx: {}, kind: "fixed" });
     }
-    if (U.weekToMonth(state.week) === 10 && U.isFirstWeekOfMonth(state.week) && !state.firedEventIds.ev_rent_up) {
+    if (U.calMonth(state.day) === 10 && !state.firedEventIds.ev_rent_up) {
       candidates.push({ ev: getEvent("ev_rent_up"), ctx: {}, kind: "fixed" });
     }
-    if (state.week === window.WEEKS_PER_RUN && !state.firedEventIds.ev_tax) {
+    if (week === window.WEEKS_PER_RUN && !state.firedEventIds.ev_tax) {
       candidates.push({ ev: getEvent("ev_tax"), ctx: {}, kind: "fixed" });
     }
 
     // --- conditional ---
-    if (!state.firedEventIds.firstComplaintFired && state.week >= 2 && weekStats.avgSatisfaction < 50) {
+    if (!state.firedEventIds.firstComplaintFired && week >= 2 && weekStats.avgSatisfaction < 50) {
       candidates.push({ ev: getEvent("ev_first_complaint"), ctx: {}, kind: "conditional_once", once: "firstComplaintFired" });
     }
     if (state.staffHired.indexOf("gonzo") >= 0 && !state.firedEventIds.ev_gonzo_angry) {
-      var recentChanges = state.recipeChangeLog.filter(function (w) { return state.week - w <= 4; }).length;
+      var recentChanges = state.recipeChangeLog.filter(function (w) { return week - w <= 4; }).length;
       if (recentChanges >= 2) {
         candidates.push({ ev: getEvent("ev_gonzo_angry"), ctx: {}, kind: "once", once: "ev_gonzo_angry" });
       }
@@ -314,7 +324,7 @@ window.EventEngine = (function () {
       weekStats.satisfactionBySeg.student > 75 && !state.firedEventIds.ev_sns_viral) {
       candidates.push({ ev: getEvent("ev_sns_viral"), ctx: {}, kind: "once", once: "ev_sns_viral" });
     }
-    if (state.staffHired.indexOf("yuta") >= 0 && state.week >= (state.flags.yutaHireWeek || 1) + 13 && !state.firedEventIds.ev_yuta_ask) {
+    if (state.staffHired.indexOf("yuta") >= 0 && week >= (state.flags.yutaHireWeek || 1) + 13 && !state.firedEventIds.ev_yuta_ask) {
       candidates.push({ ev: getEvent("ev_yuta_ask"), ctx: {}, kind: "once", once: "ev_yuta_ask" });
     }
     // 従業員の士気低下 -> 辞めたい
@@ -339,10 +349,10 @@ window.EventEngine = (function () {
 
     // --- card / combo (同一週に2つ以上出さない。1週最大1件) ---
     var cardCandidates = [];
-    if (state.week === state.flags.menyaTargetWeek && !state.firedEventIds.ev_menya_appear) {
+    if (week === state.flags.menyaTargetWeek && !state.firedEventIds.ev_menya_appear) {
       cardCandidates.push({ ev: getEvent("ev_menya_appear"), ctx: {}, kind: "once", once: "ev_menya_appear" });
     }
-    if (state.week >= state.flags.reporterWindowStart && state.week <= state.flags.reporterWindowEnd &&
+    if (week >= state.flags.reporterWindowStart && week <= state.flags.reporterWindowEnd &&
       (state.relationships.reporter || 0) >= 40 && !state.firedEventIds.ev_reporter_visit) {
       cardCandidates.push({ ev: getEvent("ev_reporter_visit"), ctx: {}, kind: "once", once: "ev_reporter_visit" });
     }
@@ -354,13 +364,13 @@ window.EventEngine = (function () {
     if (menyaRel >= 50 && (state.relationships.oldman || 0) >= 50 && !state.comboFired.menya_oldman) {
       cardCandidates.push({ ev: getEvent("ev_menya_oldman_combo"), ctx: {}, kind: "combo", combo: "menya_oldman" });
     }
-    if (cardCandidates.length > 0 && state.week - (state.flags.lastCardEventWeek || -99) >= 2) {
+    if (cardCandidates.length > 0 && week - (state.flags.lastCardEventWeek || -99) >= 2) {
       candidates.push(cardCandidates[0]); // 1週間に1件だけ
     }
 
     // --- random ---
     // 3-2: 「スープが違う」も1周で1回だけ
-    if (state.week >= 4 && !state.firedEventIds.ev_soup_fail && Math.random() < 0.06) {
+    if (week >= 4 && !state.firedEventIds.ev_soup_fail && Math.random() < 0.06) {
       candidates.push({ ev: getEvent("ev_soup_fail"), ctx: {}, kind: "once", once: "ev_soup_fail" });
     }
 
@@ -495,12 +505,13 @@ window.EventEngine = (function () {
 
   function markFired(state, entry) {
     var ev = entry.ev;
+    var week = U.weekOfRun(state.day);
     state.firedEventIds[ev.id] = true;
     if (entry.once) state.firedEventIds[entry.once] = true;
     if (entry.cooldownKey) setCooldown(state, entry.cooldownKey);
-    if (entry.combo) { state.comboFired[entry.combo] = true; state.flags.lastCardEventWeek = state.week; }
-    if (entry.ev.trigger === "card") state.flags.lastCardEventWeek = state.week;
-    state.eventLog.push({ week: state.week, id: ev.id, title: ev.title });
+    if (entry.combo) { state.comboFired[entry.combo] = true; state.flags.lastCardEventWeek = week; }
+    if (entry.ev.trigger === "card") state.flags.lastCardEventWeek = week;
+    state.eventLog.push({ week: week, id: ev.id, title: ev.title });
   }
 
   return {

@@ -98,8 +98,10 @@ window.Scoring = (function () {
     return { value: satisfaction, taste_score: taste_score, shop_score: shop_score, price_penalty: price_penalty };
   }
 
-  function seasonalFactor(property, seg, week) {
-    var month = U.weekToMonth(week);
+  // v09-3: 季節の判定は「表示上の月」(実カレンダー月)で行う。以前は週→月の近似(4.333週/月)から
+  // 逆算した「月」を使っていたが、開業日を4/1固定にしたことで実際の暦月と直接比較できるようになった。
+  function seasonalFactor(property, seg, day) {
+    var month = U.calMonth(day);
     var mult = 1;
     if (property.id === "campus" && (month === 2 || month === 8)) mult *= 0.3; // 長期休暇で街ごと静まる
     if ((month === 7 || month === 8) && seg.id !== "tourist") mult *= 0.9; // 夏はやや客足減
@@ -126,7 +128,7 @@ window.Scoring = (function () {
       var sat = computeSatisfaction(seg, state);
       var flow = property.segment_flow[seg.id] != null ? property.segment_flow[seg.id] : 0.1;
       var repMult = U.clamp(state.reputation / 50, 0.4, 2.2);
-      var seasonMult = seasonalFactor(property, seg, state.week);
+      var seasonMult = seasonalFactor(property, seg, state.day);
       var repeatMult = U.clamp(sat.value / 65, 0.15, 1.7);
       var boost = state.tempBoosts && state.tempBoosts[seg.id] ? state.tempBoosts[seg.id].mult : 1;
       var potential = Math.max(0, flow * BASE_CUSTOMERS * repMult * seasonMult * repeatMult * boost * rivalMult);

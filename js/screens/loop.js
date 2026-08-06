@@ -28,50 +28,70 @@ window.ScreenLoop = (function () {
   var lastFinance = null, lastCustomers = null;
   var openSheetKey = null, sheetBuilder = null;
   var lastFlashData = null; // 週末の収支表示(詳細/1行トグル用に直近データを保持)
-  var pausedSpeed = 1, pausedRunning = true; // 週末シーケンス中に強制停止する前の状態を退避しておく
 
   function findStaffDef(id) { return U.findById(STAFF, id); }
 
-  // 1週間ぶんの実時間(ms)。v05から変えていない。日単位表示はこれを7分割して使う。
-  function speedToMs(speed) {
-    if (speed === 0) return null;
-    return { 1: 3300, 2: 1650, 4: 825 }[speed];
+  // ---------- v09-1: 停止の一本化 ----------
+  // 「週末だから止める」「パネルが開いたから止める」を別々のフラグで書くと、両方の条件が重なった
+  // ときに片方を解除した瞬間に動き出してしまう(実際に起きていた不具合はこの形だった)。
+  // 理由を集合で持ち、空になったときだけ実際に動かす。
+  var pauseReasons = new Set();
+  function pause(reason) { pauseReasons.add(reason); syncClock(); }
+  function resume(reason) { pauseReasons.delete(reason); syncClock(); }
+  function isPaused() { return pauseReasons.size > 0; }
+
+  // 現在の一時停止の状態を、実際の動き(日付タイマー・店の絵)に反映する。何度呼んでも安全(冪等)。
+  function syncClock() {
+    if (window.ShopView) window.ShopView.setPaused(isPaused());
+    scheduleDayTick();
   }
+
+  function onVisibilityChange() {
+    if (!state) return; // ゲーム開始前(まだloop画面に来ていない)は無視
+    if (document.hidden) pause("hidden"); else resume("hidden");
+  }
+  document.addEventListener("visibilitychange", onVisibilityChange);
+
+  // v09-2: ×1 = 1日1.8秒(1週 ≈ 12.6秒)。以前(v07)は1週3300ms(1日≈470ms)と速すぎ、
+  // 「収支を読んでいる間に翌週になる」の一因になっていた。遅い側に倒す指示に従った。
   function dayMs() {
-    var ms = speedToMs(state.speed);
-    return ms ? ms / DAYS_PER_WEEK : null;
+    if (state.speed === 0) return null;
+    return { 1: 1800, 2: 900, 4: 450 }[state.speed];
   }
 
   function clearTick() { if (tickTimer) { clearTimeout(tickTimer); tickTimer = null; } }
 
-  // ---------- v07-1: 日を刻むティック ----------
+  // ---------- v07-1 / v09-1: 日を刻むティック。pauseReasonsが空の間だけ動く ----------
   function scheduleDayTick() {
     clearTick();
-    if (!state.running || state.weekEndActive) return;
+    if (isPaused()) return;
     var ms = dayMs();
-    if (!ms) return;
+    if (!ms) return; // 速度「停止」が選ばれている(この場合もisPaused()がtrueになるので実質ここには来ない)
     tickTimer = setTimeout(tickDay, ms);
   }
 
   function tickDay() {
-    if (state.weekEndActive) return; // 安全弁。週末シーケンス中は絶対に進めない
-    state.weekDay++;
-    if (state.weekDay > DAYS_PER_WEEK) {
-      runWeeklyCalc(); // 7日たまったら、ここで初めて週次計算(既存の週モデルのまま)を1回走らせる
+    // 週の中の日(1〜7)。保存はしない(state.dayから毎回計算する)。7日使い切ったら週次計算へ。
+    var dow = ((state.day - 1) % DAYS_PER_WEEK) + 1;
+    if (dow >= DAYS_PER_WEEK) {
+      runWeeklyCalc(); // ここで初めて週次計算(既存の週モデルのまま)を1回走らせる。state.dayはまだ進めない
       return;
     }
+    state.day++;
     renderTopBar();
     scheduleDayTick();
   }
 
+  // v09-2: 速度の選択は state.speed に持たせ、ゲームのセーブ(GameState)に乗せて引き継ぐ。
+  // 週をまたいでも(advanceWeekはstate.speedに一切触れない)、ページを閉じて再開しても
+  // 直前に選んでいた速度のまま続く。新規ゲームはfreshState()通り×1から始まる。
   function setSpeed(n) {
     state.speed = n;
-    window.ShopView.syncSpeed();
-    if (state.weekEndActive) { renderTopBar(); return; } // 週末シーケンス中は速度ボタンを効かせない
-    state.running = n > 0;
+    if (n === 0) pause("speed0"); else resume("speed0"); // pause/resumeが内部でsyncClock()を呼ぶ
+    window.ShopView.syncSpeed(); // アニメーションの速さのスケーリングを更新(一時停止の可否とは別軸)
     renderTopBar();
     renderSpeedDock();
-    if (n > 0) scheduleDayTick(); else clearTick();
+    window.GameState.save();
   }
 
   function monthlyCostBreakdown() {
@@ -89,19 +109,16 @@ window.ScreenLoop = (function () {
 
   // ---------- 週の計算(7日ぶんのティックがたまった時に1回だけ走る) ----------
   function runWeeklyCalc() {
-    if (state.week > WEEKS_PER_RUN) { finishGame(); return; }
+    if (state.day > window.DAYS_PER_RUN) { finishGame(); return; } // 安全弁。実際の終了判定はadvanceWeek側
 
-    // v07-2: ここから「週末の完全停止」に入る。速度ボタンを封じ、店のアニメーションも止める。
-    // 元の speed/running は退避しておき、「次の週へ」を押した瞬間に復元する。
-    pausedSpeed = state.speed;
-    pausedRunning = state.running;
+    // v09-1: ここから「週末の完全停止」に入る。理由「weekend」を積む(pause内でsyncClock()が
+    // 呼ばれ、日付タイマー・店の絵の両方が止まる)。速度の選択(state.speed)自体には触れない
+    // (以前はここでspeedを0へ強制的に書き換えて流用していたが、それだと「選んでいた速度」を
+    // 覚えていられなかった。v09で廃止し、選択と一時停止を分離した)。
     state.weekEndActive = true;
-    state.running = false;
-    state.speed = 0;
-    window.ShopView.syncSpeed(); // 店のアニメーションも止める
-    renderSpeedDock(); // 速度ボタンを無効化した見た目に更新する
-    clearTick();
-    closeSheet();
+    pause("weekend");
+    renderSpeedDock(); // 速度ボタンを「停止中」表示に切り替える
+    closeSheet(); // 開いていたパネルがあれば閉じる(resume("panel")も呼ばれる)
 
     var prev = state.history.length ? state.history[state.history.length - 1] : null;
     var repBefore = state.reputation;
@@ -114,7 +131,9 @@ window.ScreenLoop = (function () {
 
     var monthlyCosts = 0;
     var chargedBreakdown = { rent: 0, wages: 0, loanPay: 0 }; // 月次まとめ用に、実際に引き落とされた内訳を週次ログへ残す
-    if (U.isFirstWeekOfMonth(state.week)) {
+    // v09-3: 「月初」の判定を、週→月の近似(4.333週/月)から、表示上の月が実際に変わったかへ変更。
+    // 週が月をまたいでよくなったため、月の請求は「その週で月が変わったこと」で判定する。
+    if (U.monthJustChanged(state.day)) {
       chargedBreakdown = monthlyCostBreakdown();
       monthlyCosts = chargedBreakdown.total;
       state.money -= monthlyCosts;
@@ -134,7 +153,10 @@ window.ScreenLoop = (function () {
     Object.keys(customers.results).forEach(function (id) { weekStats.satisfactionBySeg[id] = customers.results[id].satisfaction; });
 
     state.history.push({
-      week: state.week, month: U.weekToMonth(state.week), customers: finance.bySegment,
+      // v09-3: monthは実カレンダー月ではなく「開業から何ヶ月目か」(seq, 1〜12・巻き戻りなし)で
+      // 持つ。1月をまたいで12月→1月と巻き戻る実カレンダー月のままだと月別集計のキーが壊れるため
+      // (表示するときだけ U.monthSeqToCal で実際の月名に戻す)。
+      week: U.weekOfRun(state.day), month: U.monthSeq(state.day), customers: finance.bySegment,
       totalCustomers: finance.totalCustomers, revenue: Math.round(finance.revenue), foodCost: Math.round(finance.foodCost),
       monthlyCosts: monthlyCosts, rentCost: chargedBreakdown.rent, wageCost: chargedBreakdown.wages, loanCost: chargedBreakdown.loanPay,
       profit: Math.round(profit), money: Math.round(state.money),
@@ -154,11 +176,12 @@ window.ScreenLoop = (function () {
     var guideLine = G.checkAuto(state, { profit: profit, queueLevel: customers.queueLevel });
     if (guideLine) G.say(guideLine);
 
-    var finishedWeek = state.week;
+    var finishedWeek = U.weekOfRun(state.day);
     window.GameState.save();
 
     // 1. 今週の収支 → 2. イベント(あれば) → 3. 月次まとめ(あれば) → 4. 定休日のアクション、の順で必ず止めて見せる。
-    // どの段階も「次へ」を押すまで進まない。
+    // どの段階も「次へ」を押すまで進まない。state.dayはこの間ずっと今週の最終日のまま動かさない
+    // (advanceWeekで初めて次の週の頭に進める)。
     showWeeklyBalance(finance, customers, function () {
       proceedToEvents(finishedWeek, weekStats);
     });
@@ -170,8 +193,10 @@ window.ScreenLoop = (function () {
       state.pendingEvents = events;
       state.eventModalActive = true;
       window.GameState.save();
+      pause("modal");
       window.ScreenEventModal.showQueue(state, events, function () {
         state.eventModalActive = false;
+        resume("modal");
         proceedToMonthlyRecap(finishedWeek);
       });
       return;
@@ -179,12 +204,20 @@ window.ScreenLoop = (function () {
     proceedToMonthlyRecap(finishedWeek);
   }
 
+  // v09-3: 月末まとめは「月が変わって最初の週末」に出す(週が月をまたいでよくなったため、
+  // 「その月の最後の週」という区切りが無くなった)。最終月(3月)だけは「次の月」が来る前に
+  // 52週目で終わってしまうので、最終週に特別扱いで出す。両方が同じ週に重なる可能性もゼロではない
+  // ため、queueにして順番に見せる(実際には52週の通しプレイで重ならないことを確認済み)。
   function proceedToMonthlyRecap(finishedWeek) {
-    if (finishedWeek === U.monthEndWeek(U.weekToMonth(finishedWeek))) {
-      showMonthlyRecap(finishedWeek, function () { proceedToDayOff(finishedWeek); });
-      return;
+    var seq = U.monthSeq(state.day);
+    var queue = [];
+    if (U.monthJustChanged(state.day) && seq - 1 >= 1) queue.push(seq - 1);
+    if (finishedWeek === WEEKS_PER_RUN && queue.indexOf(seq) < 0) queue.push(seq);
+    function next() {
+      if (!queue.length) { proceedToDayOff(finishedWeek); return; }
+      showMonthlyRecap(queue.shift(), next);
     }
-    proceedToDayOff(finishedWeek);
+    next();
   }
 
   function proceedToDayOff(finishedWeek) {
@@ -195,18 +228,14 @@ window.ScreenLoop = (function () {
 
   // 「次の週へ」。ここで初めて時間が動く。
   function advanceWeek() {
-    state.week++;
+    state.day++; // 今週の最終日で止めていた状態(runWeeklyCalc開始時点)から、次の週の1日目へ進める
     state.weekEndActive = false;
+    resume("weekend"); // pauseReasonsが空になれば(パネル等も閉じていれば)ここで自動的にtickが再開する
     window.GameState.save();
-    if (state.week > WEEKS_PER_RUN) { finishGame(); return; }
-    state.weekDay = 1;
-    state.speed = pausedSpeed;
-    state.running = pausedRunning;
+    if (state.day > window.DAYS_PER_RUN) { finishGame(); return; }
     renderTopBar();
     renderSpeedDock();
     refreshShop();
-    window.ShopView.syncSpeed();
-    if (state.running && state.speed > 0) scheduleDayTick();
   }
 
   // ---------- 2-2: 月末にまとめを出す ----------
@@ -235,17 +264,17 @@ window.ScreenLoop = (function () {
     return row;
   }
 
-  function showMonthlyRecap(week, onDone) {
-    var month = U.weekToMonth(week);
-    var cur = monthAggregate(month);
-    var prev = month > 1 ? monthAggregate(month - 1) : null;
+  // seq: 開業から何ヶ月目か(1〜12・巻き戻りなし)。見出しの月名だけ実カレンダー月に変換して出す。
+  function showMonthlyRecap(seq, onDone) {
+    var cur = monthAggregate(seq);
+    var prev = seq > 1 ? monthAggregate(seq - 1) : null;
     var fmtCount = function (v) { return Math.round(v) + "人"; };
 
     var overlay = document.getElementById("event-modal-overlay");
     var box = document.getElementById("event-modal-box");
     box.className = "modal-box month-recap";
     window.UI.clear(box);
-    box.appendChild(h("h2", { text: month + "月のまとめ" }));
+    box.appendChild(h("h2", { text: U.monthSeqToCal(seq) + "月のまとめ" }));
 
     var table = h("div", { className: "recap-table" }, [
       recapRow("客数", fmtCount(cur.customers), prev ? cur.customers - prev.customers : null, fmtCount),
@@ -276,7 +305,7 @@ window.ScreenLoop = (function () {
     closeSheet();
     G.hide();
     window.ShopView.destroy();
-    state.running = false;
+    pauseReasons.clear(); // 次のプレイに影響しないよう、理由集合をリセットしておく
     console.log("=== イベント密度ログ ===");
     console.table(state.eventLog);
     onGameOver();
@@ -311,7 +340,7 @@ window.ScreenLoop = (function () {
     var mc = monthlyCostBreakdown(); // 表示用に月額を毎週割り出す(実際の引き落としは月初のみ)
     var revenue = finance.revenue;
     return {
-      week: state.week,
+      week: U.weekOfRun(state.day),
       totalCustomers: finance.totalCustomers,
       satGood: s.good, satBad: s.bad,
       revenue: revenue, foodCost: finance.foodCost,
@@ -408,14 +437,10 @@ window.ScreenLoop = (function () {
   }
 
   // ---------- 描画 ----------
-  // v07-1-1: 「1/1」のような日付を出す。演出のみ(計算は週単位のまま)。
-  // 月の中の日数は月の週数(4〜5週)×7で近似する。厳密なカレンダーではないが、月をまたぐ境界の
-  // 定義は U.weekToMonth/weekOfMonth と完全に一致させてある(v06で踏んだ二重帰属バグを繰り返さない)。
+  // v09-3: 「4/1」のような日付を出す。内部の通算日数(state.day)を実際の暦(4月開業・平年固定)で
+  // 逆算するだけなので、以前のような「2/35」等の存在しない日付は出ない。
   function dateLabel() {
-    var wk = Math.min(state.week, WEEKS_PER_RUN);
-    var month = U.weekToMonth(wk);
-    var dom = (U.weekOfMonth(wk) - 1) * DAYS_PER_WEEK + Math.min(state.weekDay, DAYS_PER_WEEK);
-    return month + "月" + dom + "日";
+    return U.calMonth(state.day) + "月" + U.dayOfMonth(state.day) + "日";
   }
 
   function renderTopBar() {
@@ -444,8 +469,9 @@ window.ScreenLoop = (function () {
     var dock = document.getElementById("speed-dock");
     if (!dock) return;
     window.UI.clear(dock);
-    // v07-2: 週末の完全停止中は速度ボタンを効かせない
+    // v07-2/v09-2: 週末の完全停止中は速度ボタンを効かせず、代わりに「停止中」と明示する
     var locked = state.weekEndActive;
+    if (locked) dock.appendChild(h("div", { className: "speed-locked", text: "停止中" }));
     [[0, "■"], [1, "×1"], [2, "×2"], [4, "×4"]].forEach(function (pair) {
       dock.appendChild(h("button", {
         className: "btn small" + (state.speed === pair[0] && !locked ? " selected" : ""),
@@ -467,7 +493,9 @@ window.ScreenLoop = (function () {
   }
 
   // ---------- 1-3: 下半分のパネル ----------
-  // 意図的にゲームを止めない。レシピを変えた瞬間に上の店で客の反応が変わるのを見せるため。
+  // v09-1: 開いている間は時間を止める(「パネルを読んでいる間に日付が進む」不具合の本体だった)。
+  // ただし止まるのは時間の進行だけで、パネル自体はいつでも操作できる。レシピを変えた瞬間に
+  // 上の店で客の反応が変わって見えるのは、時間が止まっていても refreshShop() が反映するので変わらない。
   function openSheet(key, title, builder) {
     if (openSheetKey === key) { closeSheet(); return; }
     openSheetKey = key;
@@ -478,6 +506,7 @@ window.ScreenLoop = (function () {
     raiseControls(true);
     refreshSheet();
     renderFabs();
+    pause("panel");
   }
 
   // 速度切替とパネル切替はパネルに隠させない
@@ -506,6 +535,7 @@ window.ScreenLoop = (function () {
     if (bd) bd.classList.remove("open");
     raiseControls(false);
     renderFabs();
+    resume("panel");
   }
 
   // ---------- パネルの中身 ----------
@@ -532,7 +562,7 @@ window.ScreenLoop = (function () {
           onclick: function () {
             if (locked || selected) return;
             state.recipe[key] = item.id;
-            state.recipeChangeLog.push(state.week);
+            state.recipeChangeLog.push(U.weekOfRun(state.day));
             window.UI.toast(c[1] + "を" + item.name + "に変更した");
             refreshSheet();
           }
@@ -701,7 +731,7 @@ window.ScreenLoop = (function () {
           onclick: function () {
             state.staffHired.push(def.id);
             EE.ensureStaffState(state, def.id);
-            if (def.id === "yuta") state.flags.yutaHireWeek = state.week;
+            if (def.id === "yuta") state.flags.yutaHireWeek = U.weekOfRun(state.day);
             window.UI.toast(def.name + "を雇用した");
             refreshShop();
             refreshSheet();
@@ -771,7 +801,7 @@ window.ScreenLoop = (function () {
     var panel = h("div", { className: "week-log-panel" });
     state.history.slice(-12).reverse().forEach(function (rec) {
       panel.appendChild(h("div", {
-        text: "第" + rec.week + "週(" + rec.month + "月): 客" + rec.totalCustomers + "人 / 売上" +
+        text: "第" + rec.week + "週(" + U.monthSeqToCal(rec.month) + "月): 客" + rec.totalCustomers + "人 / 売上" +
           U.formatMoneyShort(rec.revenue) + " / 満足度" + rec.avgSatisfaction
       }));
     });
@@ -831,13 +861,15 @@ window.ScreenLoop = (function () {
     lastCustomers = null;
     openSheetKey = null;
     sheetBuilder = null;
+    pauseReasons.clear(); // 前回のプレイの一時停止理由を持ち越さない(念のため)
 
-    // 中断からの再開で万一「週末シーケンス中」のまま保存されていたら、安全側(次の週の頭)に倒す
+    // 中断からの再開で万一「週末シーケンス中」のまま保存されていたら、安全側(次の週の頭)に倒す。
+    // 今週分の収支(money・historyなど)はrunWeeklyCalcの時点で既に確定・保存済みなので、
+    // 同じ週をもう一度計算し直すのではなく、日付だけ次の週の頭へ進める。
     if (state.weekEndActive) {
+      state.day++;
       state.weekEndActive = false;
-      state.weekDay = 1;
     }
-    if (state.weekDay == null) state.weekDay = 1;
 
     window.ShopView.destroy();
     window.ShopView.mount(document.getElementById("shop-fill"), state);
@@ -845,7 +877,9 @@ window.ScreenLoop = (function () {
     renderTopBar();
     renderSpeedDock();
     renderFabs();
-    setSpeed(1); // 初期速度は ×1。ここから日が刻まれ始める
+    onVisibilityChange(); // 開いた時点でタブが非表示なら最初からpauseしておく
+    // 保存されていた速度を引き継ぐ(新規ゲームはfreshState()通り×1から。速度自体は「翌週以降も引き継ぐ」)。
+    setSpeed([0, 1, 2, 4].indexOf(state.speed) >= 0 ? state.speed : 1);
   }
 
   return { render: render, setSpeed: setSpeed };

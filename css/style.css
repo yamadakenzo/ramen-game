@@ -285,6 +285,8 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   padding: 3px;
 }
 .speed-dock .btn { padding: 4px 6px; font-size: 0.68rem; border-width: 2px; box-shadow: none; }
+/* v09-2: 週末の完全停止中、速度ボタンの代わりに出す表示 */
+.speed-locked { display: flex; align-items: center; padding: 4px 6px; font-size: 0.68rem; color: var(--accent); }
 
 /* パネルを開いている間はパネルの上へ逃がす。速度切替とパネル切替は常に押せること */
 .speed-dock.raised, .fab-col.raised { bottom: calc(52% + 8px); z-index: 31; }
@@ -567,7 +569,9 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 @keyframes svPace {
   0% { left: 14%; } 45% { left: 56%; } 50% { left: 56%; } 95% { left: 14%; } 100% { left: 14%; }
 }
-.shop-stage.paused .sv-staff { animation-play-state: paused; }
+/* v09-1: 一時停止中は食事の弾みアニメーションも止める(以前は店員の往復だけ止まっていた) */
+.shop-stage.paused .sv-staff,
+.shop-stage.paused .sv-cust.eating .sv-body { animation-play-state: paused; }
 
 /* ---- ステータス表示（パネルの中で使う） ---- */
 .status-card { background: var(--panel); border: 3px solid var(--border); padding: 9px; }

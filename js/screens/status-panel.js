@@ -95,23 +95,25 @@ window.StatusPanel = (function () {
     return box;
   }
 
-  // 雇用画面でも使えるよう能力ブロックだけ切り出しておく
-  function staffStats(def) {
-    var rows = [
-      ["麺上げ", def.stats.noodle], ["仕込み", def.stats.prep], ["接客", def.stats.service],
-      ["数字", def.stats.numbers], ["育成", def.stats.teach]
-    ];
+  // 雇用画面でも使えるよう能力ブロックだけ切り出しておく。
+  // bonus: v07「従業員に教える」の上乗せ分({noodle,prep,...})。雇用前は省略(undefined)でよい。
+  function staffStats(def, bonus) {
+    var keys = ["noodle", "prep", "service", "numbers", "teach"];
+    var labels = ["麺上げ", "仕込み", "接客", "数字", "育成"];
     var box = h("div", { className: "stat-grid" });
-    rows.forEach(function (r) {
-      box.appendChild(h("span", { className: "stat-name", text: r[0] }));
-      box.appendChild(bar(r[1], 100));
-      box.appendChild(h("span", { className: "stat-num", text: String(r[1]) }));
+    keys.forEach(function (k, i) {
+      var v = bonus ? window.Scoring.effectiveStat(def, bonus, k) : def.stats[k];
+      var grown = bonus && bonus[k] > 0;
+      box.appendChild(h("span", { className: "stat-name", text: labels[i] }));
+      box.appendChild(bar(v, 100, grown ? "good-fill" : null));
+      box.appendChild(h("span", { className: "stat-num", text: String(v) + (grown ? "↑" : "") }));
     });
     return box;
   }
 
   function staffBlock(def, sstate) {
-    var rating = window.Scoring.staffRating(def);
+    var bonus = sstate && sstate.statBonus;
+    var rating = window.Scoring.staffRating(def, bonus);
     var block = h("div", { className: "staff-card" }, [
       h("div", { className: "staff-head" }, [
         h("span", { className: "staff-emoji", text: def.emoji }),
@@ -120,7 +122,7 @@ window.StatusPanel = (function () {
         rankBadge(rating.rank),
         h("span", { className: "dim", text: "総合 " + rating.avg })
       ]),
-      staffStats(def)
+      staffStats(def, bonus)
     ]);
     if (sstate) {
       var moraleCls = sstate.morale >= 60 ? "good-fill" : (sstate.morale >= 30 ? "warn-fill" : "bad-fill");

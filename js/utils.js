@@ -1,4 +1,8 @@
 // 共通ユーティリティ
+// v07-1-3: 1周の長さ(週数)を定数で持つ。数年に伸ばす可能性があるための下準備で、
+// 今回はまだ実際には伸ばさない(値は52のまま)。
+window.WEEKS_PER_RUN = 52;
+
 window.Utils = (function () {
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
   function findById(list, id) { return list.find(function (x) { return x.id === id; }); }
@@ -10,7 +14,7 @@ window.Utils = (function () {
   function monthStartWeek(month) { return Math.round((month - 1) * 4.333) + 1; }
   function monthEndWeek(month) { return monthStartWeek(month + 1) - 1; }
   function weekToMonth(week) {
-    week = clamp(week, 1, 52);
+    week = clamp(week, 1, window.WEEKS_PER_RUN);
     for (var m = 12; m >= 1; m--) {
       if (week >= monthStartWeek(m)) return m;
     }

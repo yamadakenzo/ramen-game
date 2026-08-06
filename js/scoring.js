@@ -23,11 +23,15 @@ window.Scoring = (function () {
     }
     var volumeBonus = (state && state.equipment && state.equipment.indexOf("extra_boiler") >= 0)
       ? EXTRA_BOILER_VOLUME : 0;
+    var rawCost = soup.cost + tare.cost + noodle.cost + topping.cost;
+    // v07: 「仕入れ先を回る」で積み上げた割引(%)。既存の「原価」という数字に効かせる(新しい数値は作らない)。
+    var discountPct = (state && state.flags && state.flags.costDiscountPct) || 0;
+    var cost = rawCost * (1 - discountPct / 100);
     return {
       richness: soup.richness + tare.richness + noodle.richness + topping.richness,
       oiliness: soup.oiliness + tare.oiliness + noodle.oiliness + topping.oiliness,
       volume: soup.volume + tare.volume + noodle.volume + topping.volume + volumeBonus,
-      cost: soup.cost + tare.cost + noodle.cost + topping.cost,
+      cost: Math.round(cost),
       smell: soup.smell + tare.smell
     };
   }
@@ -86,6 +90,8 @@ window.Scoring = (function () {
     if (state.equipment.indexOf("ticket_machine") >= 0 && (seg.id === "family" || seg.id === "tourist")) shop_score -= 10;
     if (state.equipment.indexOf("bright_light") >= 0 && seg.id === "regular") shop_score -= 5;
     if (state.equipment.indexOf("multilingual") >= 0 && seg.id === "tourist") shop_score += 15;
+    // v07: 疲労が高いと店の見え方(shop_score)が落ちる。「休む」がただの回復ボタンで終わらないようにするための唯一の新規パラメータ。
+    if (state.flags && state.flags.fatigue) shop_score -= state.flags.fatigue * 0.15;
 
     var price_penalty = Math.max(0, (state.price - seg.budget) / seg.budget * 100 * w.price_sensitivity);
     var satisfaction = taste_score * 0.6 + shop_score * 0.4 - price_penalty;
@@ -226,6 +232,8 @@ window.Scoring = (function () {
       (GRADE.soup[r.soup] != null ? GRADE.soup[r.soup] : 50) * 0.22 +
       (GRADE.tare[r.tare] != null ? GRADE.tare[r.tare] : 50) * 0.08;
     if (state.flags && state.flags.noodleQualityBonus) v += 5;
+    // v07: 「スープの試作」で積み上げた完成度の上乗せ(0〜20)。既存の「素材の質」に効かせる。
+    if (state.flags && state.flags.tasteBonus) v += state.flags.tasteBonus;
     return U.clamp(v, 0, 100);
   }
 
@@ -252,9 +260,17 @@ window.Scoring = (function () {
     if (v >= 28) return "C";
     return "D";
   }
-  function staffRating(def) {
+  // bonus: v07「従業員に教える」で伸びた分の上乗せ({noodle,prep,service,numbers,teach})。
+  // 雇用前(まだ state.staffState が無い)の表示では省略してよい。
+  function effectiveStat(def, bonus, key) {
+    return U.clamp(def.stats[key] + ((bonus && bonus[key]) || 0), 0, 100);
+  }
+  function staffRating(def, bonus) {
     var s = def.stats;
-    var avg = (s.noodle + s.prep + s.service + s.numbers + s.teach) / 5;
+    var avg = bonus
+      ? (effectiveStat(def, bonus, "noodle") + effectiveStat(def, bonus, "prep") + effectiveStat(def, bonus, "service") +
+         effectiveStat(def, bonus, "numbers") + effectiveStat(def, bonus, "teach")) / 5
+      : (s.noodle + s.prep + s.service + s.numbers + s.teach) / 5;
     return { avg: Math.round(avg), rank: staffRank(avg) };
   }
 
@@ -274,6 +290,7 @@ window.Scoring = (function () {
     materialScore: materialScore,
     rankOf: rankOf,
     staffRating: staffRating,
+    effectiveStat: effectiveStat,
     BASE_CUSTOMERS: BASE_CUSTOMERS
   };
 })();

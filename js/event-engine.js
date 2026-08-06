@@ -20,6 +20,11 @@ window.EventEngine = (function () {
     if (!state.staffState[id]) {
       state.staffState[id] = { morale: 70, rel: 0, lowMoraleWeeks: 0 };
     }
+    // v07: 「従業員に教える」で伸びた能力値の上乗せ分。既存のstatsテーブル(静的データ)は書き換えず、
+    // 表示・判定側でこの上乗せを足して使う(js/scoring.js の staffRating、js/screens/status-panel.js)。
+    if (!state.staffState[id].statBonus) {
+      state.staffState[id].statBonus = { noodle: 0, prep: 0, service: 0, numbers: 0, teach: 0 };
+    }
     return state.staffState[id];
   }
 
@@ -291,7 +296,7 @@ window.EventEngine = (function () {
     if (U.weekToMonth(state.week) === 10 && U.isFirstWeekOfMonth(state.week) && !state.firedEventIds.ev_rent_up) {
       candidates.push({ ev: getEvent("ev_rent_up"), ctx: {}, kind: "fixed" });
     }
-    if (state.week === 52 && !state.firedEventIds.ev_tax) {
+    if (state.week === window.WEEKS_PER_RUN && !state.firedEventIds.ev_tax) {
       candidates.push({ ev: getEvent("ev_tax"), ctx: {}, kind: "fixed" });
     }
 
@@ -368,6 +373,126 @@ window.EventEngine = (function () {
     return [others[0]];
   }
 
+  // ---------- v07: 定休日のアクション ----------
+  // 大成功/成功/空振りの3段階。マイナスは作らない(空振りは「1週間を損した」だけ)。
+  function rollTier(chance) {
+    var p = U.clamp(chance, 0.05, 0.95);
+    var r = Math.random();
+    if (r < p * 0.3) return "great";
+    if (r < p) return "good";
+    return "miss";
+  }
+
+  // 今の物件で客足の比重が大きい客層。「商店街の寄合に出る」の客足ブーストをどこに乗せるかに使う。
+  function dominantSegments(state) {
+    var prop = window.Scoring.getProperty(state);
+    if (!prop) return [];
+    var flows = prop.segment_flow;
+    return Object.keys(flows).sort(function (a, b) { return flows[b] - flows[a]; }).slice(0, 2);
+  }
+
+  function resolveFixedAction(state, def, ctx) {
+    var text;
+    if (def.id === "teach_staff") {
+      var s = ensureStaffState(state, ctx.staffId);
+      var sdef = U.findById(STAFF, ctx.staffId);
+      var keys = ["noodle", "prep", "service", "numbers", "teach"];
+      var effective = keys.map(function (k) { return { k: k, v: sdef.stats[k] + (s.statBonus[k] || 0) }; });
+      effective.sort(function (a, b) { return a.v - b.v; });
+      var weakest = effective[0].k; // いちばん低い能力を伸ばす
+      var gain = Math.round(3 + sdef.stats.teach / 15); // 教える側(=本人のteach)が高いほど伸びが大きい
+      s.statBonus[weakest] = (s.statBonus[weakest] || 0) + gain;
+      ctx.staffName = sdef.name;
+      text = def.text.fixed(state, ctx);
+    } else if (def.id === "rest") {
+      state.flags.fatigue = U.clamp((state.flags.fatigue || 0) - 25, 0, 100);
+      text = def.text.fixed;
+    } else if (def.id === "open_shop") {
+      var lastRec = state.history.length ? state.history[state.history.length - 1] : null;
+      var extra = lastRec ? Math.round(lastRec.revenue / 6) : Math.round(state.price * 8);
+      state.money += extra;
+      text = def.text.fixed;
+    }
+    return { tier: "fixed", text: text };
+  }
+
+  function resolveVariableAction(state, def, ctx) {
+    if (def.id === "meet_person") {
+      var cdef = U.findById(CARDS, ctx.cardId);
+      ctx.cardName = cdef ? cdef.name : "";
+    }
+
+    var chance = 0.3;
+    switch (def.id) {
+      case "soup_trial":
+        chance = 0.35 + (state.staffHired.indexOf("gonzo") >= 0 ? 0.25 : 0);
+        break;
+      case "supplier_visit":
+        chance = 0.3 + U.clamp((state.relationships.menya || 0) / 100, 0, 1) * 0.5;
+        break;
+      case "food_tour":
+        chance = 0.4 + U.clamp(state.reputation / 100, 0, 1) * 0.2;
+        break;
+      case "meeting":
+        var prop = window.Scoring.getProperty(state);
+        chance = 0.3 + (prop && prop.id === "shotengai" ? 0.25 : 0) +
+          Math.min((state.flags.meetingAttendCount || 0) * 0.05, 0.25);
+        break;
+      case "meet_person":
+        chance = 0.25 + U.clamp((state.relationships[ctx.cardId] || 0) / 100, 0, 1) * 0.55;
+        break;
+    }
+
+    var tier = rollTier(chance);
+
+    switch (def.id) {
+      case "soup_trial":
+        if (tier !== "miss") state.flags.tasteBonus = U.clamp((state.flags.tasteBonus || 0) + (tier === "great" ? 6 : 3), 0, 20);
+        break;
+      case "supplier_visit":
+        if (tier !== "miss") state.flags.costDiscountPct = U.clamp((state.flags.costDiscountPct || 0) + (tier === "great" ? 4 : 2), 0, 20);
+        break;
+      case "food_tour":
+        if (tier !== "miss") {
+          if (!state.flags.eventRecipesUnlocked) state.flags.eventRecipesUnlocked = true;
+          else state.flags.tasteBonus = U.clamp((state.flags.tasteBonus || 0) + (tier === "great" ? 4 : 2), 0, 20);
+        }
+        break;
+      case "meeting":
+        state.flags.meetingAttendCount = (state.flags.meetingAttendCount || 0) + 1; // 空振りでも「出た回数」自体は積み上がる
+        if (tier !== "miss") {
+          var pct = tier === "great" ? 30 : 15;
+          dominantSegments(state).forEach(function (segId) { addTempBoost(state, segId, pct, 4); });
+        }
+        break;
+      case "meet_person":
+        if (tier !== "miss") adjustRel(state, ctx.cardId, tier === "great" ? 20 : 10);
+        break;
+    }
+
+    var textEntry = def.text[tier];
+    var text = typeof textEntry === "function" ? textEntry(state, ctx) : textEntry;
+    return { tier: tier, text: text };
+  }
+
+  // 疲労: 「店を開ける」だけが増える。それ以外は定休日をとった分だけ和らぐ(「休む」はさらに大きく和らぐ)。
+  function applyFatigueForAction(state, actionId) {
+    var f = state.flags.fatigue || 0;
+    if (actionId === "open_shop") f += 15;
+    else if (actionId === "rest") f -= 25;
+    else f -= 8;
+    state.flags.fatigue = U.clamp(f, 0, 100);
+  }
+
+  function resolveDayOffAction(state, actionId, ctx) {
+    ctx = ctx || {};
+    var def = U.findById(window.DATA.actions.actions, actionId);
+    if (!def) return null;
+    var result = def.kind === "fixed" ? resolveFixedAction(state, def, ctx) : resolveVariableAction(state, def, ctx);
+    applyFatigueForAction(state, actionId);
+    return result;
+  }
+
   function markFired(state, entry) {
     var ev = entry.ev;
     state.firedEventIds[ev.id] = true;
@@ -388,6 +513,7 @@ window.EventEngine = (function () {
     checkCardUnlocks: checkCardUnlocks,
     checkWeeklyEvents: checkWeeklyEvents,
     markFired: markFired,
-    ensureStaffState: ensureStaffState
+    ensureStaffState: ensureStaffState,
+    resolveDayOffAction: resolveDayOffAction
   };
 })();

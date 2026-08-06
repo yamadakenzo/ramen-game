@@ -269,9 +269,11 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   padding: 6px 8px 8px;
   background: linear-gradient(180deg, rgba(14, 10, 7, 0.85) 0%, rgba(14, 10, 7, 0.55) 60%, rgba(14, 10, 7, 0) 100%);
 }
-.top-bar .ti { text-align: center; line-height: 1.2; min-width: 0; }
-.top-bar .tl { font-size: 0.58rem; color: var(--text-dim); }
-.top-bar .tv { font-size: 0.88rem; white-space: nowrap; }
+.top-bar .ti { text-align: center; line-height: 1.2; min-width: 0; flex: 1; }
+.top-bar .tl { font-size: 0.54rem; color: var(--text-dim); }
+.top-bar .tv { font-size: 0.8rem; white-space: nowrap; }
+.top-bar .tv.warn { color: var(--accent); }
+.top-bar .tv.bad { color: var(--bad); }
 .top-bar .queue-mark { color: var(--accent-2); font-size: 0.7rem; }
 
 /* 速度切替は押す回数が多いので常時表示 */
@@ -312,54 +314,37 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .fab.active { border-color: var(--accent); background: rgba(92, 66, 30, 0.95); }
 .fab:active { transform: translate(1px, 1px); }
 
-/* 2-2: 週の終わりに出す収支表示。1行版(compact)と詳細版(detailed)を切り替えられる。 */
-.week-flash {
-  position: absolute; left: 8px; right: 8px; top: 11%; z-index: 18;
-  background: rgba(14, 10, 7, 0.9);
-  border: 2px solid var(--accent);
-  opacity: 0;
-  transition: opacity 0.14s ease;
-  pointer-events: none;
-}
-.week-flash.show { opacity: 1; }
-
-/* 1行版: 従来通り軽い表示 */
-.week-flash.compact {
-  text-align: center;
-  padding: 5px 8px;
-  font-size: 0.7rem;
-}
-
-/* 詳細版: 引き算が見える表。タップできるようにpointer-eventsを戻す */
-.week-flash.detailed {
-  padding: 8px 10px;
-  font-size: 0.72rem;
-  pointer-events: auto;
-}
-.wf-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
-.wf-title { color: var(--accent); font-size: 0.82rem; }
-.wf-sub { color: var(--text-dim); font-size: 0.68rem; }
+/* v07-2: 週の終わりの収支表示。以前は画面上に浮かせる自動フェードのバッジだったが、
+   「読んでいる間に裏で時間が進む」不具合の元だったため、週末の完全停止シーケンスの
+   1段階目として #event-modal-box に描画するブロッキングのモーダルに変更した(js/screens/loop.js の
+   showWeeklyBalance)。.wf-* のクラス群はそのモーダルの中身の見た目として引き続き使う。 */
+.wf-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.wf-sub { color: var(--text-dim); font-size: 0.75rem; margin-top: 2px; }
 .wf-toggle {
   font-family: inherit; background: none; border: 1px solid var(--border);
-  color: var(--text-dim); padding: 2px 6px; font-size: 0.6rem; cursor: pointer;
+  color: var(--text-dim); padding: 3px 8px; font-size: 0.68rem; cursor: pointer;
   touch-action: manipulation;
-  pointer-events: auto; /* compact表示は親がpointer-events:noneなので、ボタン自身で明示的に戻す */
 }
-.wf-table { display: flex; flex-direction: column; gap: 1px; }
+.wf-table { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; font-size: 0.85rem; }
 .wf-row { display: flex; justify-content: space-between; padding: 1px 0; }
 .wf-row .wf-label { color: var(--text-dim); }
 .wf-row .wf-val { font-variant-numeric: tabular-nums; }
 .wf-row.wf-bad .wf-val { color: var(--bad); }
 .wf-row.wf-good .wf-val { color: var(--good); }
-.wf-divider { border-top: 1px solid var(--border); margin: 3px 0; }
-.wf-row.wf-net { font-weight: bold; font-size: 0.82rem; }
+.wf-divider { border-top: 2px solid var(--border); margin: 4px 0; }
+.wf-row.wf-net { font-weight: bold; font-size: 1.1rem; padding-top: 2px; }
 .wf-row.wf-net .wf-val.good { color: var(--good); }
 .wf-row.wf-net .wf-val.bad { color: var(--bad); }
-.wf-note { color: var(--text-dim); font-size: 0.6rem; margin-top: 3px; }
+.wf-note { color: var(--text-dim); font-size: 0.68rem; margin-top: 6px; }
 
 /* 月次まとめ(イベントモーダルを流用。少し大きい扱いにするため専用の見た目を足す) */
 .modal-box.month-recap { border-color: var(--money); }
 .modal-box.month-recap h2 { color: var(--money); }
+
+/* v07-3: 定休日のアクション画面(イベントモーダルを流用。色だけ変えて見分けをつける) */
+.modal-box.dayoff-box { border-color: var(--good); }
+.modal-box.dayoff-box h2 { color: var(--good); }
+.dayoff-box .sheet-section { margin-bottom: 10px; }
 .recap-table { display: flex; flex-direction: column; gap: 3px; margin: 10px 0; }
 .recap-row { display: flex; justify-content: space-between; font-size: 0.85rem; }
 .recap-row .recap-label { color: var(--text-dim); }

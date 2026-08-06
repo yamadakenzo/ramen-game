@@ -1,7 +1,9 @@
-// 営業ループ本体（v05）
+// 営業ループ本体（v07）
 //  - 店の絵を固定枠いっぱいに広げ、その上に情報とボタンを重ねる
 //  - パネルは下半分だけ。上半分の店は見えたまま残す（レシピを変えた瞬間の客の反応が同じ画面で見える）
-//  - 週の終わりに一拍止めて、起きたことを1行の言葉にする
+//  - v07: 時間は「日」単位で刻む(演出のみ、計算は週単位のまま)。週末は完全停止し、
+//    今週の収支 → イベント → 月次まとめ(あれば) → 定休日のアクション、の順に必ず止まって見せる。
+//    「次の週へ」を押すまで絶対に時間は動かない(自動再開しない)。
 window.ScreenLoop = (function () {
   var h = window.UI.h;
   var U = window.Utils;
@@ -13,10 +15,11 @@ window.ScreenLoop = (function () {
   var PROPERTY_DATA = window.DATA.property;
   var STAFF = window.DATA.characters.staff;
   var CARDS = window.DATA.characters.cards;
+  var WEEKS_PER_RUN = window.WEEKS_PER_RUN;
+  var DAYS_PER_WEEK = 7;
 
   var state, onGameOver;
   var tickTimer = null;
-  var flashTimer = null;
   var TALK_COST = 1200;
   var TALK_GAIN = 8;
   // 満足/不満の分け目。この値以上を「満足して帰った客」として数える
@@ -24,36 +27,51 @@ window.ScreenLoop = (function () {
   // 直近の週次計算結果。設備変更などで店の絵を組み直すときに再利用する。
   var lastFinance = null, lastCustomers = null;
   var openSheetKey = null, sheetBuilder = null;
+  var lastFlashData = null; // 週末の収支表示(詳細/1行トグル用に直近データを保持)
+  var pausedSpeed = 1, pausedRunning = true; // 週末シーケンス中に強制停止する前の状態を退避しておく
 
   function findStaffDef(id) { return U.findById(STAFF, id); }
 
-  // 2-1: ×1 の実速度を v02 の 1/3（1100ms -> 3300ms）に落とす
+  // 1週間ぶんの実時間(ms)。v05から変えていない。日単位表示はこれを7分割して使う。
   function speedToMs(speed) {
     if (speed === 0) return null;
     return { 1: 3300, 2: 1650, 4: 825 }[speed];
   }
-  // 2-2: 週の終わりの「一拍」。×1 で 0.5 秒、速度倍率に連動して短縮する
-  function beatMs() { return state.speed > 0 ? 500 / state.speed : 0; }
+  function dayMs() {
+    var ms = speedToMs(state.speed);
+    return ms ? ms / DAYS_PER_WEEK : null;
+  }
 
   function clearTick() { if (tickTimer) { clearTimeout(tickTimer); tickTimer = null; } }
 
-  function scheduleTick(extraMs) {
+  // ---------- v07-1: 日を刻むティック ----------
+  function scheduleDayTick() {
     clearTick();
-    if (!state.running) return;
-    var ms = speedToMs(state.speed);
+    if (!state.running || state.weekEndActive) return;
+    var ms = dayMs();
     if (!ms) return;
-    tickTimer = setTimeout(processWeek, ms + (extraMs || 0));
+    tickTimer = setTimeout(tickDay, ms);
+  }
+
+  function tickDay() {
+    if (state.weekEndActive) return; // 安全弁。週末シーケンス中は絶対に進めない
+    state.weekDay++;
+    if (state.weekDay > DAYS_PER_WEEK) {
+      runWeeklyCalc(); // 7日たまったら、ここで初めて週次計算(既存の週モデルのまま)を1回走らせる
+      return;
+    }
+    renderTopBar();
+    scheduleDayTick();
   }
 
   function setSpeed(n) {
     state.speed = n;
     window.ShopView.syncSpeed();
-    if (n === 0) hideFlash();
-    if (state.eventModalActive) { renderTopBar(); return; } // モーダル表示中は再開しない
+    if (state.weekEndActive) { renderTopBar(); return; } // 週末シーケンス中は速度ボタンを効かせない
     state.running = n > 0;
     renderTopBar();
     renderSpeedDock();
-    if (n > 0) scheduleTick(); else clearTick();
+    if (n > 0) scheduleDayTick(); else clearTick();
   }
 
   function monthlyCostBreakdown() {
@@ -69,10 +87,21 @@ window.ScreenLoop = (function () {
     return { rent: rent, wages: wages, loanPay: loanPay, total: rent + wages + loanPay };
   }
 
-  // ---------- 週の進行 ----------
-  function processWeek() {
-    if (state.week > 52) { finishGame(); return; }
-    if (state.eventModalActive) return; // モーダル応答待ちの間は絶対に進めない
+  // ---------- 週の計算(7日ぶんのティックがたまった時に1回だけ走る) ----------
+  function runWeeklyCalc() {
+    if (state.week > WEEKS_PER_RUN) { finishGame(); return; }
+
+    // v07-2: ここから「週末の完全停止」に入る。速度ボタンを封じ、店のアニメーションも止める。
+    // 元の speed/running は退避しておき、「次の週へ」を押した瞬間に復元する。
+    pausedSpeed = state.speed;
+    pausedRunning = state.running;
+    state.weekEndActive = true;
+    state.running = false;
+    state.speed = 0;
+    window.ShopView.syncSpeed(); // 店のアニメーションも止める
+    renderSpeedDock(); // 速度ボタンを無効化した見た目に更新する
+    clearTick();
+    closeSheet();
 
     var prev = state.history.length ? state.history[state.history.length - 1] : null;
     var repBefore = state.reputation;
@@ -98,6 +127,8 @@ window.ScreenLoop = (function () {
     state.reputation = U.clamp(state.reputation + (avgSat - 50) * 0.04, 0, 100);
     EE.tickTempBoosts(state);
     if (state.flags.recipeLockWeeksLeft > 0) state.flags.recipeLockWeeksLeft--;
+    // v07-3-3: 通常営業でも疲労が少しずつ溜まる(混んだ週ほど少し多く)
+    state.flags.fatigue = U.clamp((state.flags.fatigue || 0) + U.clamp(3 + customers.queueLevel * 4, 3, 10), 0, 100);
 
     var weekStats = { avgSatisfaction: avgSat, satisfactionBySeg: {}, queueLevel: customers.queueLevel };
     Object.keys(customers.results).forEach(function (id) { weekStats.satisfactionBySeg[id] = customers.results[id].satisfaction; });
@@ -118,50 +149,64 @@ window.ScreenLoop = (function () {
     EE.checkCardUnlocks(state).forEach(function (u) { window.UI.toast(u.text, 3200); });
 
     renderAll(finance, customers);
-    showWeekFlash(finance, customers);
     emitFloats(prev, finance, state.reputation - repBefore, state.money - moneyBefore);
 
     var guideLine = G.checkAuto(state, { profit: profit, queueLevel: customers.queueLevel });
     if (guideLine) G.say(guideLine);
 
     var finishedWeek = state.week;
-    var wasRunning = state.running;
+    window.GameState.save();
 
+    // 1. 今週の収支 → 2. イベント(あれば) → 3. 月次まとめ(あれば) → 4. 定休日のアクション、の順で必ず止めて見せる。
+    // どの段階も「次へ」を押すまで進まない。
+    showWeeklyBalance(finance, customers, function () {
+      proceedToEvents(finishedWeek, weekStats);
+    });
+  }
+
+  function proceedToEvents(finishedWeek, weekStats) {
     var events = EE.checkWeeklyEvents(state, weekStats);
     if (events.length > 0) {
       state.pendingEvents = events;
-      state.running = false;
       state.eventModalActive = true;
-      clearTick();
-      closeSheet();      // イベントは全画面で覆うので、開いているパネルは畳む
-      hideFlash();
+      window.GameState.save();
       window.ScreenEventModal.showQueue(state, events, function () {
         state.eventModalActive = false;
-        afterWeekResolved(finishedWeek, wasRunning);
+        proceedToMonthlyRecap(finishedWeek);
       });
       return;
     }
-
-    afterWeekResolved(finishedWeek, wasRunning);
+    proceedToMonthlyRecap(finishedWeek);
   }
 
-  // イベント(あれば)の解決後、月末なら月次まとめを挟んでから次の週へ進む
-  function afterWeekResolved(finishedWeek, wasRunning) {
+  function proceedToMonthlyRecap(finishedWeek) {
     if (finishedWeek === U.monthEndWeek(U.weekToMonth(finishedWeek))) {
-      hideFlash();
-      showMonthlyRecap(finishedWeek, function () { advanceWeek(wasRunning); });
+      showMonthlyRecap(finishedWeek, function () { proceedToDayOff(finishedWeek); });
       return;
     }
-    advanceWeek(wasRunning, beatMs());
+    proceedToDayOff(finishedWeek);
   }
 
-  function advanceWeek(wasRunning, extraMs) {
+  function proceedToDayOff(finishedWeek) {
+    // 最終週は「次の週」が無く、選んでも効果が現れないので定休日アクションは出さない
+    if (finishedWeek >= WEEKS_PER_RUN) { advanceWeek(); return; }
+    window.DayOff.show(state, G, function () { advanceWeek(); });
+  }
+
+  // 「次の週へ」。ここで初めて時間が動く。
+  function advanceWeek() {
     state.week++;
+    state.weekEndActive = false;
     window.GameState.save();
-    if (state.week > 52) { finishGame(); return; }
+    if (state.week > WEEKS_PER_RUN) { finishGame(); return; }
+    state.weekDay = 1;
+    state.speed = pausedSpeed;
+    state.running = pausedRunning;
     renderTopBar();
+    renderSpeedDock();
     refreshShop();
-    if (wasRunning && state.speed > 0) { state.running = true; scheduleTick(extraMs); }
+    window.ShopView.syncSpeed();
+    if (state.running && state.speed > 0) scheduleDayTick();
   }
 
   // ---------- 2-2: 月末にまとめを出す ----------
@@ -228,7 +273,6 @@ window.ScreenLoop = (function () {
 
   function finishGame() {
     clearTick();
-    hideFlash();
     closeSheet();
     G.hide();
     window.ShopView.destroy();
@@ -238,7 +282,7 @@ window.ScreenLoop = (function () {
     onGameOver();
   }
 
-  // ---------- 2-2: 週の結果表示(1行版 / 詳細版) ----------
+  // ---------- v07-2: 週の収支表示(1行版 / 詳細版)。週末停止の第1段階として、ブロッキングのモーダルで出す ----------
   function satSplit(finance, customers) {
     var good = 0, bad = 0;
     Object.keys(finance.bySegment).forEach(function (id) {
@@ -251,13 +295,6 @@ window.ScreenLoop = (function () {
   }
 
   function isDetailedFlash() { return state.flags.weekFlashDetailed !== false; } // 初期状態は詳細版
-  var lastFlashData = null; // トグルボタンで表示を切り替えるとき、直近の週データを再利用する
-
-  function hideFlash() {
-    if (flashTimer) { clearTimeout(flashTimer); flashTimer = null; }
-    var el = document.getElementById("week-flash");
-    if (el) el.classList.remove("show");
-  }
 
   function moneyRow(label, val, opts) {
     opts = opts || {};
@@ -268,66 +305,12 @@ window.ScreenLoop = (function () {
     ]);
   }
 
-  function renderWeekFlash() {
-    var el = document.getElementById("week-flash");
-    if (!el || !lastFlashData) return;
-    var d = lastFlashData;
-    window.UI.clear(el);
-    el.className = "week-flash show" + (isDetailedFlash() ? " detailed" : " compact");
-
-    if (!isDetailedFlash()) {
-      el.appendChild(h("span", {
-        text: "今週：客" + d.totalCustomers + "人 / 満足" + d.satGood + "・不満" + d.satBad +
-          " / 売上 " + U.formatMoney(d.revenue)
-      }));
-      el.appendChild(h("button", { className: "wf-toggle", text: "詳細", style: { marginLeft: "8px" }, onclick: toggleFlashMode }));
-      return;
-    }
-
-    el.appendChild(h("div", { className: "wf-head" }, [
-      h("div", {}, [
-        h("div", { className: "wf-title", text: "第" + d.week + "週" }),
-        h("div", { className: "wf-sub", text: "客 " + d.totalCustomers + "人（満足" + d.satGood + " / 不満" + d.satBad + "）" })
-      ]),
-      h("button", { className: "wf-toggle", text: "1行に", onclick: toggleFlashMode })
-    ]));
-    var table = h("div", { className: "wf-table" }, [
-      moneyRow("売上", d.revenue),
-      moneyRow("仕入", -d.foodCost, { tone: "bad", suffix: "（原価率 " + d.foodCostPct + "%）" }),
-      moneyRow("人件費", -d.wageShare, { tone: "bad" }),
-      moneyRow("家賃", -d.rentShare, { tone: "bad" }),
-      moneyRow("返済", -d.loanShare, { tone: "bad" }),
-      h("div", { className: "wf-divider" }),
-      moneyRow("残り", d.net, { sign: true })
-    ]);
-    table.lastChild.className = "wf-row wf-net";
-    table.lastChild.querySelector(".wf-val").classList.add(d.net >= 0 ? "good" : "bad");
-    el.appendChild(table);
-    el.appendChild(h("div", { className: "wf-note", text: "人件費・家賃・返済は月額を週割りした概算。実際の引き落としは月初にまとめて。" }));
-  }
-
-  function toggleFlashMode() {
-    state.flags.weekFlashDetailed = !isDetailedFlash();
-    window.GameState.save();
-    renderWeekFlash();
-    // 詳細版は読むのに時間がかかるので、切り替えたらタイマーを仕切り直す
-    if (flashTimer) clearTimeout(flashTimer);
-    flashTimer = setTimeout(hideFlash, flashDurationMs());
-  }
-
-  function flashDurationMs() {
-    var base = (speedToMs(state.speed) || 1200) + beatMs();
-    return isDetailedFlash() ? Math.max(1800, base) : base;
-  }
-
-  function showWeekFlash(finance, customers) {
-    var el = document.getElementById("week-flash");
-    if (!el) return;
-    if (state.speed === 0) { el.classList.remove("show"); return; } // 「停止」中は出さない
+  // 「今週：客52人/満足38・不満14/売上¥46,800」のようなデータをまとめておく。トグル切替の再描画にも使う。
+  function buildFlashData(finance, customers) {
     var s = satSplit(finance, customers);
     var mc = monthlyCostBreakdown(); // 表示用に月額を毎週割り出す(実際の引き落としは月初のみ)
     var revenue = finance.revenue;
-    lastFlashData = {
+    return {
       week: state.week,
       totalCustomers: finance.totalCustomers,
       satGood: s.good, satBad: s.bad,
@@ -336,9 +319,62 @@ window.ScreenLoop = (function () {
       wageShare: mc.wages / 4.333, rentShare: mc.rent / 4.333, loanShare: mc.loanPay / 4.333,
       net: revenue - finance.foodCost - mc.total / 4.333
     };
-    renderWeekFlash();
-    if (flashTimer) clearTimeout(flashTimer);
-    flashTimer = setTimeout(hideFlash, flashDurationMs());
+  }
+
+  // 週末停止の第1段階。読んでいる間に裏で時間が進むことは絶対にない(タイマーを一切使わない)。
+  // 「次へ」を押すまでここで止まる。
+  function showWeeklyBalance(finance, customers, onDone) {
+    lastFlashData = buildFlashData(finance, customers);
+    renderWeeklyBalanceModal(onDone);
+  }
+
+  function renderWeeklyBalanceModal(onDone) {
+    var overlay = document.getElementById("event-modal-overlay");
+    var box = document.getElementById("event-modal-box");
+    var d = lastFlashData;
+    box.className = "modal-box";
+    window.UI.clear(box);
+
+    box.appendChild(h("div", { className: "wf-head" }, [
+      h("div", {}, [
+        h("h2", { text: "第" + d.week + "週" }),
+        h("div", { className: "wf-sub", text: "客 " + d.totalCustomers + "人（満足" + d.satGood + " / 不満" + d.satBad + "）" })
+      ]),
+      h("button", {
+        className: "wf-toggle", text: isDetailedFlash() ? "1行に" : "詳細",
+        onclick: function () {
+          state.flags.weekFlashDetailed = !isDetailedFlash();
+          window.GameState.save();
+          renderWeeklyBalanceModal(onDone);
+        }
+      })
+    ]));
+
+    if (isDetailedFlash()) {
+      var table = h("div", { className: "wf-table" }, [
+        moneyRow("売上", d.revenue),
+        moneyRow("仕入", -d.foodCost, { tone: "bad", suffix: "（原価率 " + d.foodCostPct + "%）" }),
+        moneyRow("人件費", -d.wageShare, { tone: "bad" }),
+        moneyRow("家賃", -d.rentShare, { tone: "bad" }),
+        moneyRow("返済", -d.loanShare, { tone: "bad" }),
+        h("div", { className: "wf-divider" }),
+        moneyRow("残り", d.net, { sign: true })
+      ]);
+      table.lastChild.className = "wf-row wf-net";
+      table.lastChild.querySelector(".wf-val").classList.add(d.net >= 0 ? "good" : "bad");
+      box.appendChild(table);
+      box.appendChild(h("div", { className: "wf-note", text: "人件費・家賃・返済は月額を週割りした概算。実際の引き落としは月初にまとめて。" }));
+    } else {
+      box.appendChild(h("p", { text: "売上 " + U.formatMoney(d.revenue) }));
+    }
+
+    box.appendChild(h("div", { className: "modal-choices" }, [
+      h("button", {
+        className: "btn primary", text: "次へ",
+        onclick: function () { overlay.classList.remove("show"); onDone(); }
+      })
+    ]));
+    overlay.classList.add("show");
   }
 
   // ---------- 2-3: 変化した瞬間に絵の上へ浮かせる ----------
@@ -372,13 +408,23 @@ window.ScreenLoop = (function () {
   }
 
   // ---------- 描画 ----------
+  // v07-1-1: 「1/1」のような日付を出す。演出のみ(計算は週単位のまま)。
+  // 月の中の日数は月の週数(4〜5週)×7で近似する。厳密なカレンダーではないが、月をまたぐ境界の
+  // 定義は U.weekToMonth/weekOfMonth と完全に一致させてある(v06で踏んだ二重帰属バグを繰り返さない)。
+  function dateLabel() {
+    var wk = Math.min(state.week, WEEKS_PER_RUN);
+    var month = U.weekToMonth(wk);
+    var dom = (U.weekOfMonth(wk) - 1) * DAYS_PER_WEEK + Math.min(state.weekDay, DAYS_PER_WEEK);
+    return month + "月" + dom + "日";
+  }
+
   function renderTopBar() {
     var root = document.getElementById("top-bar");
     if (!root) return;
     window.UI.clear(root);
-    var wk = Math.min(state.week, 52);
-    var month = U.weekToMonth(wk);
     var queued = lastCustomers && lastCustomers.queueLevel > 0.1;
+    var fatigue = Math.round(state.flags.fatigue || 0);
+    var fatigueCls = fatigue >= 70 ? "bad" : (fatigue >= 40 ? "warn" : "");
 
     function item(label, value, cls) {
       return h("div", { className: "ti" }, [
@@ -386,10 +432,11 @@ window.ScreenLoop = (function () {
         h("div", { className: "tv" + (cls ? " " + cls : ""), text: value })
       ]);
     }
-    root.appendChild(item("日付", month + "月 " + U.weekOfMonth(wk) + "週目"));
+    root.appendChild(item("日付", dateLabel()));
     root.appendChild(item("所持金", U.formatMoneyShort(state.money), "money"));
     root.appendChild(item("今週の客", (lastFinance ? lastFinance.totalCustomers : 0) + "人"));
     root.appendChild(item("評判", String(Math.round(state.reputation))));
+    root.appendChild(item("疲労", String(fatigue), fatigueCls));
     if (queued) root.appendChild(h("div", { className: "ti queue-mark", text: "🚶行列" }));
   }
 
@@ -397,11 +444,14 @@ window.ScreenLoop = (function () {
     var dock = document.getElementById("speed-dock");
     if (!dock) return;
     window.UI.clear(dock);
+    // v07-2: 週末の完全停止中は速度ボタンを効かせない
+    var locked = state.weekEndActive;
     [[0, "■"], [1, "×1"], [2, "×2"], [4, "×4"]].forEach(function (pair) {
       dock.appendChild(h("button", {
-        className: "btn small" + (state.speed === pair[0] ? " selected" : ""),
+        className: "btn small" + (state.speed === pair[0] && !locked ? " selected" : ""),
         text: pair[1],
-        onclick: function () { setSpeed(pair[0]); }
+        disabled: locked ? "disabled" : null,
+        onclick: function () { if (!locked) setSpeed(pair[0]); }
       }));
     });
   }
@@ -472,6 +522,7 @@ window.ScreenLoop = (function () {
       RECIPES[key].filter(function (item) {
         if (item.unlock === "start") return true;
         if (item.unlock === "card_menya") return !!state.cardsUnlocked.menya;
+        if (item.unlock === "event") return !!state.flags.eventRecipesUnlocked; // v07:「他店を食べ歩く」で解禁
         return false;
       }).forEach(function (item) {
         var selected = state.recipe[key] === item.id;
@@ -762,7 +813,6 @@ window.ScreenLoop = (function () {
 
     root.appendChild(h("div", { className: "shop-fill", id: "shop-fill" }));
     root.appendChild(h("div", { className: "top-bar", id: "top-bar" }));
-    root.appendChild(h("div", { className: "week-flash", id: "week-flash" }));
     root.appendChild(h("div", { className: "float-layer", id: "float-layer" }));
     root.appendChild(h("div", { className: "speed-dock", id: "speed-dock" }));
     root.appendChild(h("div", { className: "fab-col", id: "fab-col" }));
@@ -782,13 +832,20 @@ window.ScreenLoop = (function () {
     openSheetKey = null;
     sheetBuilder = null;
 
+    // 中断からの再開で万一「週末シーケンス中」のまま保存されていたら、安全側(次の週の頭)に倒す
+    if (state.weekEndActive) {
+      state.weekEndActive = false;
+      state.weekDay = 1;
+    }
+    if (state.weekDay == null) state.weekDay = 1;
+
     window.ShopView.destroy();
     window.ShopView.mount(document.getElementById("shop-fill"), state);
 
     renderTopBar();
     renderSpeedDock();
     renderFabs();
-    setSpeed(1); // 2-1: 初期速度は ×1
+    setSpeed(1); // 初期速度は ×1。ここから日が刻まれ始める
   }
 
   return { render: render, setSpeed: setSpeed };

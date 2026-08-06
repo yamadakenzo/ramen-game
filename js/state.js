@@ -1,9 +1,10 @@
 // ゲーム状態の定義とlocalStorage永続化
 window.GameState = (function () {
-  // v05 で開業フェーズのステップ構成が変わった(5問 -> 8問)ため、旧セーブは読ませない。
-  // キーごと変えているので、旧キーのデータが残っていても「続きから」に出てこない。
-  var SAVE_KEY = "ramen_v05_save";
-  var SAVE_VERSION = 2;
+  // v07 で営業ループの時間進行が根本的に変わった(週末で完全停止+定休日アクションが必須の手順に
+  // なった)ため、旧セーブは読ませない。キーごと変えているので、旧キーのデータが残っていても
+  // 「続きから」に出てこない。
+  var SAVE_KEY = "ramen_v07_save";
+  var SAVE_VERSION = 3;
 
   function freshState() {
     return {
@@ -20,9 +21,10 @@ window.GameState = (function () {
       money: 0,
       loan: { monthlyRepay: 0, monthsLeft: 0 },
       week: 1,
+      weekDay: 1, // v07-1: 週の中の日(1〜7)。演出のみ。計算は週単位のまま
       reputation: 50,
       relationships: { menya: 0, reporter: 0, landlord: 0, oldman: 0, lender: 0 },
-      staffState: {}, // id -> {morale, rel, lowMoraleWeeks}
+      staffState: {}, // id -> {morale, rel, lowMoraleWeeks, statBonus}
       cardsUnlocked: {}, // card id -> true (関係値要求を満たしイベント発生済み)
       cardsMet: {}, // card id -> true (関係値要求を満たした瞬間、イベント待ち)
       comboFired: {},
@@ -31,7 +33,12 @@ window.GameState = (function () {
       flags: {
         regularLowWeeks: 0,
         recipeLockWeeksLeft: 0,
-        weekFlashDetailed: true // v06-2-1: 週の収支表示は詳細版が初期状態
+        weekFlashDetailed: true, // v06-2-1: 週の収支表示は詳細版が初期状態
+        fatigue: 0,              // v07-3-3: 唯一の新規パラメータ。0〜100
+        tasteBonus: 0,           // v07: 「スープの試作」の積み上げ(素材の質に加算)
+        costDiscountPct: 0,      // v07: 「仕入れ先を回る」の積み上げ(原価に掛ける割引%)
+        eventRecipesUnlocked: false, // v07: 「他店を食べ歩く」で野菜スープ・辛味タレが解禁
+        meetingAttendCount: 0    // v07: 「商店街の寄合に出る」を選んだ回数(成功率が積み上がる)
       },
       history: [], // {week, month, customers, revenue, foodCost, rent, wage, loanRepay, profit, money, satisfaction, queueLevel}
       eventLog: [], // {week, id, title}

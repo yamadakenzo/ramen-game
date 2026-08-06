@@ -50,7 +50,7 @@ window.DATA.property = {
     { "id": "extra_boiler",   "name": "麺量アップ",   "emoji": "🍜", "cost": 300000,  "effect": "全メニューの量+15", "note": "茹で麺器の増設。学生・サラリーマンなど量を求める客層の底上げ" }
   ],
   "funding": [
-    { "id": "self_only",   "name": "自己資金のみ",         "amount": 3000000,  "monthly_repay": 0,      "months": 0,  "note": "借金なし。選べる物件が限られる" },
+    { "id": "self_only",   "name": "自己資金のみ",         "amount": 3500000,  "monthly_repay": 0,      "months": 0,  "note": "借金なし。選べる物件が限られる" },
     { "id": "public_loan", "name": "公庫融資",             "amount": 7000000,  "monthly_repay": 68000,  "months": 84, "note": "標準。手堅い" },
     { "id": "big_loan",    "name": "公庫＋銀行",           "amount": 12000000, "monthly_repay": 135000, "months": 84, "note": "選択肢は広がるが返済が重い" },
     { "id": "family_loan", "name": "親から借りる",         "amount": 5000000,  "monthly_repay": 0,      "months": 0,  "note": "返済不要。ただし家族イベントが発生し続ける" }

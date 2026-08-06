@@ -1,9 +1,9 @@
-// 営業ループ本体（v07）
+// 営業ループ本体（v10）
 //  - 店の絵を固定枠いっぱいに広げ、その上に情報とボタンを重ねる
 //  - パネルは下半分だけ。上半分の店は見えたまま残す（レシピを変えた瞬間の客の反応が同じ画面で見える）
-//  - v07: 時間は「日」単位で刻む(演出のみ、計算は週単位のまま)。週末は完全停止し、
-//    今週の収支 → イベント → 月次まとめ(あれば) → 定休日のアクション、の順に必ず止まって見せる。
-//    「次の週へ」を押すまで絶対に時間は動かない(自動再開しない)。
+//  - v10-2: 時間は「時刻」単位で刻む(1時間=5秒@×1)。営業していない時間帯は一気に飛ばす。
+//    週末は完全停止し、今週の収支 → イベント → 月次まとめ(あれば) → 定休日のアクション、の順に
+//    必ず止まって見せる。「次の週へ」を押すまで絶対に時間は動かない(自動再開しない)。
 window.ScreenLoop = (function () {
   var h = window.UI.h;
   var U = window.Utils;
@@ -17,6 +17,7 @@ window.ScreenLoop = (function () {
   var CARDS = window.DATA.characters.cards;
   var WEEKS_PER_RUN = window.WEEKS_PER_RUN;
   var DAYS_PER_WEEK = 7;
+  var TICK_MIN = 15; // 時計を進める最小刻み(分)。表示は15分単位
 
   var state, onGameOver;
   var tickTimer = null;
@@ -25,7 +26,7 @@ window.ScreenLoop = (function () {
   // 満足/不満の分け目。この値以上を「満足して帰った客」として数える
   var SATISFIED_LINE = 55;
   // 直近の週次計算結果。設備変更などで店の絵を組み直すときに再利用する。
-  var lastFinance = null, lastCustomers = null;
+  var lastFinance = null, lastCustomers = null, lastSchedule = null;
   var openSheetKey = null, sheetBuilder = null;
   var lastFlashData = null; // 週末の収支表示(詳細/1行トグル用に直近データを保持)
 
@@ -52,33 +53,84 @@ window.ScreenLoop = (function () {
   }
   document.addEventListener("visibilitychange", onVisibilityChange);
 
-  // v09-2: ×1 = 1日1.8秒(1週 ≈ 12.6秒)。以前(v07)は1週3300ms(1日≈470ms)と速すぎ、
-  // 「収支を読んでいる間に翌週になる」の一因になっていた。遅い側に倒す指示に従った。
-  function dayMs() {
+  // v10-2-1: ×1 = 1時間5秒。v09の「1日1.8秒」は破棄する指示に従った(1日の中で時刻が
+  // 進むのを見せるため)。TICK_MIN(15分)刻みで進めるので、1ティックの実時間はこの1/4。
+  function hourMs() {
     if (state.speed === 0) return null;
-    return { 1: 1800, 2: 900, 4: 450 }[state.speed];
+    return { 1: 5000, 2: 2500, 4: 1250 }[state.speed];
+  }
+  function tickMs() {
+    var hm = hourMs();
+    return hm ? hm * TICK_MIN / 60 : null;
   }
 
   function clearTick() { if (tickTimer) { clearTimeout(tickTimer); tickTimer = null; } }
 
-  // ---------- v07-1 / v09-1: 日を刻むティック。pauseReasonsが空の間だけ動く ----------
+  // ---------- v10-2: 営業時間帯のヘルパー ----------
+  // 今週アクティブな帯(businessHoursActive。パネルでの変更は次週から)を開始時刻順で返す。
+  function activeBandDefs() {
+    var keys = (state.businessHoursActive && state.businessHoursActive.length) ? state.businessHoursActive : window.BASE_HOUR_BANDS;
+    return window.BANDS.filter(function (b) { return keys.indexOf(b.key) >= 0; }).sort(function (a, b) { return a.start - b.start; });
+  }
+  function bandAt(min, bands) {
+    for (var i = 0; i < bands.length; i++) {
+      var b = bands[i];
+      if (min >= b.start * 60 && min < b.end * 60) return b;
+    }
+    return null;
+  }
+  function nextBandToday(min, bands) {
+    var best = null;
+    bands.forEach(function (b) { if (b.start * 60 > min && (!best || b.start < best.start)) best = b; });
+    return best;
+  }
+  // 今どの帯にいるか(いなければ次に開く帯)に応じて、ShopViewへ開店/湧きの開始を伝える。
+  // 新しいゲーム開始・週替わり・セーブからの再開(帯の途中に保存されていた場合を含む)の
+  // どこから呼んでも安全なように、判定はここに一本化してある。
+  function syncBandForNow() {
+    var cur = bandAt(state.clockMin, activeBandDefs());
+    if (cur) window.ShopView.openBand(cur.key);
+  }
+
+  // ---------- v10-2: 時刻を刻むティック。pauseReasonsが空の間だけ動く ----------
   function scheduleDayTick() {
     clearTick();
     if (isPaused()) return;
-    var ms = dayMs();
+    var ms = tickMs();
     if (!ms) return; // 速度「停止」が選ばれている(この場合もisPaused()がtrueになるので実質ここには来ない)
-    tickTimer = setTimeout(tickDay, ms);
+    tickTimer = setTimeout(tickClock, ms);
   }
 
-  function tickDay() {
-    // 週の中の日(1〜7)。保存はしない(state.dayから毎回計算する)。7日使い切ったら週次計算へ。
-    var dow = ((state.day - 1) % DAYS_PER_WEEK) + 1;
-    if (dow >= DAYS_PER_WEEK) {
-      runWeeklyCalc(); // ここで初めて週次計算(既存の週モデルのまま)を1回走らせる。state.dayはまだ進めない
+  function tickClock() {
+    var bands = activeBandDefs();
+    var cur = bandAt(state.clockMin, bands);
+    if (cur) {
+      // 営業中: 時計を進める。ちょうど帯の終わりを超えたらShopViewへ伝える(既存の客は自然に帰る)
+      state.clockMin += TICK_MIN;
+      if (!bandAt(state.clockMin, bands)) window.ShopView.closeBand(cur.key);
+      renderTopBar();
+      scheduleDayTick();
+      return;
+    }
+    var next = nextBandToday(state.clockMin, bands);
+    if (next) {
+      // 営業していない時間: 待たずに次の帯の頭まで一気に飛ぶ
+      state.clockMin = next.start * 60;
+      window.ShopView.openBand(next.key);
+      renderTopBar();
+      scheduleDayTick();
+      return;
+    }
+    // 今日はもう開く帯が無い -> 日をまたぐ。週の7日目を使い切っていたらここで週次計算へ。
+    if (state.day % DAYS_PER_WEEK === 0) {
+      runWeeklyCalc(); // state.dayはまだ進めない(週末シーケンスの間は今週最終日のまま)
       return;
     }
     state.day++;
+    var firstBand = bands.length ? bands[0] : null;
+    state.clockMin = firstBand ? firstBand.start * 60 : 0;
     renderTopBar();
+    if (firstBand) window.ShopView.openBand(firstBand.key);
     scheduleDayTick();
   }
 
@@ -96,14 +148,15 @@ window.ScreenLoop = (function () {
 
   function monthlyCostBreakdown() {
     var property = Scoring.getProperty(state);
-    var rent = Math.round(property.rent * (state.rentMultiplier || 1));
+    var rent = Math.round(property.rent * (state.rentMultiplier || 1)); // v10-2-4: 家賃は営業時間に関係しない固定費
+    var costMult = Scoring.hoursCostMultiplier(state); // 開けている帯の数(÷2基準)。人件費はここに比例する
     var wages = 0;
     state.staffHired.forEach(function (id) {
       var s = EE.ensureStaffState(state, id);
       var def = findStaffDef(id);
-      wages += Math.round(def.wage * (s.wageMult || 1));
+      wages += Math.round(def.wage * (s.wageMult || 1) * costMult);
     });
-    var loanPay = state.loan.monthsLeft > 0 ? state.loan.monthlyRepay : 0;
+    var loanPay = state.loan.monthsLeft > 0 ? state.loan.monthlyRepay : 0; // 返済も固定費
     return { rent: rent, wages: wages, loanPay: loanPay, total: rent + wages + loanPay };
   }
 
@@ -128,6 +181,9 @@ window.ScreenLoop = (function () {
     var finance = Scoring.computeWeeklyFinance(state, customers);
     var avgSat = Scoring.weightedAvgSatisfaction(customers);
     state.lastAvgSatisfaction = avgSat;
+    // v10-3: この週、実際に絵の上へ湧かせる「曜日×帯」の内訳。計算(売上・満足度)には一切使わない、
+    // 可視化専用のデータ。ShopView.openBand()がここから今日・今の帯ぶんを取り出して湧かせる。
+    lastSchedule = Scoring.weeklyBandSchedule(state, customers);
 
     var monthlyCosts = 0;
     var chargedBreakdown = { rent: 0, wages: 0, loanPay: 0 }; // 月次まとめ用に、実際に引き落とされた内訳を週次ログへ残す
@@ -146,8 +202,10 @@ window.ScreenLoop = (function () {
     state.reputation = U.clamp(state.reputation + (avgSat - 50) * 0.04, 0, 100);
     EE.tickTempBoosts(state);
     if (state.flags.recipeLockWeeksLeft > 0) state.flags.recipeLockWeeksLeft--;
-    // v07-3-3: 通常営業でも疲労が少しずつ溜まる(混んだ週ほど少し多く)
-    state.flags.fatigue = U.clamp((state.flags.fatigue || 0) + U.clamp(3 + customers.queueLevel * 4, 3, 10), 0, 100);
+    // v07-3-3: 通常営業でも疲労が少しずつ溜まる(混んだ週ほど少し多く)。
+    // v10-2-4: 開けている帯が多いほど疲れも増える(2帯基準=1.0倍)。「長く開ければ儲かるが疲れる」の本体。
+    var hoursMult = Scoring.hoursCostMultiplier(state);
+    state.flags.fatigue = U.clamp((state.flags.fatigue || 0) + U.clamp(3 + customers.queueLevel * 4, 3, 10) * hoursMult, 0, 100);
 
     var weekStats = { avgSatisfaction: avgSat, satisfactionBySeg: {}, queueLevel: customers.queueLevel };
     Object.keys(customers.results).forEach(function (id) { weekStats.satisfactionBySeg[id] = customers.results[id].satisfaction; });
@@ -230,12 +288,17 @@ window.ScreenLoop = (function () {
   function advanceWeek() {
     state.day++; // 今週の最終日で止めていた状態(runWeeklyCalc開始時点)から、次の週の1日目へ進める
     state.weekEndActive = false;
-    resume("weekend"); // pauseReasonsが空になれば(パネル等も閉じていれば)ここで自動的にtickが再開する
+    // v10-2-2: 営業時間の変更は「次の週から」反映。ここで選択中(businessHours)を確定させる。
+    state.businessHoursActive = state.businessHours.slice();
+    var bands = activeBandDefs();
+    state.clockMin = bands.length ? bands[0].start * 60 : 0;
+    if (state.day > window.DAYS_PER_RUN) { window.GameState.save(); finishGame(); return; }
     window.GameState.save();
-    if (state.day > window.DAYS_PER_RUN) { finishGame(); return; }
     renderTopBar();
     renderSpeedDock();
     refreshShop();
+    if (bands.length) window.ShopView.openBand(bands[0].key);
+    resume("weekend"); // pauseReasonsが空になれば(パネル等も閉じていれば)ここで自動的にtickが再開する
   }
 
   // ---------- 2-2: 月末にまとめを出す ----------
@@ -439,8 +502,10 @@ window.ScreenLoop = (function () {
   // ---------- 描画 ----------
   // v09-3: 「4/1」のような日付を出す。内部の通算日数(state.day)を実際の暦(4月開業・平年固定)で
   // 逆算するだけなので、以前のような「2/35」等の存在しない日付は出ない。
+  // v10-2-1: それに曜日と現在時刻を添える(例: 「4月1日(月) 12:40」)。
   function dateLabel() {
-    return U.calMonth(state.day) + "月" + U.dayOfMonth(state.day) + "日";
+    return U.calMonth(state.day) + "月" + U.dayOfMonth(state.day) + "日" +
+      "(" + U.dowLabel(state.day) + ") " + U.timeLabel(state.clockMin);
   }
 
   function renderTopBar() {
@@ -457,7 +522,7 @@ window.ScreenLoop = (function () {
         h("div", { className: "tv" + (cls ? " " + cls : ""), text: value })
       ]);
     }
-    root.appendChild(item("日付", dateLabel()));
+    root.appendChild(item("日時", dateLabel()));
     root.appendChild(item("所持金", U.formatMoneyShort(state.money), "money"));
     root.appendChild(item("今週の客", (lastFinance ? lastFinance.totalCustomers : 0) + "人"));
     root.appendChild(item("評判", String(Math.round(state.reputation))));
@@ -482,7 +547,7 @@ window.ScreenLoop = (function () {
     });
   }
 
-  function refreshShop() { window.ShopView.update(state, lastFinance, lastCustomers); }
+  function refreshShop() { window.ShopView.update(state, lastFinance, lastCustomers, lastSchedule); }
 
   function renderAll(finance, customers) {
     lastFinance = finance;
@@ -813,6 +878,41 @@ window.ScreenLoop = (function () {
     return box;
   }
 
+  // v10-2-2: 営業時間帯パネル。営業ループ中はいつでも変更できるが、反映は次の週から
+  // (今週アクティブなbusinessHoursActiveはここでは書き換えない)。
+  function panelHours() {
+    var box = h("div", {});
+    var changed = state.businessHours.slice().sort().join(",") !== state.businessHoursActive.slice().sort().join(",");
+    box.appendChild(h("div", { className: "setup-hint", text: "変更は次の週から反映される。最低1つは開けておく。" }));
+    if (changed) box.appendChild(h("p", { className: "dim", text: "今週はまだ今の設定のまま営業中。" }));
+    var grid = h("div", { className: "choice-grid" });
+    window.BANDS.forEach(function (b) {
+      var selected = state.businessHours.indexOf(b.key) >= 0;
+      var onlyOne = selected && state.businessHours.length === 1;
+      grid.appendChild(h("div", {
+        className: "choice-card" + (selected ? " selected" : "") + (onlyOne ? " disabled" : ""),
+        onclick: function () {
+          if (onlyOne) return;
+          if (selected) {
+            state.businessHours = state.businessHours.filter(function (k) { return k !== b.key; });
+            window.UI.toast("次の週から" + b.label + "を閉める");
+          } else {
+            state.businessHours.push(b.key);
+            window.UI.toast("次の週から" + b.label + "を開ける");
+          }
+          window.GameState.save();
+          refreshSheet();
+        }
+      }, [
+        h("div", { className: "emoji", text: U.bandEmoji(b.key) }),
+        h("div", { className: "name", text: b.label + "（" + U.bandTimeLabel(b) + "）" }),
+        onlyOne ? h("div", { className: "locked", text: "最低1つは開けておく" }) : null
+      ]));
+    });
+    box.appendChild(grid);
+    return box;
+  }
+
   function renderFabs() {
     var col = document.getElementById("fab-col");
     if (!col) return;
@@ -820,6 +920,7 @@ window.ScreenLoop = (function () {
     [
       ["recipe", "🍜", "レシピ", "レシピ", panelRecipe],
       ["price", "💴", "価格", "価格", panelPrice],
+      ["hours", "⏰", "時間", "営業時間", panelHours],
       ["people", "👥", "人", "人", panelPeople],
       ["equip", "🛠", "設備", "設備", panelEquipment],
       ["data", "📊", "データ", "データ", panelData]
@@ -869,10 +970,14 @@ window.ScreenLoop = (function () {
     if (state.weekEndActive) {
       state.day++;
       state.weekEndActive = false;
+      state.businessHoursActive = state.businessHours.slice();
+      var bands = activeBandDefs();
+      state.clockMin = bands.length ? bands[0].start * 60 : 0;
     }
 
     window.ShopView.destroy();
     window.ShopView.mount(document.getElementById("shop-fill"), state);
+    syncBandForNow(); // 今いる帯(セーブからの再開なら帯の途中のこともある)ぶんの客を湧かせ始める
 
     renderTopBar();
     renderSpeedDock();

@@ -115,13 +115,37 @@ window.DayOff = (function () {
       renderResult(def, result);
     }
 
+    // v10-1: イベントの結果表示(event-modal.jsのshowResult)と同じ形式で見せる。
+    // 見出し(何をしたか) → 判定バッジ(大成功/成功/空振り、fixedアクションには出さない) →
+    // 一言 → 差分、の順。空振りで差分が無い(=fatigueの変化以外に何も無かった)場合は
+    // 「今週は何も掴めなかった」を明示する(何も出さずに次へ進めることはしない)。
+    var TIER_LABEL = { great: "大成功", good: "成功", miss: "空振り" };
     function renderResult(def, result) {
       box.className = "modal-box dayoff-box";
       window.UI.clear(box);
       box.appendChild(h("h2", { text: def.name }));
+      box.appendChild(h("div", { className: "result-choice", text: "▶ " + result.headline }));
+
+      if (TIER_LABEL[result.tier]) {
+        box.appendChild(h("div", { className: "tier-badge tier-" + result.tier, text: TIER_LABEL[result.tier] }));
+      }
+
       box.appendChild(h("div", { className: "react-box" }, [
         h("div", { className: "react-line", text: result.text })
       ]));
+
+      var deltaBox = h("div", { className: "delta-box" });
+      if (result.tier === "miss") {
+        deltaBox.appendChild(h("div", { className: "delta-none", text: "今週は何も掴めなかった" }));
+      }
+      (result.diffs || []).forEach(function (d) {
+        deltaBox.appendChild(h("div", { className: "delta-row " + d.tone }, [
+          h("span", { className: "delta-mark", text: d.tone === "good" ? "▲" : (d.tone === "bad" ? "▼" : "・") }),
+          h("span", { text: d.text })
+        ]));
+      });
+      box.appendChild(deltaBox);
+
       box.appendChild(h("div", { className: "modal-choices" }, [
         h("button", {
           className: "btn primary", text: "次の週へ",

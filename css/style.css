@@ -200,6 +200,14 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .choice-card .cost { color: var(--money); font-size: 0.78rem; }
 .choice-card .sub { font-size: 0.7rem; color: var(--text-dim); }
 .choice-card .locked { font-size: 0.68rem; color: var(--bad); margin-top: 3px; }
+/* v10-2-2: 営業時間帯カードの「この帯に来る客層」チップ */
+.hours-seg-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.hours-seg-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.5em; height: 1.5em; font-size: 0.85rem;
+  background: var(--panel); border: 2px solid var(--border);
+}
+.hours-seg-chip.weekend { opacity: 0.55; border-style: dashed; }
 
 /* 4-3: 数値は初期状態で隠し、「詳しく見る」で出す */
 .detail-btn {
@@ -430,6 +438,11 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .delta-row.flat { color: var(--text-dim); }
 .delta-mark { font-size: 0.6rem; }
 .delta-none { color: var(--text-dim); font-size: 0.8rem; }
+/* v10-1: 定休日アクションの判定(大成功/成功/空振り)バッジ */
+.tier-badge { display: inline-block; padding: 2px 8px; border: 2px solid; font-weight: bold; font-size: 0.74rem; margin-bottom: 8px; }
+.tier-great { color: #ffd76e; border-color: #ffd76e; background: #453510; }
+.tier-good { color: #8fd66f; border-color: #8fd66f; background: #1f3a18; }
+.tier-miss { color: var(--text-dim); border-color: var(--border); background: #1e1710; }
 
 /* ---- 結果画面 ---- */
 #screen-result { padding: 0; }

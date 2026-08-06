@@ -65,6 +65,38 @@ window.Utils = (function () {
     return calMonth(day) !== calMonth(day - 7);
   }
 
+  // v10-2: 営業時間の帯定義。開業日(day1)を月曜日固定とする(現実のカレンダーとの対応は無い、
+  // ゲーム内だけの取り決め)。dow: 0=月,1=火,2=水,3=木,4=金,5=土,6=日。
+  var DOW_LABEL = ["月", "火", "水", "木", "金", "土", "日"];
+  function dow(day) { return (Math.round(day) - 1) % 7; }
+  function isWeekend(day) { var d = dow(day); return d === 5 || d === 6; }
+  function dowLabel(day) { return DOW_LABEL[dow(day)]; }
+
+  // 帯は常にこの4つ。start/endは時(24時制、深夜だけ26時まで延長表記=実質翌1〜2時)。
+  window.BANDS = [
+    { key: "lunch", label: "昼", start: 11, end: 14 },
+    { key: "dinner", label: "夕", start: 17, end: 20 },
+    { key: "night", label: "夜", start: 20, end: 23 },
+    { key: "latenight", label: "深夜", start: 23, end: 26 }
+  ];
+  // 「2帯(昼+夜)開けた状態」を現状の数値の基準とする(v10指示2-5)
+  window.BASE_HOUR_BANDS = ["lunch", "night"];
+
+  // BANDSの要素は id ではなく key を識別子に持つので、findById(id前提)は使えない。
+  function bandDef(key) { return window.BANDS.find(function (b) { return b.key === key; }); }
+  function timeLabel(min) {
+    min = Math.max(0, Math.round(min));
+    var h = Math.floor(min / 60), m = min % 60;
+    return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m;
+  }
+  var BAND_EMOJI = { lunch: "🌞", dinner: "🌇", night: "🌙", latenight: "🌃" };
+  function bandEmoji(key) { return BAND_EMOJI[key] || "🕐"; }
+  // 帯の時刻表示。終了が24時を超える(深夜)場合は「翌N:00」にする。setup/loopの両方で使う共通表記。
+  function bandTimeLabel(b) {
+    var endLabel = b.end > 24 ? ("翌" + (b.end - 24) + ":00") : (b.end + ":00");
+    return b.start + ":00〜" + endLabel;
+  }
+
   function formatMoney(n) {
     // Math.round(n)+0 で -0 を +0 に正規化する(そのままだと "¥-0" のように表示が崩れる箇所があった)
     return "¥" + (Math.round(n) + 0).toLocaleString("ja-JP");
@@ -81,6 +113,8 @@ window.Utils = (function () {
     clamp: clamp, findById: findById,
     calMonth: calMonth, dayOfMonth: dayOfMonth, weekOfRun: weekOfRun, monthSeq: monthSeq, monthSeqToCal: monthSeqToCal,
     monthSeqStartDay: monthSeqStartDay, monthSeqEndDay: monthSeqEndDay, monthJustChanged: monthJustChanged,
+    dow: dow, isWeekend: isWeekend, dowLabel: dowLabel, bandDef: bandDef, timeLabel: timeLabel,
+    bandEmoji: bandEmoji, bandTimeLabel: bandTimeLabel,
     formatMoney: formatMoney, formatMoneyShort: formatMoneyShort,
     rand: rand, randInt: randInt, pick: pick
   };

@@ -110,11 +110,39 @@ window.Scoring = (function () {
     return mult;
   }
 
-  // 週の客数(客層別) = segment_flow × 基礎客数 × 評判係数 × リピート率 × 季節係数、行列で常連系を排除
+  // v10-2/3: 客層のpeak_hoursと、いま開けている帯を突き合わせて倍率を作る。
+  // 「昼+夜の2帯」を基準(=1.0)とし、開けている帯がそこから増えれば増え、減れば減る。
+  // OL(peak_hours=[lunch])は昼を閉めると0倍、学生(peak_hours=[lunch,night,latenight])は
+  // 深夜を追加で開けると1.5倍、という指示の具体例をどちらも満たす式になっている。
+  function segmentPhysicalBands(seg) {
+    var set = {};
+    (seg.peak_hours || []).forEach(function (ph) {
+      var band = ph === "weekend_lunch" ? "lunch" : (ph === "weekend_dinner" ? "dinner" : ph);
+      set[band] = true;
+    });
+    return Object.keys(set);
+  }
+  function hourCoverageMultiplier(seg, activeBands) {
+    var bands = segmentPhysicalBands(seg);
+    if (!bands.length) return 1; // peak_hours未設定の客層は影響を受けない(保険)
+    var base = window.BASE_HOUR_BANDS || ["lunch", "night"];
+    var baseCount = bands.filter(function (b) { return base.indexOf(b) >= 0; }).length;
+    var openCount = bands.filter(function (b) { return activeBands.indexOf(b) >= 0; }).length;
+    if (baseCount === 0) return bands.length ? openCount / bands.length : 0; // 現在のデータでは発生しない保険
+    return openCount / baseCount;
+  }
+  // v10-2-4: 開けた帯の数に比例するコスト倍率。基準は2帯(昼+夜)=1.0。
+  function hoursCostMultiplier(state) {
+    var bands = (state.businessHoursActive && state.businessHoursActive.length) ? state.businessHoursActive : (window.BASE_HOUR_BANDS || ["lunch", "night"]);
+    return bands.length / 2;
+  }
+
+  // 週の客数(客層別) = segment_flow × 基礎客数 × 評判係数 × リピート率 × 季節係数 × 営業時間係数、行列で常連系を排除
   function computeWeeklyCustomers(state) {
     var property = getProperty(state);
     var results = {};
     var totalDemand = 0;
+    var activeBands = (state.businessHoursActive && state.businessHoursActive.length) ? state.businessHoursActive : (window.BASE_HOUR_BANDS || ["lunch", "night"]);
 
     // v05: 向かいにライバル店ができた後は客足が落ちる。挨拶に行っていれば落ち方が軽い。
     var rivalMult = 1;
@@ -131,7 +159,8 @@ window.Scoring = (function () {
       var seasonMult = seasonalFactor(property, seg, state.day);
       var repeatMult = U.clamp(sat.value / 65, 0.15, 1.7);
       var boost = state.tempBoosts && state.tempBoosts[seg.id] ? state.tempBoosts[seg.id].mult : 1;
-      var potential = Math.max(0, flow * BASE_CUSTOMERS * repMult * seasonMult * repeatMult * boost * rivalMult);
+      var hoursMult = hourCoverageMultiplier(seg, activeBands);
+      var potential = Math.max(0, flow * BASE_CUSTOMERS * repMult * seasonMult * repeatMult * boost * rivalMult * hoursMult);
       results[seg.id] = { count: potential, satisfaction: sat.value, blocked: false };
       totalDemand += potential;
     });
@@ -173,14 +202,59 @@ window.Scoring = (function () {
     var revenue = 0, foodCost = 0, totalCustomers = 0;
     var bySegment = {};
     var revenueMult = state.flags.weekRevenueMult != null ? state.flags.weekRevenueMult : 1;
+    // v10-2-4: 開けている帯が多いほど、仕込み・仕入れの効率が落ちる分を原価に乗せる(2帯基準=1.0)。
+    // 客数自体は既にcomputeWeeklyCustomers側の営業時間係数で増減しているので、これは客数とは別枠の上乗せ。
+    var costMult = hoursCostMultiplier(state);
     Object.keys(customersResult.results).forEach(function (id) {
       var c = customersResult.results[id].count;
       revenue += c * state.price * revenueMult;
-      foodCost += c * agg.cost;
+      foodCost += c * agg.cost * costMult;
       totalCustomers += c;
       bySegment[id] = c;
     });
     return { revenue: revenue, foodCost: foodCost, totalCustomers: totalCustomers, bySegment: bySegment, property: property };
+  }
+
+  // v10-3: 週の客数(客層別、計算済みのcustomersResult)を、実際に絵の上へ湧かせるための
+  // 「曜日×帯」のマス目へ配分する。計算(売上・満足度)はcomputeWeeklyCustomers/Financeのままで、
+  // ここはその結果を可視化のためだけに割り振る(このスケジュール自体は売上に一切影響しない)。
+  // 端数は累積丸め(cumulative rounding)で吸収し、マス目の合計が客層ごとの週客数と一致するようにする
+  // (週の終わりの表示客数と、絵の上で入店した客の合計を±10%以内に収める、という指示に対応)。
+  function weeklyBandSchedule(state, customersResult) {
+    var activeBands = (state.businessHoursActive && state.businessHoursActive.length) ? state.businessHoursActive : (window.BASE_HOUR_BANDS || ["lunch", "night"]);
+    var schedule = {};
+    for (var d = 0; d < 7; d++) {
+      schedule[d] = {};
+      activeBands.forEach(function (b) { schedule[d][b] = {}; });
+    }
+    SEGMENTS.forEach(function (seg) {
+      var r = customersResult.results[seg.id];
+      var total = r ? r.count : 0;
+      if (!total) return;
+      var cells = [];
+      for (var dow = 0; dow < 7; dow++) {
+        var weekend = (dow === 5 || dow === 6);
+        (seg.peak_hours || []).forEach(function (ph) {
+          var band, weekendOnly;
+          if (ph === "weekend_lunch") { band = "lunch"; weekendOnly = true; }
+          else if (ph === "weekend_dinner") { band = "dinner"; weekendOnly = true; }
+          else { band = ph; weekendOnly = false; }
+          if (weekendOnly && !weekend) return;
+          if (activeBands.indexOf(band) < 0) return;
+          cells.push({ dow: dow, band: band });
+        });
+      }
+      if (!cells.length) return;
+      var per = total / cells.length;
+      var prevCum = 0;
+      cells.forEach(function (c, i) {
+        var cum = Math.round(per * (i + 1));
+        var v = cum - prevCum;
+        prevCum = cum;
+        schedule[c.dow][c.band][seg.id] = Math.max(0, v);
+      });
+    });
+    return schedule;
   }
 
   function weightedAvgSatisfaction(customersResult) {
@@ -286,6 +360,9 @@ window.Scoring = (function () {
     computeSatisfaction: computeSatisfaction,
     computeWeeklyCustomers: computeWeeklyCustomers,
     computeWeeklyFinance: computeWeeklyFinance,
+    hourCoverageMultiplier: hourCoverageMultiplier,
+    hoursCostMultiplier: hoursCostMultiplier,
+    weeklyBandSchedule: weeklyBandSchedule,
     weightedAvgSatisfaction: weightedAvgSatisfaction,
     ramenScore: ramenScore,
     tasteFit: tasteFit,

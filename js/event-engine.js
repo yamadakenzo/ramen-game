@@ -141,21 +141,30 @@ window.EventEngine = (function () {
       rentMultiplier: state.rentMultiplier || 1,
       recipeLock: state.flags.recipeLockWeeksLeft || 0,
       staffHired: state.staffHired.slice(),
-      rel: {}, staff: {}, boosts: {}, flags: {}
+      rel: {}, staff: {}, staffBonus: {}, boosts: {}, flags: {}
     };
     CARDS.forEach(function (c) { snap.rel[c.id] = state.relationships[c.id] || 0; });
     Object.keys(state.staffState).forEach(function (id) {
       var s = state.staffState[id];
       snap.staff[id] = { morale: s.morale, rel: s.rel, wageMult: s.wageMult || 1 };
+      // v10-1: 「従業員に教える」の結果表示用。伸びた能力値をbefore→afterで見せるために、
+      // 5能力ぶんの上乗せ(statBonus)もスナップショットに含める。
+      var b = s.statBonus || {};
+      snap.staffBonus[id] = { noodle: b.noodle || 0, prep: b.prep || 0, service: b.service || 0, numbers: b.numbers || 0, teach: b.teach || 0 };
     });
     Object.keys(state.tempBoosts || {}).forEach(function (seg) {
       snap.boosts[seg] = state.tempBoosts[seg].mult;
     });
-    ["noodleHint", "noodleQualityBonus", "rivalOpen", "rivalCordial", "forceQueueSpike"].forEach(function (k) {
+    ["noodleHint", "noodleQualityBonus", "rivalOpen", "rivalCordial", "forceQueueSpike", "eventRecipesUnlocked"].forEach(function (k) {
       snap.flags[k] = !!state.flags[k];
     });
     snap.flags.weekRevenueMult = state.flags.weekRevenueMult;
     snap.flags.weekSatisfactionHit = state.flags.weekSatisfactionHit;
+    // v10-1: 定休日のアクション(スープの試作・仕入れ先を回る・休む等)の結果表示用。
+    // 通常のイベントはこれらのキーに触れないので、既存のイベント差分表示には影響しない。
+    snap.flags.tasteBonus = state.flags.tasteBonus || 0;
+    snap.flags.costDiscountPct = state.flags.costDiscountPct || 0;
+    snap.flags.fatigue = state.flags.fatigue || 0;
     return snap;
   }
 
@@ -233,6 +242,34 @@ window.EventEngine = (function () {
       out.push(diffEntry("向かいの店と友好関係になった", 1));
     }
     if (!before.flags.forceQueueSpike && after.flags.forceQueueSpike) out.push(diffEntry("来週、行列ができる", 0));
+
+    // v10-1: 定休日のアクション用の差分。教える相手の能力はbefore→afterの絶対値で見せる
+    // (他の項目は増減量だけで足りるが、能力値は「今どれくらいか」の方が分かりやすいため)。
+    var STAT_LABELS = { noodle: "麺上げ", prep: "仕込み", service: "接客", numbers: "数字", teach: "育成" };
+    Object.keys(after.staffBonus || {}).forEach(function (id) {
+      var b = (before.staffBonus && before.staffBonus[id]) || { noodle: 0, prep: 0, service: 0, numbers: 0, teach: 0 };
+      var a = after.staffBonus[id];
+      var def = U.findById(STAFF, id);
+      if (!def) return;
+      Object.keys(STAT_LABELS).forEach(function (k) {
+        if (a[k] === b[k]) return;
+        var beforeVal = U.clamp(def.stats[k] + b[k], 0, 100);
+        var afterVal = U.clamp(def.stats[k] + a[k], 0, 100);
+        out.push(diffEntry(def.name + " " + STAT_LABELS[k] + " " + beforeVal + " → " + afterVal, afterVal - beforeVal));
+      });
+    });
+
+    d = (after.flags.tasteBonus || 0) - (before.flags.tasteBonus || 0);
+    if (d !== 0) out.push(diffEntry("スープの完成度 " + signed(d), d));
+
+    d = (after.flags.costDiscountPct || 0) - (before.flags.costDiscountPct || 0);
+    if (d !== 0) out.push(diffEntry("原価の割引 " + signed(d) + "%", d));
+
+    // 疲労だけは色を反転する(増えるのは悪いことなので)
+    d = (after.flags.fatigue || 0) - (before.flags.fatigue || 0);
+    if (d !== 0) out.push(diffEntry("疲労 " + signed(d), d, true));
+
+    if (!before.flags.eventRecipesUnlocked && after.flags.eventRecipesUnlocked) out.push(diffEntry("野菜スープ・辛味タレが解禁された", 1));
     if (after.flags.weekRevenueMult !== before.flags.weekRevenueMult && after.flags.weekRevenueMult != null) {
       out.push(diffEntry(after.flags.weekRevenueMult === 0 ? "今週は休業（売上ゼロ）" : ("今週の売上 ×" + after.flags.weekRevenueMult), -1));
     }
@@ -494,12 +531,19 @@ window.EventEngine = (function () {
     state.flags.fatigue = U.clamp(f, 0, 100);
   }
 
+  // v10-1: 「何をしたか」は即座に返す。イベントと同じスナップショット比較の差分表示を使う
+  // (表示側を新規に作らない、という指示通り。event-engine側の仕組みを流用するだけで足りた)。
+  // 遅らせるのは「客への反映」だけ(次週のrunWeeklyCalcで自然に反映される)であって、
+  // 能力値・関係値・素材の解放などここで確定した数値そのものは隠さない。
   function resolveDayOffAction(state, actionId, ctx) {
     ctx = ctx || {};
     var def = U.findById(window.DATA.actions.actions, actionId);
     if (!def) return null;
+    var before = snapshotForDiff(state);
     var result = def.kind === "fixed" ? resolveFixedAction(state, def, ctx) : resolveVariableAction(state, def, ctx);
     applyFatigueForAction(state, actionId);
+    result.diffs = diffSnapshots(before, state);
+    result.headline = typeof def.headline === "function" ? def.headline(state, ctx) : (def.headline || def.name);
     return result;
   }
 

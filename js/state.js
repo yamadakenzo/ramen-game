@@ -1,10 +1,10 @@
 // ゲーム状態の定義とlocalStorage永続化
 window.GameState = (function () {
-  // v09 で時間の持ち方が「週+週内の日」から「開業からの通算日数(state.day)」1本に変わり、
-  // 停止の仕組みも state.running を廃して pauseReasons(js/screens/loop.js)へ一本化したため、
-  // 旧セーブは読ませない。キーごと変えているので、旧キーのデータが残っていても「続きから」に出てこない。
-  var SAVE_KEY = "ramen_v09_save";
-  var SAVE_VERSION = 4;
+  // v10 で時間の刻みが「1日単位」から「1時間単位+営業時間帯の選択」に変わり、
+  // 営業時間の設定(businessHours)がstateに増えたため、旧セーブは読ませない。
+  // キーごと変えているので、旧キーのデータが残っていても「続きから」に出てこない。
+  var SAVE_KEY = "ramen_v10_save";
+  var SAVE_VERSION = 5;
 
   function freshState() {
     return {
@@ -20,7 +20,10 @@ window.GameState = (function () {
       price: 850,
       money: 0,
       loan: { monthlyRepay: 0, monthsLeft: 0 },
-      day: 1, // v09-3: 開業からの通算日数(1始まり)。時間はこれ1本だけで持つ。月日は表示時にUtilsで逆算する
+      day: 1, // v09-3: 開業からの通算日数(1始まり)。月日・曜日は表示時にUtilsで逆算する
+      clockMin: 11 * 60, // v10-2: 「今日」の中の時計(分、0始まり)。開店前は無く、開いている帯の頭から始まる
+      businessHours: ["lunch", "night"], // v10-2: 選んでいる営業時間帯(次の週から反映)。初期値は昼+夜
+      businessHoursActive: ["lunch", "night"], // 今週すでに反映されている帯(週の頭でbusinessHoursから複製)
       reputation: 50,
       relationships: { menya: 0, reporter: 0, landlord: 0, oldman: 0, lender: 0 },
       staffState: {}, // id -> {morale, rel, lowMoraleWeeks, statBonus}

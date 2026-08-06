@@ -24,6 +24,10 @@ window.ShopView = (function () {
     drawMaxCounter: 8, drawMaxTable: 4
   };
 
+  // v10-2: loop.js の hourMs(×1) と揃えること(×1で1時間=5000ms)。later()は1x基準のmsを
+  // 受け取って内部でspd()で割る作りなので、ここでも1x基準のまま渡す(実時間へは変換しない)。
+  var BAND_HOUR_MS = 5000;
+
   var stage = null;      // 舞台のDOM
   var actorLayer = null; // 客・店員を載せるレイヤー
   var state = null;
@@ -32,9 +36,12 @@ window.ShopView = (function () {
   var staffActors = [];
   var queue = [];        // 入店待ちの客
   var timers = [];       // {fn, remaining(ms), id, startedAt} v09: 残り時間を持たせ、凍結中は完全に止める
-  var spawnTimer = null;
   var builtSig = "";
-  var traffic = { pool: [], occupancy: 0, queueLevel: 0, satBySeg: {} };
+  // v10-3: 週次のcomputeWeeklyCustomersの結果を「曜日×帯」へ配分したもの(js/scoring.jsの
+  // weeklyBandSchedule)。openBand()がここから今日・その帯ぶんを取り出して実数だけ湧かせる。
+  // 以前あった traffic.pool/occupancy(Math.pow で稼働率を持ち上げる演出)は廃止した
+  // (客数と絵が一致しない原因そのものだったため。v10指示3)。
+  var traffic = { schedule: null, queueLevel: 0, satBySeg: {} };
   // v09-1: 中央の pauseReasons(js/screens/loop.js)から setPaused() で渡される、唯一の一時停止フラグ。
   // 以前は state.speed===0 を「止まっている」の代用にしていたが、v09で速度の選択と一時停止を
   // 分離したため(停止中でも「選んでいる速度」自体は保持し続ける)、ここでは専用のフラグを持つ。
@@ -63,7 +70,6 @@ window.ShopView = (function () {
   function clearTimers() {
     timers.forEach(function (rec) { if (rec.id) clearTimeout(rec.id); });
     timers = [];
-    if (spawnTimer) { clearTimeout(spawnTimer); spawnTimer = null; }
   }
 
   // ---------- v09-1: 一時停止(パネル・モーダル・週末停止・非表示タブ)----------
@@ -106,7 +112,6 @@ window.ShopView = (function () {
       rec.remaining = Math.max(0, rec.remaining - (now - rec.startedAt));
       rec.id = null;
     });
-    if (spawnTimer) { clearTimeout(spawnTimer); spawnTimer = null; }
     actors.forEach(pinActor);
     syncSpeed(); // stage の .paused クラスを更新(店員の往復・食事の弾みも一括で止まる)
   }
@@ -117,7 +122,6 @@ window.ShopView = (function () {
     timers.forEach(armTimer);
     actors.forEach(resumeActor);
     syncSpeed();
-    if (!spawnTimer && stage) spawnLoop();
   }
 
   // ---------- 静物(店の躯体・設備) ----------
@@ -303,8 +307,7 @@ window.ShopView = (function () {
     return Math.abs(toX - fromX) * (perPct || 22);
   }
 
-  function spawnCustomer() {
-    var segId = traffic.pool[U.randInt(0, traffic.pool.length - 1)];
+  function spawnCustomer(segId) {
     var a = makeActor(segId);
     // 初期位置を確定させてから移動させる。requestAnimationFrame だと
     // タブが非表示のときにコールバックが来ず、客が湧いた位置で固まる。
@@ -320,15 +323,10 @@ window.ShopView = (function () {
     return open[U.randInt(0, open.length - 1)];
   }
 
-  function queueTarget() {
-    return Math.min(GEO.queueMax, Math.round(traffic.queueLevel * 4));
-  }
-
+  // v10-3: 実数だけ湧かせるようになったので、「席が空いていても行列を作る」演出上の水増しは廃止。
+  // 満席なら並ぶ・空いていれば座る、という素直な判定にした。行列は実際の混雑から自然に生まれる。
   function arriveDoor(a) {
     if (a.gone) return;
-    // 行列が出ている週は、席が空いていても外に列を作る。
-    // 「空席があるなら必ず座る」だと行列が絵に出ないまま終わってしまう。
-    if (queue.length < queueTarget()) { joinQueue(a); return; }
     var seat = freeSeat();
     if (seat) { enterAndSit(a, seat); return; }
     joinQueue(a);
@@ -336,9 +334,12 @@ window.ShopView = (function () {
 
   function queueSlot(i) { return GEO.queueX0 + i * GEO.queueGap; }
 
+  // 縦長の枠では表示できる行列の人数に限りがある(GEO.queueMax)。それを超えるぶんは
+  // 最後の見える位置に重ねておく(データ上は全員実在し、席が空けば順番に呼ばれる)。
   function layoutQueue() {
     queue.forEach(function (a, i) {
-      move(a, queueSlot(i), GEO.walkY, 500);
+      var slot = Math.min(i, GEO.queueMax - 1);
+      move(a, queueSlot(slot), GEO.walkY, 500);
     });
   }
 
@@ -389,7 +390,8 @@ window.ShopView = (function () {
       later(function () {
         if (a.gone) return;
         a.el.classList.add("eating");
-        later(function () { finishMeal(a); }, 3200);
+        // v10-3: 滞在時間を実時間に合わせる(提供+食事で30〜40分 ≒ 2.5〜3.5秒@×1)
+        later(function () { finishMeal(a); }, U.rand(2500, 3500));
       }, 420);
     }, ms);
   }
@@ -412,16 +414,32 @@ window.ShopView = (function () {
     }, 460);
   }
 
-  // ---------- 送り出し(客の湧き) ----------
-  function spawnLoop() {
-    if (!stage || frozen) { spawnTimer = null; return; } // 凍結中はこの周期タイマー自体を止める(unfreezeが再度呼ぶ)
-    spawnTimer = setTimeout(spawnLoop, Math.max(80, 620 / spd()));
-    if (!traffic.pool.length) return;
-
-    var occupied = seats.filter(function (s) { return !!s.occupant; }).length;
-    var want = Math.round(seats.length * traffic.occupancy) + queueTarget();
-    if (occupied + queue.length < want && actors.length < want + 4) spawnCustomer();
+  // ---------- v10-3: 送り出し(客の湧き)。帯の開始時にその帯ぶんを一括で予約する ----------
+  // 「その日・その帯に来る客数を週客数から逆算し、実際にその人数だけ湧かせる」への対応。
+  // week次のschedule(js/scoring.jsのweeklyBandSchedule)から、今日の曜日×この帯の内訳を取り出し、
+  // 到着時刻を帯の中盤に寄せて(2つの一様乱数の平均≒三角分布)個別にlater()で予約する。
+  // 確率で間引く仕組みは無い(誰か1人でも来なくなると週の合計とズレるため、全員を必ず湧かせる)。
+  function openBand(bandKey) {
+    if (!stage || !state) return;
+    var band = U.bandDef(bandKey);
+    if (!band) return;
+    var dow = U.dow(state.day);
+    var counts = (traffic.schedule && traffic.schedule[dow] && traffic.schedule[dow][bandKey]) || {};
+    var durationMs = (band.end - band.start) * BAND_HOUR_MS; // 1x基準。実際の速さはlater()側で調整される
+    Object.keys(counts).forEach(function (segId) {
+      var n = counts[segId];
+      for (var i = 0; i < n; i++) {
+        var t = (Math.random() + Math.random()) / 2; // 中盤に寄せた到着時刻(0〜1)
+        later(function () { spawnCustomer(segId); }, t * durationMs);
+      }
+    });
   }
+
+  // 帯が終わる瞬間。今のところ特別な後処理はしていない(この帯の到着予定は既に上のopenBandで
+  // 帯の範囲内に収まるよう予約済みなので、閉店の瞬間に残っているのは接客中・行列中の客だけ。
+  // それらは既存の自然な退店・行列諦めの仕組みに任せる)。将来、帯終了で行列を強制的に
+  // 解散させたくなった場合はここに書く。
+  function closeBand(bandKey) { /* noop */ }
 
   function syncSpeed() {
     var sec = 6 / spd();
@@ -440,7 +458,7 @@ window.ShopView = (function () {
     stage = h("div", { className: "shop-stage" });
     container.appendChild(stage);
     builtSig = "";
-    ensureBuilt(); // ここで組み立てと spawnLoop の起動まで済む
+    ensureBuilt();
   }
 
   function ensureBuilt() {
@@ -449,33 +467,19 @@ window.ShopView = (function () {
       state.staffHired.slice().sort().join(",") + "|" + counts.counter + "/" + counts.table;
     if (sig === builtSig) return;
     builtSig = sig;
-    clearTimers();
+    clearTimers(); // v10-3: 組み直すと、その帯の予約済みだった到着もろとも消える(既知の割り切り。
+    // 設備購入などで帯の途中にシーンを作り直すと、その帯の客が少なめに見えることがある)
     buildScenery();
-    // v09-1: 凍結中(パネルを開いたまま設備を買った、等)に組み直した場合は湧きループを起こさない。
-    // unfreeze() 側が再開時にちゃんと spawnLoop() を呼ぶ。
-    if (!frozen) spawnLoop();
   }
 
-  // finance / customers は processWeek の計算結果。無い場合(開業直後)は空の店にする。
-  function update(gameState, finance, customers) {
+  // finance / customers は週次計算の結果。schedule はその内訳を「曜日×帯」へ配分したもの
+  // (js/scoring.jsのweeklyBandSchedule)。無い場合(開業直後、まだ1週目の計算前)は空の店にする。
+  function update(gameState, finance, customers, schedule) {
     state = gameState;
     if (!stage) return;
     ensureBuilt();
 
-    var pool = [];
-    var bySeg = finance ? finance.bySegment : {};
-    Object.keys(bySeg).forEach(function (id) {
-      var n = Math.round(bySeg[id]);
-      for (var i = 0; i < n; i++) pool.push(id);
-    });
-    traffic.pool = pool;
-
-    // 実際の稼働率(週の客数/週のキャパ)をそのまま席数に掛けると、繁盛していても
-    // 常時1〜2席しか埋まらず店が死んで見える。見せ方として指数で持ち上げる。
-    var cap = customers ? customers.weeklyCapacity : 0;
-    var total = finance ? finance.totalCustomers : 0;
-    var ratio = cap > 0 ? U.clamp(total / cap, 0, 1) : 0;
-    traffic.occupancy = ratio > 0 ? U.clamp(Math.pow(ratio, 0.55), 0.08, 1) : 0;
+    traffic.schedule = schedule || null;
     traffic.queueLevel = customers ? customers.queueLevel : 0;
 
     traffic.satBySeg = {};
@@ -496,10 +500,14 @@ window.ShopView = (function () {
     staffActors = [];
     builtSig = "";
     frozen = false;
+    traffic = { schedule: null, queueLevel: 0, satBySeg: {} };
   }
 
   // v09-1: 中央のpauseReasons(js/screens/loop.js)から呼ばれる、唯一の一時停止スイッチ。
   function setPaused(on) { if (on) freeze(); else unfreeze(); }
 
-  return { mount: mount, update: update, syncSpeed: syncSpeed, destroy: destroy, setPaused: setPaused };
+  return {
+    mount: mount, update: update, syncSpeed: syncSpeed, destroy: destroy, setPaused: setPaused,
+    openBand: openBand, closeBand: closeBand
+  };
 })();

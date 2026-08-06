@@ -30,7 +30,8 @@ window.GameState = (function () {
       recipeChangeLog: [], // 変更があった週番号のログ(直近1ヶ月分の判定用)
       flags: {
         regularLowWeeks: 0,
-        recipeLockWeeksLeft: 0
+        recipeLockWeeksLeft: 0,
+        weekFlashDetailed: true // v06-2-1: 週の収支表示は詳細版が初期状態
       },
       history: [], // {week, month, customers, revenue, foodCost, rent, wage, loanRepay, profit, money, satisfaction, queueLevel}
       eventLog: [], // {week, id, title}

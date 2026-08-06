@@ -2,22 +2,29 @@
 window.Utils = (function () {
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
   function findById(list, id) { return list.find(function (x) { return x.id === id; }); }
+  // 52週/12ヶ月をだいたい均等割り(4.33週/月)。
+  // v06で発覚: weekToMonth が Math.floor、monthStartWeek が Math.round で別々の式だったため、
+  // 1月→2月の境界(第5週)だけ「表示上は1月」なのに「月初課金の判定は2月スタート」という
+  // 二重帰属が起きていた(月次まとめが1件分の家賃・給与・返済を取りこぼす形で顕在化した)。
+  // 以後は weekToMonth を monthStartWeek から逆算する形にして、常に一致させる。
+  function monthStartWeek(month) { return Math.round((month - 1) * 4.333) + 1; }
+  function monthEndWeek(month) { return monthStartWeek(month + 1) - 1; }
   function weekToMonth(week) {
-    // 52週/12ヶ月をだいたい均等割り(4.33週/月)
-    return clamp(Math.floor((week - 1) / 4.333) + 1, 1, 12);
+    week = clamp(week, 1, 52);
+    for (var m = 12; m >= 1; m--) {
+      if (week >= monthStartWeek(m)) return m;
+    }
+    return 1;
   }
   function weekOfMonth(week) {
-    var month = weekToMonth(week);
-    var monthStartWeek = Math.round((month - 1) * 4.333) + 1;
-    return week - monthStartWeek + 1;
+    return week - monthStartWeek(weekToMonth(week)) + 1;
   }
   function isFirstWeekOfMonth(week) {
     return weekOfMonth(week) === 1;
   }
-  function monthStartWeek(month) { return Math.round((month - 1) * 4.333) + 1; }
-  function monthEndWeek(month) { return monthStartWeek(month + 1) - 1; }
   function formatMoney(n) {
-    return "¥" + Math.round(n).toLocaleString("ja-JP");
+    // Math.round(n)+0 で -0 を +0 に正規化する(そのままだと "¥-0" のように表示が崩れる箇所があった)
+    return "¥" + (Math.round(n) + 0).toLocaleString("ja-JP");
   }
   function formatMoneyShort(n) {
     var v = Math.round(n);

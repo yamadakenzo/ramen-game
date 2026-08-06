@@ -25,9 +25,9 @@ window.Guide = (function () {
   }
 
   function ask(stepId) { return LINES.ask[stepId] || ""; }
-  function react(itemId) { return LINES.react[itemId] || "なるほど、いいと思います！"; }
+  function react(itemId) { return LINES.react[itemId] || "いいね、それでいこう。"; }
   function blurb(itemId) { return LINES.blurb[itemId] || ""; }
-  function unpick(kind) { return LINES.unpick[kind] || "了解です。"; }
+  function unpick(kind) { return LINES.unpick[kind] || "了解。"; }
 
   // ---------- 営業ループ中の吹き出し ----------
   function mountBubble(parent) {
@@ -77,13 +77,13 @@ window.Guide = (function () {
   // 呼ばれたときに今の店の状況を一言で言う
   function summary(state) {
     var last = state.history.length ? state.history[state.history.length - 1] : null;
-    if (state.money < 0) return "お金が尽きかけてます！ すぐ手を打ちましょう。";
-    if (last && last.profit < 0) return "今月、出ていくお金のほうが多いです。値段か材料を見直しましょう。";
-    if (last && last.queueLevel > 0.1) return "よく入ってます！ 席を増やすか、提供を速くするか、ですね。";
-    if (last && last.avgSatisfaction < 45) return "お客さんの顔が、あまり良くないですね。味を見直しましょうか。";
-    if (state.reputation >= 65) return "評判、いいですよ。この調子でいきましょう！";
-    if (last && last.totalCustomers < 10) return "お客さんが少ないです。誰に向けた店なのか、もう一度。";
-    return "まずまずです。焦らず、一つずつ積みましょう。";
+    if (state.money < 0) return "金が尽きかけてる！ すぐ手を打とう。";
+    if (last && last.profit < 0) return "今月、出ていく金のほうが多い。値段か材料か、見直そう。";
+    if (last && last.queueLevel > 0.1) return "よく入ってる！ 席を増やすか、提供を速くするか。";
+    if (last && last.avgSatisfaction < 45) return "客の顔が、あまり良くない。味を見直そうか。";
+    if (state.reputation >= 65) return "評判、いいぞ。この調子。";
+    if (last && last.totalCustomers < 10) return "客が少ない。誰に向けた店なのか、もう一度。";
+    return "まずまず。焦らず、一つずつ積もう。";
   }
 
   return {

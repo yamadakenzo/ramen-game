@@ -287,14 +287,14 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 /* パネルを開いている間はパネルの上へ逃がす。速度切替とパネル切替は常に押せること */
 .speed-dock.raised, .fab-col.raised { bottom: calc(52% + 8px); z-index: 31; }
 
-/* 右下の丸ボタン */
+/* 右下の丸ボタン。v06で価格を独立させ5個になったので一回り小さくして余裕を持たせた */
 .fab-col {
   position: absolute; right: 8px; bottom: 10px; z-index: 22;
-  display: flex; flex-direction: column; gap: 7px;
+  display: flex; flex-direction: column; gap: 6px;
 }
 .fab {
-  width: calc(var(--frame-w) * 0.135);
-  height: calc(var(--frame-w) * 0.135);
+  width: calc(var(--frame-w) * 0.115);
+  height: calc(var(--frame-w) * 0.115);
   border-radius: 50%;
   border: 3px solid var(--border-light);
   background: rgba(43, 33, 24, 0.88);
@@ -305,25 +305,68 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   line-height: 1;
   box-shadow: 2px 2px 0 var(--shadow);
   padding: 0;
+  touch-action: manipulation;
 }
-.fab .fab-icon { font-size: calc(var(--frame-w) * 0.048); }
-.fab .fab-label { font-size: calc(var(--frame-w) * 0.023); color: var(--text-dim); margin-top: 2px; }
+.fab .fab-icon { font-size: calc(var(--frame-w) * 0.042); }
+.fab .fab-label { font-size: calc(var(--frame-w) * 0.02); color: var(--text-dim); margin-top: 2px; }
 .fab.active { border-color: var(--accent); background: rgba(92, 66, 30, 0.95); }
 .fab:active { transform: translate(1px, 1px); }
 
-/* 2-2: 週の終わりに1行だけ出す */
+/* 2-2: 週の終わりに出す収支表示。1行版(compact)と詳細版(detailed)を切り替えられる。 */
 .week-flash {
-  position: absolute; left: 8px; right: 8px; top: 12.5%; z-index: 18;
-  text-align: center;
-  padding: 5px 8px;
-  font-size: 0.7rem;
-  background: rgba(14, 10, 7, 0.86);
+  position: absolute; left: 8px; right: 8px; top: 11%; z-index: 18;
+  background: rgba(14, 10, 7, 0.9);
   border: 2px solid var(--accent);
   opacity: 0;
   transition: opacity 0.14s ease;
   pointer-events: none;
 }
 .week-flash.show { opacity: 1; }
+
+/* 1行版: 従来通り軽い表示 */
+.week-flash.compact {
+  text-align: center;
+  padding: 5px 8px;
+  font-size: 0.7rem;
+}
+
+/* 詳細版: 引き算が見える表。タップできるようにpointer-eventsを戻す */
+.week-flash.detailed {
+  padding: 8px 10px;
+  font-size: 0.72rem;
+  pointer-events: auto;
+}
+.wf-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
+.wf-title { color: var(--accent); font-size: 0.82rem; }
+.wf-sub { color: var(--text-dim); font-size: 0.68rem; }
+.wf-toggle {
+  font-family: inherit; background: none; border: 1px solid var(--border);
+  color: var(--text-dim); padding: 2px 6px; font-size: 0.6rem; cursor: pointer;
+  touch-action: manipulation;
+  pointer-events: auto; /* compact表示は親がpointer-events:noneなので、ボタン自身で明示的に戻す */
+}
+.wf-table { display: flex; flex-direction: column; gap: 1px; }
+.wf-row { display: flex; justify-content: space-between; padding: 1px 0; }
+.wf-row .wf-label { color: var(--text-dim); }
+.wf-row .wf-val { font-variant-numeric: tabular-nums; }
+.wf-row.wf-bad .wf-val { color: var(--bad); }
+.wf-row.wf-good .wf-val { color: var(--good); }
+.wf-divider { border-top: 1px solid var(--border); margin: 3px 0; }
+.wf-row.wf-net { font-weight: bold; font-size: 0.82rem; }
+.wf-row.wf-net .wf-val.good { color: var(--good); }
+.wf-row.wf-net .wf-val.bad { color: var(--bad); }
+.wf-note { color: var(--text-dim); font-size: 0.6rem; margin-top: 3px; }
+
+/* 月次まとめ(イベントモーダルを流用。少し大きい扱いにするため専用の見た目を足す) */
+.modal-box.month-recap { border-color: var(--money); }
+.modal-box.month-recap h2 { color: var(--money); }
+.recap-table { display: flex; flex-direction: column; gap: 3px; margin: 10px 0; }
+.recap-row { display: flex; justify-content: space-between; font-size: 0.85rem; }
+.recap-row .recap-label { color: var(--text-dim); }
+.recap-row.recap-total { font-size: 1.1rem; font-weight: bold; border-top: 2px solid var(--border); padding-top: 6px; margin-top: 4px; }
+.recap-diff { font-size: 0.72rem; color: var(--text-dim); }
+.recap-diff.good { color: var(--good); }
+.recap-diff.bad { color: var(--bad); }
 
 /* 2-3: 変化した瞬間に絵の上へ浮かせる */
 .float-layer { position: absolute; inset: 0; z-index: 19; pointer-events: none; overflow: hidden; }

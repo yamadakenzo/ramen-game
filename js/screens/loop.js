@@ -84,8 +84,10 @@ window.ScreenLoop = (function () {
     state.lastAvgSatisfaction = avgSat;
 
     var monthlyCosts = 0;
+    var chargedBreakdown = { rent: 0, wages: 0, loanPay: 0 }; // 月次まとめ用に、実際に引き落とされた内訳を週次ログへ残す
     if (U.isFirstWeekOfMonth(state.week)) {
-      monthlyCosts = monthlyCostBreakdown().total;
+      chargedBreakdown = monthlyCostBreakdown();
+      monthlyCosts = chargedBreakdown.total;
       state.money -= monthlyCosts;
       if (state.loan.monthsLeft > 0) state.loan.monthsLeft--;
     }
@@ -103,7 +105,8 @@ window.ScreenLoop = (function () {
     state.history.push({
       week: state.week, month: U.weekToMonth(state.week), customers: finance.bySegment,
       totalCustomers: finance.totalCustomers, revenue: Math.round(finance.revenue), foodCost: Math.round(finance.foodCost),
-      monthlyCosts: monthlyCosts, profit: Math.round(profit), money: Math.round(state.money),
+      monthlyCosts: monthlyCosts, rentCost: chargedBreakdown.rent, wageCost: chargedBreakdown.wages, loanCost: chargedBreakdown.loanPay,
+      profit: Math.round(profit), money: Math.round(state.money),
       avgSatisfaction: Math.round(avgSat), queueLevel: customers.queueLevel
     });
 
@@ -121,10 +124,12 @@ window.ScreenLoop = (function () {
     var guideLine = G.checkAuto(state, { profit: profit, queueLevel: customers.queueLevel });
     if (guideLine) G.say(guideLine);
 
+    var finishedWeek = state.week;
+    var wasRunning = state.running;
+
     var events = EE.checkWeeklyEvents(state, weekStats);
     if (events.length > 0) {
       state.pendingEvents = events;
-      var wasRunning = state.running;
       state.running = false;
       state.eventModalActive = true;
       clearTick();
@@ -132,20 +137,93 @@ window.ScreenLoop = (function () {
       hideFlash();
       window.ScreenEventModal.showQueue(state, events, function () {
         state.eventModalActive = false;
-        state.week++;
-        window.GameState.save();
-        if (state.week > 52) { finishGame(); return; }
-        renderTopBar();
-        refreshShop();
-        if (wasRunning && state.speed > 0) { state.running = true; scheduleTick(); }
+        afterWeekResolved(finishedWeek, wasRunning);
       });
       return;
     }
 
+    afterWeekResolved(finishedWeek, wasRunning);
+  }
+
+  // イベント(あれば)の解決後、月末なら月次まとめを挟んでから次の週へ進む
+  function afterWeekResolved(finishedWeek, wasRunning) {
+    if (finishedWeek === U.monthEndWeek(U.weekToMonth(finishedWeek))) {
+      hideFlash();
+      showMonthlyRecap(finishedWeek, function () { advanceWeek(wasRunning); });
+      return;
+    }
+    advanceWeek(wasRunning, beatMs());
+  }
+
+  function advanceWeek(wasRunning, extraMs) {
     state.week++;
     window.GameState.save();
     if (state.week > 52) { finishGame(); return; }
-    scheduleTick(beatMs());
+    renderTopBar();
+    refreshShop();
+    if (wasRunning && state.speed > 0) { state.running = true; scheduleTick(extraMs); }
+  }
+
+  // ---------- 2-2: 月末にまとめを出す ----------
+  function monthAggregate(monthNum) {
+    var agg = { revenue: 0, foodCost: 0, rent: 0, wages: 0, loan: 0, profit: 0, customers: 0 };
+    state.history.forEach(function (rec) {
+      if (rec.month !== monthNum) return;
+      agg.revenue += rec.revenue; agg.foodCost += rec.foodCost;
+      agg.rent += rec.rentCost || 0; agg.wages += rec.wageCost || 0; agg.loan += rec.loanCost || 0;
+      agg.profit += rec.profit; agg.customers += rec.totalCustomers;
+    });
+    return agg;
+  }
+
+  function recapRow(label, valueText, diff, diffFmt) {
+    var row = h("div", { className: "recap-row" }, [
+      h("span", { className: "recap-label", text: label }),
+      h("span", { text: valueText })
+    ]);
+    if (diff != null) {
+      row.appendChild(h("span", {
+        className: "recap-diff " + (diff >= 0 ? "good" : "bad"),
+        text: "前月比 " + (diff >= 0 ? "+" : "") + diffFmt(diff)
+      }));
+    }
+    return row;
+  }
+
+  function showMonthlyRecap(week, onDone) {
+    var month = U.weekToMonth(week);
+    var cur = monthAggregate(month);
+    var prev = month > 1 ? monthAggregate(month - 1) : null;
+    var fmtCount = function (v) { return Math.round(v) + "人"; };
+
+    var overlay = document.getElementById("event-modal-overlay");
+    var box = document.getElementById("event-modal-box");
+    box.className = "modal-box month-recap";
+    window.UI.clear(box);
+    box.appendChild(h("h2", { text: month + "月のまとめ" }));
+
+    var table = h("div", { className: "recap-table" }, [
+      recapRow("客数", fmtCount(cur.customers), prev ? cur.customers - prev.customers : null, fmtCount),
+      recapRow("売上", U.formatMoney(cur.revenue), prev ? cur.revenue - prev.revenue : null, U.formatMoney),
+      recapRow("仕入", "−" + U.formatMoney(cur.foodCost), prev ? -(cur.foodCost - prev.foodCost) : null, U.formatMoney),
+      recapRow("人件費", "−" + U.formatMoney(cur.wages), prev ? -(cur.wages - prev.wages) : null, U.formatMoney),
+      recapRow("家賃", "−" + U.formatMoney(cur.rent), prev ? -(cur.rent - prev.rent) : null, U.formatMoney),
+      recapRow("返済", "−" + U.formatMoney(cur.loan), prev ? -(cur.loan - prev.loan) : null, U.formatMoney)
+    ]);
+    var totalRow = recapRow("この月の損益", (cur.profit >= 0 ? "+" : "") + U.formatMoney(cur.profit),
+      prev ? cur.profit - prev.profit : null, U.formatMoney);
+    totalRow.className = "recap-row recap-total";
+    totalRow.querySelector("span:nth-child(2)").classList.add(cur.profit >= 0 ? "good" : "bad"); // 赤字は赤で
+    table.appendChild(totalRow);
+    box.appendChild(table);
+
+    box.appendChild(h("div", { className: "modal-choices" }, [
+      h("button", {
+        className: "btn primary", text: "続ける",
+        onclick: function () { overlay.classList.remove("show"); onDone(); }
+      })
+    ]));
+    overlay.classList.add("show");
   }
 
   function finishGame() {
@@ -160,7 +238,7 @@ window.ScreenLoop = (function () {
     onGameOver();
   }
 
-  // ---------- 2-2: 週の結果を1行で ----------
+  // ---------- 2-2: 週の結果表示(1行版 / 詳細版) ----------
   function satSplit(finance, customers) {
     var good = 0, bad = 0;
     Object.keys(finance.bySegment).forEach(function (id) {
@@ -172,10 +250,74 @@ window.ScreenLoop = (function () {
     return { good: good, bad: bad };
   }
 
+  function isDetailedFlash() { return state.flags.weekFlashDetailed !== false; } // 初期状態は詳細版
+  var lastFlashData = null; // トグルボタンで表示を切り替えるとき、直近の週データを再利用する
+
   function hideFlash() {
     if (flashTimer) { clearTimeout(flashTimer); flashTimer = null; }
     var el = document.getElementById("week-flash");
     if (el) el.classList.remove("show");
+  }
+
+  function moneyRow(label, val, opts) {
+    opts = opts || {};
+    var cls = "wf-row" + (opts.tone === "bad" ? " wf-bad" : (opts.tone === "good" ? " wf-good" : ""));
+    return h("div", { className: cls }, [
+      h("span", { className: "wf-label", text: label }),
+      h("span", { className: "wf-val", text: (opts.sign && val >= 0 ? "+" : "") + U.formatMoney(val) + (opts.suffix || "") })
+    ]);
+  }
+
+  function renderWeekFlash() {
+    var el = document.getElementById("week-flash");
+    if (!el || !lastFlashData) return;
+    var d = lastFlashData;
+    window.UI.clear(el);
+    el.className = "week-flash show" + (isDetailedFlash() ? " detailed" : " compact");
+
+    if (!isDetailedFlash()) {
+      el.appendChild(h("span", {
+        text: "今週：客" + d.totalCustomers + "人 / 満足" + d.satGood + "・不満" + d.satBad +
+          " / 売上 " + U.formatMoney(d.revenue)
+      }));
+      el.appendChild(h("button", { className: "wf-toggle", text: "詳細", style: { marginLeft: "8px" }, onclick: toggleFlashMode }));
+      return;
+    }
+
+    el.appendChild(h("div", { className: "wf-head" }, [
+      h("div", {}, [
+        h("div", { className: "wf-title", text: "第" + d.week + "週" }),
+        h("div", { className: "wf-sub", text: "客 " + d.totalCustomers + "人（満足" + d.satGood + " / 不満" + d.satBad + "）" })
+      ]),
+      h("button", { className: "wf-toggle", text: "1行に", onclick: toggleFlashMode })
+    ]));
+    var table = h("div", { className: "wf-table" }, [
+      moneyRow("売上", d.revenue),
+      moneyRow("仕入", -d.foodCost, { tone: "bad", suffix: "（原価率 " + d.foodCostPct + "%）" }),
+      moneyRow("人件費", -d.wageShare, { tone: "bad" }),
+      moneyRow("家賃", -d.rentShare, { tone: "bad" }),
+      moneyRow("返済", -d.loanShare, { tone: "bad" }),
+      h("div", { className: "wf-divider" }),
+      moneyRow("残り", d.net, { sign: true })
+    ]);
+    table.lastChild.className = "wf-row wf-net";
+    table.lastChild.querySelector(".wf-val").classList.add(d.net >= 0 ? "good" : "bad");
+    el.appendChild(table);
+    el.appendChild(h("div", { className: "wf-note", text: "人件費・家賃・返済は月額を週割りした概算。実際の引き落としは月初にまとめて。" }));
+  }
+
+  function toggleFlashMode() {
+    state.flags.weekFlashDetailed = !isDetailedFlash();
+    window.GameState.save();
+    renderWeekFlash();
+    // 詳細版は読むのに時間がかかるので、切り替えたらタイマーを仕切り直す
+    if (flashTimer) clearTimeout(flashTimer);
+    flashTimer = setTimeout(hideFlash, flashDurationMs());
+  }
+
+  function flashDurationMs() {
+    var base = (speedToMs(state.speed) || 1200) + beatMs();
+    return isDetailedFlash() ? Math.max(1800, base) : base;
   }
 
   function showWeekFlash(finance, customers) {
@@ -183,12 +325,20 @@ window.ScreenLoop = (function () {
     if (!el) return;
     if (state.speed === 0) { el.classList.remove("show"); return; } // 「停止」中は出さない
     var s = satSplit(finance, customers);
-    el.textContent = "今週：客" + finance.totalCustomers + "人 / 満足" + s.good + "・不満" + s.bad +
-      " / 売上 " + U.formatMoney(finance.revenue);
-    el.classList.add("show");
+    var mc = monthlyCostBreakdown(); // 表示用に月額を毎週割り出す(実際の引き落としは月初のみ)
+    var revenue = finance.revenue;
+    lastFlashData = {
+      week: state.week,
+      totalCustomers: finance.totalCustomers,
+      satGood: s.good, satBad: s.bad,
+      revenue: revenue, foodCost: finance.foodCost,
+      foodCostPct: revenue > 0 ? Math.round((finance.foodCost / revenue) * 100) : 0,
+      wageShare: mc.wages / 4.333, rentShare: mc.rent / 4.333, loanShare: mc.loanPay / 4.333,
+      net: revenue - finance.foodCost - mc.total / 4.333
+    };
+    renderWeekFlash();
     if (flashTimer) clearTimeout(flashTimer);
-    flashTimer = setTimeout(function () { el.classList.remove("show"); },
-      (speedToMs(state.speed) || 1200) + beatMs());
+    flashTimer = setTimeout(hideFlash, flashDurationMs());
   }
 
   // ---------- 2-3: 変化した瞬間に絵の上へ浮かせる ----------
@@ -344,23 +494,68 @@ window.ScreenLoop = (function () {
       sec.appendChild(grid);
       box.appendChild(sec);
     });
+    return box;
+  }
 
-    var priceSec = h("div", { className: "sheet-section" }, [
-      h("h3", { text: "価格" }),
-      h("p", {}, ["1杯 ", h("span", { className: "money", text: state.price + "円" })])
-    ]);
-    var row = h("div", { style: { display: "flex", gap: "6px", flexWrap: "wrap" } });
-    [-100, -50, 50, 100].forEach(function (delta) {
+  // v06-3-4: 価格変更は専用パネルに独立させた(以前はレシピパネルの一番下にあり、
+  // 4カテゴリぶんのカードをスクロールしないと辿り着けず気づかれにくかった)。
+  // 変更した瞬間に「原価・粗利」と「客層ごとの予算との比較」をその場で見せる。
+  function panelPrice() {
+    var box = h("div", {});
+    var agg = Scoring.recipeAggregate(state.recipe, state);
+    var margin = state.price - agg.cost;
+
+    var headSec = h("div", { className: "sheet-section status-card" });
+    headSec.appendChild(h("div", { className: "score-head" }, [
+      h("span", { className: "score-num", text: state.price + "円" }),
+      h("span", { className: "score-max", text: "/ 杯" })
+    ]));
+    headSec.appendChild(h("div", { className: "dim", text: "原価 " + agg.cost + "円 ・ 粗利 " +
+      (margin >= 0 ? "+" : "") + margin + "円/杯" }));
+    var row = h("div", { style: { display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "8px" } });
+    [-100, -50, -10, 10, 50, 100].forEach(function (delta) {
       row.appendChild(h("button", {
         className: "btn small", text: (delta > 0 ? "+" : "") + delta + "円",
         onclick: function () {
           state.price = U.clamp(state.price + delta, 300, 3000);
+          renderTopBar();
           refreshSheet();
         }
       }));
     });
-    priceSec.appendChild(row);
-    box.appendChild(priceSec);
+    headSec.appendChild(row);
+    box.appendChild(headSec);
+
+    // 客層ごとの予算比較。価格を動かした瞬間にどの客層が苦しくなるかをその場で見せる。
+    var segSec = h("div", { className: "sheet-section" }, [
+      h("h3", { text: "客層ごとの予算" }),
+      h("div", { className: "dim", text: "予算を超えるほど、その客層の満足度が下がる（来なくなるとは限らない）。" })
+    ]);
+    SEGMENTS.forEach(function (seg) {
+      var blocked = !Scoring.meetsRequires(seg, state);
+      var over = state.price - seg.budget;
+      var pct = Math.round((over / seg.budget) * 100);
+      var statusText, statusCls;
+      if (blocked) {
+        statusText = "設備不足で来店なし"; statusCls = "flat";
+      } else if (over <= 0) {
+        statusText = "余裕 ¥" + Math.abs(over); statusCls = "good";
+      } else {
+        statusText = "予算より +" + pct + "%（¥" + over + "オーバー）"; statusCls = "bad";
+      }
+      segSec.appendChild(h("div", { className: "staff-card" + (blocked ? "" : "") }, [
+        h("div", { className: "staff-head" }, [
+          h("span", { className: "staff-emoji", text: seg.emoji }),
+          h("span", { className: "staff-name", text: seg.name }),
+          h("span", { className: "dim", text: "予算 " + U.formatMoney(seg.budget) })
+        ]),
+        h("div", { className: "delta-row " + statusCls }, [
+          h("span", { className: "delta-mark", text: statusCls === "good" ? "▲" : (statusCls === "bad" ? "▼" : "・") }),
+          h("span", { text: statusText })
+        ])
+      ]));
+    });
+    box.appendChild(segSec);
     return box;
   }
 
@@ -542,7 +737,8 @@ window.ScreenLoop = (function () {
     if (!col) return;
     window.UI.clear(col);
     [
-      ["recipe", "🍜", "レシピ", "レシピと価格", panelRecipe],
+      ["recipe", "🍜", "レシピ", "レシピ", panelRecipe],
+      ["price", "💴", "価格", "価格", panelPrice],
       ["people", "👥", "人", "人", panelPeople],
       ["equip", "🛠", "設備", "設備", panelEquipment],
       ["data", "📊", "データ", "データ", panelData]

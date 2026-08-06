@@ -1,6 +1,15 @@
 // v01_データ_キャラクター.json を埋め込み
 window.DATA = window.DATA || {};
 window.DATA.characters = {
+  // v05: 従業員でもカードでもない「案内役」。開業から営業開始まで、同じ1人が最後まで案内する。
+  // 設定は信用金庫の開業支援担当。金を貸した側なので、その後も店に様子を見に来る理由が成立する。
+  "guide": {
+    "id": "kogane", "name": "こがね めぐみ", "name_en": "Megumi Kogane", "emoji": "👩‍💼",
+    "role": "信用金庫 開業支援担当",
+    "personality": "明るい・世話焼き・少しおせっかい",
+    "tone": "「大丈夫です、いっしょに考えましょう！」",
+    "backstory": "融資を通した本人。貸した以上、この店が続くかどうかは自分の仕事でもある。"
+  },
   "staff": [
     {
       "id": "yuta", "name": "ユウタ", "name_en": "Yuta", "emoji": "🧑‍🍳", "age": 22, "role": "麺上げ",

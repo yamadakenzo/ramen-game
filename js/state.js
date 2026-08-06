@@ -1,13 +1,16 @@
 // ゲーム状態の定義とlocalStorage永続化
 window.GameState = (function () {
-  var SAVE_KEY = "ramen_v01_save";
+  // v05 で開業フェーズのステップ構成が変わった(5問 -> 8問)ため、旧セーブは読ませない。
+  // キーごと変えているので、旧キーのデータが残っていても「続きから」に出てこない。
+  var SAVE_KEY = "ramen_v05_save";
+  var SAVE_VERSION = 2;
 
   function freshState() {
     return {
-      version: 1,
+      version: SAVE_VERSION,
       phase: "opening", // opening -> setup -> loop -> result
       openingStep: 0,
-      setupStep: 0, // 0 funding,1 property,2 recipe,3 equipment,4 staff
+      setupStep: 0, // 0 資金,1 物件,2 スープ,3 タレ,4 麺,5 具,6 設備,7 従業員
       funding: null,
       property: null,
       recipe: { soup: null, tare: null, noodle: null, topping: null },
@@ -54,7 +57,7 @@ window.GameState = (function () {
       var raw = localStorage.getItem(SAVE_KEY);
       if (!raw) return false;
       var loaded = JSON.parse(raw);
-      if (!loaded || loaded.version !== 1) return false;
+      if (!loaded || loaded.version !== SAVE_VERSION) return false;
       state = loaded;
       return true;
     } catch (e) {

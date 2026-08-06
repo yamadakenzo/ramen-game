@@ -1,5 +1,6 @@
 // 店舗の断面図とアニメーション。画像は一切使わず CSS ブロック + 絵文字だけで作る。
-// 座標系: x は舞台幅に対する % 、y は舞台の上端からの px（舞台の高さは CSS の .shop-stage と合わせる）。
+// v05: 舞台を固定枠いっぱい(9:16)に広げたので、縦位置も px ではなく舞台高さに対する % で持つ。
+// 座標系: x は舞台幅に対する %、y は舞台高さに対する %。CSS の .sv-* と同じ数値を二重に持っている。
 window.ShopView = (function () {
   var h = window.UI.h;
   var U = window.Utils;
@@ -8,17 +9,19 @@ window.ShopView = (function () {
   var EQUIP = window.DATA.property.equipment;
 
   var GEO = {
-    stageH: 250,
-    kitchenY: 30,      // 厨房で働く店員の立ち位置(上端)
-    counterSitY: 100,  // カウンター席に座った客
-    stoolY: 132,       // 丸椅子
-    tableSitY: 150,    // テーブル席に座った客
-    tableY: 178,       // テーブルの天板
-    walkY: 196,        // 床を歩いている客
-    inMinX: 6, inMaxX: 70,   // 店内の可動範囲(%)
+    kitchenY: 15,      // 厨房で働く店員の立ち位置(上端)
+    counterSitY: 43.5, // カウンター席に座った客(天板のすぐ下から頭が出る)
+    stoolY: 48.5,      // 丸椅子(座った客の足元)
+    tableSitY: 62,     // テーブル席に座った客
+    tableY: 67,        // テーブルの天板
+    walkY: 76,         // 床を歩いている客(足元が床の線に乗る)
+    inMinX: 5, inMaxX: 71,   // 店内の可動範囲(%)
     doorX: 78,               // 出入口(%)
-    queueX0: 84.5, queueGap: 2.6, queueMax: 6,
-    offX: 112                // 画面外(%)
+    // 縦長の枠では通りの幅が狭いので、行列は間隔を広く・人数を少なくして潰れないようにする
+    queueX0: 84, queueGap: 5, queueMax: 4,
+    offX: 112,               // 画面外(%)
+    // 縦長では横に並べられる席数が限られる。実際の席数より多くは描かない(絵は代表表示)
+    drawMaxCounter: 8, drawMaxTable: 4
   };
 
   var stage = null;      // 舞台のDOM
@@ -59,7 +62,10 @@ window.ShopView = (function () {
     var p = window.Scoring.getProperty(state);
     if (!p) return { counter: 8, table: 0 };
     var table = p.seats_table + (has("table_seats") ? 4 : 0);
-    return { counter: Math.min(14, p.seats_counter), table: Math.min(10, table) };
+    return {
+      counter: Math.min(GEO.drawMaxCounter, p.seats_counter),
+      table: Math.min(GEO.drawMaxTable, table)
+    };
   }
 
   function spread(n, min, max) {
@@ -106,10 +112,10 @@ window.ShopView = (function () {
 
     // 厨房(カウンターの向こう側)
     stage.appendChild(block("sv-kitchen-counter", {}));
-    var kit = [{ x: 9, e: "🍥" }];
-    if (has("big_pot")) kit.push({ x: 17, e: "🍲" }); else kit.push({ x: 17, e: "🥘" });
-    if (has("noodle_boiler")) kit.push({ x: 25, e: "♨️" });
-    if (has("extra_boiler")) kit.push({ x: 32, e: "♨️" }); // 増設した茹で麺器
+    var kit = [{ x: 8, e: "🍥" }];
+    if (has("big_pot")) kit.push({ x: 20, e: "🍲" }); else kit.push({ x: 20, e: "🥘" });
+    if (has("noodle_boiler")) kit.push({ x: 32, e: "♨️" });
+    if (has("extra_boiler")) kit.push({ x: 44, e: "♨️" }); // 増設した茹で麺器
     kit.forEach(function (k) {
       stage.appendChild(block("sv-kit-item", { left: k.x + "%" }, [h("span", { text: k.e })]));
     });
@@ -117,7 +123,7 @@ window.ShopView = (function () {
       stage.appendChild(block("sv-wall-sign", { left: "50%" }, [h("span", { text: "🌏 MENU" })]));
     }
     if (has("pos")) {
-      stage.appendChild(block("sv-kit-item", { left: "64%" }, [h("span", { text: "🖥️" })]));
+      stage.appendChild(block("sv-kit-item", { left: "62%" }, [h("span", { text: "🖥️" })]));
     }
 
     // カウンター
@@ -126,7 +132,7 @@ window.ShopView = (function () {
     // カウンター席の丸椅子
     var cx = spread(counts.counter, GEO.inMinX + 2, GEO.inMaxX - 2);
     cx.forEach(function (x) {
-      stage.appendChild(block("sv-stool", { left: x + "%", top: GEO.stoolY + "px" }));
+      stage.appendChild(block("sv-stool", { left: x + "%", top: GEO.stoolY + "%" }));
       seats.push({ x: x, sitY: GEO.counterSitY, kind: "counter", occupant: null });
     });
 
@@ -135,7 +141,7 @@ window.ShopView = (function () {
       var tx = spread(counts.table, 12, 66);
       for (var i = 0; i < tx.length; i += 2) {
         var cxx = tx[i + 1] != null ? (tx[i] + tx[i + 1]) / 2 : tx[i];
-        stage.appendChild(block("sv-table", { left: cxx + "%", top: GEO.tableY + "px" }));
+        stage.appendChild(block("sv-table", { left: cxx + "%", top: GEO.tableY + "%" }));
       }
       tx.forEach(function (x) {
         seats.push({ x: x, sitY: GEO.tableSitY, kind: "table", occupant: null });
@@ -170,7 +176,7 @@ window.ShopView = (function () {
     state.staffHired.forEach(function (id, i) {
       var def = U.findById(STAFF, id);
       if (!def) return;
-      var el = h("div", { className: "sv-staff", style: { top: GEO.kitchenY + "px", left: "20%" } }, [
+      var el = h("div", { className: "sv-staff", style: { top: GEO.kitchenY + "%", left: "20%" } }, [
         h("span", { className: "sv-body", text: def.emoji })
       ]);
       el.dataset.idx = i; // 速度変更時にディレイを掛け直すため
@@ -193,7 +199,7 @@ window.ShopView = (function () {
 
   function makeActor(segId) {
     var def = segDef(segId);
-    var el = h("div", { className: "sv-cust", style: { left: GEO.offX + "%", top: GEO.walkY + "px" } }, [
+    var el = h("div", { className: "sv-cust", style: { left: GEO.offX + "%", top: GEO.walkY + "%" } }, [
       h("span", { className: "sv-bowl", text: "🍜" }),
       h("span", { className: "sv-body", text: def ? def.emoji : "🧑" }),
       h("span", { className: "sv-bubble", text: "" })
@@ -223,7 +229,7 @@ window.ShopView = (function () {
     if (a.gone) return;
     a.el.style.transitionDuration = Math.max(16, ms / spd()) + "ms";
     a.el.style.left = x + "%";
-    if (y != null) a.el.style.top = y + "px";
+    if (y != null) a.el.style.top = y + "%";
     a.el.classList.toggle("flip", x > (parseFloat(a.el.dataset.x || GEO.offX)));
     a.el.dataset.x = x;
   }

@@ -114,6 +114,7 @@ window.EventEngine = (function () {
         case "noodle_hint": state.flags.noodleHint = true; break;
         case "noodle_quality_bonus": state.flags.noodleQualityBonus = true; break;
         case "reporter_visit": resolveReporterVisit(state); break;
+        case "rival_open": state.flags.rivalOpen = true; break;
         case "rival_cordial": state.flags.rivalCordial = true; break;
         case "tax": resolveTax(state); break;
         default: break;
@@ -142,7 +143,7 @@ window.EventEngine = (function () {
     Object.keys(state.tempBoosts || {}).forEach(function (seg) {
       snap.boosts[seg] = state.tempBoosts[seg].mult;
     });
-    ["noodleHint", "noodleQualityBonus", "rivalCordial", "forceQueueSpike"].forEach(function (k) {
+    ["noodleHint", "noodleQualityBonus", "rivalOpen", "rivalCordial", "forceQueueSpike"].forEach(function (k) {
       snap.flags[k] = !!state.flags[k];
     });
     snap.flags.weekRevenueMult = state.flags.weekRevenueMult;
@@ -216,7 +217,13 @@ window.EventEngine = (function () {
 
     if (!before.flags.noodleHint && after.flags.noodleHint) out.push(diffEntry("麺の見方が分かるようになった", 1));
     if (!before.flags.noodleQualityBonus && after.flags.noodleQualityBonus) out.push(diffEntry("麺の質にボーナスがついた", 1));
-    if (!before.flags.rivalCordial && after.flags.rivalCordial) out.push(diffEntry("向かいの店と友好関係になった", 1));
+    if (!before.flags.rivalOpen && after.flags.rivalOpen) {
+      // 友好かどうかで減り方が変わる。両方出すと同じ話を2回言うことになるので1行にまとめる
+      out.push(diffEntry("向かいにライバル店ができた（客足 " +
+        (after.flags.rivalCordial ? "-6%・挨拶したぶん軽い" : "-15%") + "）", -1));
+    } else if (!before.flags.rivalCordial && after.flags.rivalCordial) {
+      out.push(diffEntry("向かいの店と友好関係になった", 1));
+    }
     if (!before.flags.forceQueueSpike && after.flags.forceQueueSpike) out.push(diffEntry("来週、行列ができる", 0));
     if (after.flags.weekRevenueMult !== before.flags.weekRevenueMult && after.flags.weekRevenueMult != null) {
       out.push(diffEntry(after.flags.weekRevenueMult === 0 ? "今週は休業（売上ゼロ）" : ("今週の売上 ×" + after.flags.weekRevenueMult), -1));
@@ -251,12 +258,20 @@ window.EventEngine = (function () {
     return unlocked;
   }
 
-  function isEventOnCooldown(state, key, weeks) {
-    var last = state.flags["cooldown_" + key];
-    return last != null && (state.week - last) < weeks;
-  }
+  // v05: 全イベントが「1周で1回」になったのでクールダウン機構は使っていない。
+  // 季節ものを複数回出したくなったときのために枠だけ残してある(entry.cooldownKey)。
   function setCooldown(state, key) {
     state.flags["cooldown_" + key] = state.week;
+  }
+
+  // v05 密度制御: 月2〜3回 / 年25〜35回。1週に出すのは最大1件。
+  // fixed(開店初日・夏・向かいの店・家賃・決算)だけはクォータを無視して必ず出す。
+  var MONTHLY_EVENT_CAP = 3;
+  function eventsThisMonth(state) {
+    var m = U.weekToMonth(state.week);
+    var n = 0;
+    state.eventLog.forEach(function (e) { if (U.weekToMonth(e.week) === m) n++; });
+    return n;
   }
 
   // 週次でどのイベントが発生するかを判定する。density検証のため呼び出し側でログを残す。
@@ -284,10 +299,10 @@ window.EventEngine = (function () {
     if (!state.firedEventIds.firstComplaintFired && state.week >= 2 && weekStats.avgSatisfaction < 50) {
       candidates.push({ ev: getEvent("ev_first_complaint"), ctx: {}, kind: "conditional_once", once: "firstComplaintFired" });
     }
-    if (state.staffHired.indexOf("gonzo") >= 0) {
+    if (state.staffHired.indexOf("gonzo") >= 0 && !state.firedEventIds.ev_gonzo_angry) {
       var recentChanges = state.recipeChangeLog.filter(function (w) { return state.week - w <= 4; }).length;
-      if (recentChanges >= 2 && !isEventOnCooldown(state, "gonzo_angry", 6)) {
-        candidates.push({ ev: getEvent("ev_gonzo_angry"), ctx: {}, kind: "cooldown", cooldownKey: "gonzo_angry" });
+      if (recentChanges >= 2) {
+        candidates.push({ ev: getEvent("ev_gonzo_angry"), ctx: {}, kind: "once", once: "ev_gonzo_angry" });
       }
     }
     if (state.staffHired.indexOf("rin") >= 0 && weekStats.satisfactionBySeg.student != null &&
@@ -311,8 +326,9 @@ window.EventEngine = (function () {
     if (regularSat != null) {
       if (regularSat < 40) state.flags.regularLowWeeks = (state.flags.regularLowWeeks || 0) + 1;
       else state.flags.regularLowWeeks = 0;
-      if (state.flags.regularLowWeeks >= 3 && !isEventOnCooldown(state, "regular_gone", 8)) {
-        candidates.push({ ev: getEvent("ev_regular_gone"), ctx: {}, kind: "cooldown", cooldownKey: "regular_gone" });
+      // 3-2: 「空いた席」は1周で1回だけ（前回のプレイで6回出て単調になった）
+      if (state.flags.regularLowWeeks >= 3 && !state.firedEventIds.ev_regular_gone) {
+        candidates.push({ ev: getEvent("ev_regular_gone"), ctx: {}, kind: "once", once: "ev_regular_gone" });
       }
     }
 
@@ -338,15 +354,18 @@ window.EventEngine = (function () {
     }
 
     // --- random ---
-    if (candidates.length < 2 && state.week >= 2 && !isEventOnCooldown(state, "random", 3) && Math.random() < 0.07) {
-      candidates.push({ ev: getEvent("ev_soup_fail"), ctx: {}, kind: "cooldown", cooldownKey: "random" });
+    // 3-2: 「スープが違う」も1周で1回だけ
+    if (state.week >= 4 && !state.firedEventIds.ev_soup_fail && Math.random() < 0.06) {
+      candidates.push({ ev: getEvent("ev_soup_fail"), ctx: {}, kind: "once", once: "ev_soup_fail" });
     }
 
-    // 1週間で最大2件まで(密度目標: 週1〜2回)。ただしfixed(決算・家賃等)は取りこぼさない
+    // 3-3: 1週に出すのは最大1件。fixed(決算・家賃等)は月のクォータを無視して必ず出す。
     var fixed = candidates.filter(function (c) { return c.kind === "fixed"; });
+    if (fixed.length > 0) return [fixed[0]];
     var others = candidates.filter(function (c) { return c.kind !== "fixed"; });
-    var slots = Math.max(2 - fixed.length, 0);
-    return fixed.concat(others.slice(0, slots));
+    if (!others.length) return [];
+    if (eventsThisMonth(state) >= MONTHLY_EVENT_CAP) return [];
+    return [others[0]];
   }
 
   function markFired(state, entry) {

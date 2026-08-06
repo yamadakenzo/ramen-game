@@ -2,8 +2,8 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ラーメン屋経営 プロトタイプ v02</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+<title>ラーメン屋経営 プロトタイプ v05</title>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -17,10 +17,11 @@
 
   <section id="screen-result" class="screen"></section>
 
-</div>
+  <!-- イベントは「時間を止める」演出なので枠全体を覆う。枠の外には出さない -->
+  <div id="event-modal-overlay" class="modal-overlay">
+    <div id="event-modal-box" class="modal-box"></div>
+  </div>
 
-<div id="event-modal-overlay" class="modal-overlay">
-  <div id="event-modal-box" class="modal-box"></div>
 </div>
 
 <!-- データ(埋め込みJSON、file://でもfetch不要で動くようスクリプトとして読み込む) -->
@@ -29,6 +30,7 @@
 <script src="js/data/characters.js"></script>
 <script src="js/data/property.js"></script>
 <script src="js/data/events.js"></script>
+<script src="js/data/guide.js"></script>
 
 <!-- ロジック -->
 <script src="js/utils.js"></script>
@@ -39,6 +41,7 @@
 
 <!-- 画面 -->
 <script src="js/screens/opening.js"></script>
+<script src="js/screens/guide.js"></script>
 <script src="js/screens/shop-view.js"></script>
 <script src="js/screens/status-panel.js"></script>
 <script src="js/screens/setup.js"></script>

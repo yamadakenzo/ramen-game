@@ -159,7 +159,7 @@ window.StatusPanel = (function () {
   }
 
   return {
-    render: render, renderRamen: renderRamen, staffBlock: staffBlock,
-    staffStats: staffStats, rankBadge: rankBadge
+    render: render, renderRamen: renderRamen, renderStaff: renderStaff,
+    staffBlock: staffBlock, staffStats: staffStats, rankBadge: rankBadge
   };
 })();

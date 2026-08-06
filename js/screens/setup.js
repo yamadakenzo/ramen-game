@@ -1,4 +1,6 @@
-// 開業フェーズ: 資金調達 -> 物件 -> レシピ -> 設備 -> 従業員
+// 開業フェーズ（v05）: 1画面1問の会話にする。
+// 案内役が喋る -> 選択肢のカードが出る -> 選ぶ -> 案内役が一言反応する -> 次へ。
+// カードには数値を出さない（「詳しく見る」を押したときだけ出す）。
 window.ScreenSetup = (function () {
   var h = window.UI.h;
   var U = window.Utils;
@@ -6,10 +8,25 @@ window.ScreenSetup = (function () {
   var RECIPES = window.DATA.recipes;
   var PROPERTY_DATA = window.DATA.property;
   var STAFF = window.DATA.characters.staff;
+  var G = window.Guide;
 
-  var STEP_NAMES = ["資金調達", "物件", "レシピ", "設備", "従業員"];
+  // 1画面1問。レシピは4つに割って、それぞれ独立した問いにする。
+  var STEPS = [
+    { id: "funding",  kind: "funding" },
+    { id: "property", kind: "property" },
+    { id: "soup",     kind: "recipe", cat: "soup" },
+    { id: "tare",     kind: "recipe", cat: "tare" },
+    { id: "noodle",   kind: "recipe", cat: "noodle" },
+    { id: "topping",  kind: "recipe", cat: "topping" },
+    { id: "equip",    kind: "equipment" },
+    { id: "staff",    kind: "staff" }
+  ];
+  var PREVIEW_FROM = 2; // スープ以降は客層プレビューを出す
+
   var state, onDone;
+  var reactLine = null; // 選んだ直後の案内役の反応。ステップを移ると消す
 
+  // ---------- 予算 ----------
   function budgetAtPropertyStep() {
     var funding = U.findById(PROPERTY_DATA.funding, state.funding);
     return funding ? funding.amount : 0;
@@ -28,10 +45,179 @@ window.ScreenSetup = (function () {
     });
     return total;
   }
-  function remainingBudget() {
-    return budgetAtEquipmentStep() - spentOnEquipment();
+  function remainingBudget() { return budgetAtEquipmentStep() - spentOnEquipment(); }
+
+  // ---------- カード ----------
+  function signed(v) { return (v > 0 ? "+" : "") + v; }
+
+  // 4-3: カードに出すのは 名前・絵文字・一言 だけ。数値は detail 側に閉じ込める。
+  function card(opts) {
+    var el = h("div", {
+      className: "choice-card" + (opts.selected ? " selected" : "") + (opts.disabled ? " disabled" : ""),
+      onclick: function (e) {
+        if (e.target.classList.contains("detail-btn")) return;
+        if (opts.disabled) return;
+        opts.onpick();
+      }
+    }, [
+      h("div", { className: "emoji", text: opts.emoji }),
+      h("div", { className: "name", text: opts.name }),
+      h("div", { className: "blurb", text: opts.blurb }),
+      opts.locked ? h("div", { className: "locked", text: opts.locked }) : null,
+      h("button", {
+        className: "detail-btn", text: "詳しく見る",
+        onclick: function (e) { e.stopPropagation(); el.classList.toggle("show-detail"); }
+      }),
+      h("div", { className: "card-detail" }, opts.detail)
+    ]);
+    return el;
   }
 
+  function detailLines(lines) {
+    return lines.filter(function (t) { return !!t; }).map(function (t) {
+      return typeof t === "string" ? h("div", { text: t }) : t;
+    });
+  }
+
+  // ---------- 各ステップ ----------
+  function stepFunding() {
+    var grid = h("div", { className: "choice-grid" });
+    PROPERTY_DATA.funding.forEach(function (f) {
+      grid.appendChild(card({
+        emoji: f.id === "family_loan" ? "👪" : (f.id === "self_only" ? "🐖" : "🏦"),
+        name: f.name,
+        blurb: G.blurb(f.id),
+        selected: state.funding === f.id,
+        detail: detailLines([
+          "調達額 " + U.formatMoney(f.amount),
+          f.monthly_repay > 0 ? ("月々返済 " + U.formatMoney(f.monthly_repay) + " × " + f.months + "ヶ月") : "返済不要",
+          f.note
+        ]),
+        onpick: function () { pick(f.id, function () { state.funding = f.id; }); }
+      }));
+    });
+    return grid;
+  }
+
+  function stepProperty() {
+    var budget = budgetAtPropertyStep();
+    var grid = h("div", { className: "choice-grid" });
+    PROPERTY_DATA.properties.forEach(function (p) {
+      var afford = p.initial_cost <= budget;
+      grid.appendChild(card({
+        emoji: p.emoji,
+        name: p.name,
+        blurb: G.blurb(p.id),
+        selected: state.property === p.id,
+        disabled: !afford,
+        locked: afford ? null : "今の資金では手が届きません",
+        detail: detailLines([
+          "初期費用 " + U.formatMoney(p.initial_cost),
+          "家賃 " + U.formatMoney(p.rent) + " / 月",
+          "カウンター" + p.seats_counter + "席" + (p.seats_table ? " ・ テーブル" + p.seats_table + "席" : ""),
+          p.desc
+        ].concat(p.traits)),
+        onpick: function () { pick(p.id, function () { state.property = p.id; }); }
+      }));
+    });
+    return grid;
+  }
+
+  function stepRecipe(cat) {
+    var grid = h("div", { className: "choice-grid" });
+    RECIPES[cat].filter(function (item) { return item.unlock === "start"; }).forEach(function (item) {
+      grid.appendChild(card({
+        emoji: item.emoji,
+        name: item.name,
+        blurb: G.blurb(item.id),
+        selected: state.recipe[cat] === item.id,
+        detail: detailLines([
+          "コク " + signed(item.richness) + " ・ 脂 " + signed(item.oiliness) + " ・ 量 " + signed(item.volume),
+          "原価 " + item.cost + "円",
+          item.smell != null ? "匂い " + item.smell : null
+        ]),
+        onpick: function () { pick(item.id, function () { state.recipe[cat] = item.id; }); }
+      }));
+    });
+    return grid;
+  }
+
+  function stepEquipment() {
+    var wrap = h("div", {});
+    wrap.appendChild(h("div", { className: "setup-hint" }, [
+      "使えるお金：", h("span", { className: "money", text: U.formatMoney(remainingBudget()) })
+    ]));
+    var grid = h("div", { className: "choice-grid" });
+    PROPERTY_DATA.equipment.forEach(function (eq) {
+      var selected = state.equipment.indexOf(eq.id) >= 0;
+      var afford = selected || eq.cost <= remainingBudget();
+      grid.appendChild(card({
+        emoji: eq.emoji,
+        name: eq.name,
+        blurb: G.blurb(eq.id),
+        selected: selected,
+        disabled: !afford,
+        locked: afford ? null : "今の資金では手が届きません",
+        detail: detailLines([
+          U.formatMoney(eq.cost),
+          eq.effect,
+          eq.penalty ? "代償: " + eq.penalty : null,
+          eq.note
+        ]),
+        onpick: function () {
+          if (selected) {
+            state.equipment = state.equipment.filter(function (id) { return id !== eq.id; });
+            reactLine = G.unpick("equip");
+            draw();
+          } else {
+            pick(eq.id, function () { state.equipment.push(eq.id); });
+          }
+        }
+      }));
+    });
+    wrap.appendChild(grid);
+    return wrap;
+  }
+
+  function stepStaff() {
+    var wrap = h("div", {});
+    wrap.appendChild(h("div", { className: "setup-hint", text: "1〜2人まで。給与は毎月かかります。" }));
+    var grid = h("div", { className: "choice-grid wide" });
+    STAFF.forEach(function (s) {
+      var selected = state.staffHired.indexOf(s.id) >= 0;
+      var full = state.staffHired.length >= 2 && !selected;
+      grid.appendChild(card({
+        emoji: s.emoji,
+        name: s.name + "（" + s.role + "）",
+        blurb: G.blurb(s.id),
+        selected: selected,
+        disabled: full,
+        locked: full ? "これ以上は雇えません" : null,
+        detail: detailLines([
+          "給与 " + U.formatMoney(s.wage) + " / 月",
+          h("div", { style: { margin: "4px 0" } }, [
+            window.StatusPanel.rankBadge(window.Scoring.staffRating(s).rank),
+            h("span", { text: " 総合 " + window.Scoring.staffRating(s).avg })
+          ]),
+          window.StatusPanel.staffStats(s),
+          s.personality + " / " + s.traits.join(" / ")
+        ]),
+        onpick: function () {
+          if (selected) {
+            state.staffHired = state.staffHired.filter(function (id) { return id !== s.id; });
+            reactLine = G.unpick("staff");
+            draw();
+          } else {
+            pick(s.id, function () { state.staffHired.push(s.id); });
+          }
+        }
+      }));
+    });
+    wrap.appendChild(grid);
+    return wrap;
+  }
+
+  // ---------- 4-5: 客層プレビュー ----------
   function previewState() {
     // 未選択のスロットにはデフォルトを仮当てして常にプレビューできるようにする
     return {
@@ -44,16 +230,22 @@ window.ScreenSetup = (function () {
       },
       equipment: state.equipment,
       staffHired: state.staffHired,
-      price: state.price
+      price: state.price,
+      flags: {}
     };
   }
 
   function renderPreview() {
     var ps = previewState();
     var prop = U.findById(PROPERTY_DATA.properties, ps.property);
-    var wrap = h("div", { className: "pixel-panel" }, [
-      window.StatusPanel.renderRamen(ps),
-      h("h3", { text: "この組み合わせで刺さる客層" }),
+    var r = window.Scoring.ramenScore(ps);
+    var wrap = h("div", { className: "setup-preview" }, [
+      h("div", { className: "preview-head" }, [
+        h("span", { text: "🍜 いまの完成度" }),
+        window.StatusPanel.rankBadge(r.rank),
+        h("span", { className: "money", text: String(r.score) }),
+        h("span", { className: "dim", text: "／ 刺さる客層" })
+      ]),
       h("div", { className: "segment-preview", id: "segment-preview-list" })
     ]);
     var list = wrap.querySelector("#segment-preview-list");
@@ -65,13 +257,12 @@ window.ScreenSetup = (function () {
       }
       var flow = prop && prop.segment_flow[seg.id] != null ? prop.segment_flow[seg.id] : 0.5;
       var lit = meets && sat >= 55 && flow >= 0.6;
-      var pct = U.clamp(sat, 0, 100);
       var chip = h("div", { className: "segment-chip" + (lit ? " lit" : "") + (!meets ? " blocked" : "") }, [
         h("span", { text: seg.emoji }),
         h("div", {}, [
           h("div", { text: seg.name }),
           h("div", { className: "bar" }, [
-            h("div", { className: "bar-fill", style: { width: pct + "%" } })
+            h("div", { className: "bar-fill", style: { width: U.clamp(sat, 0, 100) + "%" } })
           ])
         ])
       ]);
@@ -81,203 +272,92 @@ window.ScreenSetup = (function () {
     return wrap;
   }
 
-  function renderStepBar() {
-    var bar = h("div", { className: "setup-steps" });
-    STEP_NAMES.forEach(function (name, i) {
-      var cls = "step" + (i === state.setupStep ? " active" : "") + (i < state.setupStep ? " done" : "");
-      bar.appendChild(h("div", { className: cls, text: (i + 1) + ". " + name, onclick: function () {
-        // 完了済みのステップへは自由に戻れる
-        if (i <= state.setupStep) { state.setupStep = i; draw(); }
-      } }));
+  // ---------- 進行 ----------
+  function pick(itemId, apply) {
+    apply();
+    reactLine = G.react(itemId); // 4-4: 選んだことに反応を返してから次へ
+    draw();
+  }
+
+  function canProceed() {
+    var step = STEPS[state.setupStep];
+    switch (step.kind) {
+      case "funding": return !!state.funding;
+      case "property": return !!state.property;
+      case "recipe": return !!state.recipe[step.cat];
+      case "equipment": return true;
+      case "staff": return state.staffHired.length >= 1;
+      default: return true;
+    }
+  }
+
+  function body() {
+    var step = STEPS[state.setupStep];
+    if (step.kind === "funding") return stepFunding();
+    if (step.kind === "property") return stepProperty();
+    if (step.kind === "recipe") return stepRecipe(step.cat);
+    if (step.kind === "equipment") return stepEquipment();
+    return stepStaff();
+  }
+
+  function stepDots() {
+    var bar = h("div", { className: "step-dots" });
+    STEPS.forEach(function (s, i) {
+      bar.appendChild(h("div", {
+        className: "dot" + (i === state.setupStep ? " active" : (i < state.setupStep ? " done" : ""))
+      }));
     });
     return bar;
   }
 
-  function stepFunding() {
-    var grid = h("div", { className: "choice-grid" });
-    PROPERTY_DATA.funding.forEach(function (f) {
-      var selected = state.funding === f.id;
-      grid.appendChild(h("div", {
-        className: "choice-card" + (selected ? " selected" : ""),
-        onclick: function () { state.funding = f.id; draw(); }
-      }, [
-        h("div", { className: "name", text: f.name }),
-        h("div", { className: "cost", text: U.formatMoney(f.amount) }),
-        h("div", { className: "sub", text: f.monthly_repay > 0 ? ("月々返済 " + U.formatMoney(f.monthly_repay) + " × " + f.months + "ヶ月") : "返済不要" }),
-        h("div", { className: "sub", text: f.note })
-      ]));
-    });
-    return h("div", {}, [
-      h("h2", { text: "1. 資金調達" }),
-      h("p", { className: "dim", text: "開業資金をどう用意するか。返済の重さが後々効いてくる。" }),
-      grid
-    ]);
-  }
-
-  function stepProperty() {
-    var budget = budgetAtPropertyStep();
-    var grid = h("div", { className: "choice-grid" });
-    PROPERTY_DATA.properties.forEach(function (p) {
-      var afford = p.initial_cost <= budget;
-      var selected = state.property === p.id;
-      var card = h("div", {
-        className: "choice-card" + (selected ? " selected" : "") + (!afford ? " disabled" : ""),
-        onclick: function () { if (afford) { state.property = p.id; draw(); } }
-      }, [
-        h("div", { className: "emoji", text: p.emoji }),
-        h("div", { className: "name", text: p.name }),
-        h("div", { className: "cost", text: U.formatMoney(p.initial_cost) + (afford ? "" : "(資金不足)") }),
-        h("div", { className: "sub", text: "家賃 " + U.formatMoney(p.rent) + "/月 ・ カウンター" + p.seats_counter + "席" + (p.seats_table ? " ・ テーブル" + p.seats_table + "席" : "") }),
-        h("div", { className: "sub", text: p.desc })
-      ]);
-      grid.appendChild(card);
-    });
-    return h("div", {}, [
-      h("h2", { text: "2. 物件" }),
-      h("p", { className: "dim", text: "資金: " + U.formatMoney(budget) + "（手が届かない物件も並べて表示している）" }),
-      grid
-    ]);
-  }
-
-  function stepRecipe() {
-    var box = h("div", {});
-    box.appendChild(h("h2", { text: "3. 初期レシピ" }));
-    box.appendChild(h("p", { className: "dim", text: "スープ・タレ・麺・トッピングを各1つ選ぶ。" }));
-    var cats = [["soup", "スープ"], ["tare", "タレ"], ["noodle", "麺"], ["topping", "トッピング"]];
-    cats.forEach(function (c) {
-      var key = c[0], label = c[1];
-      box.appendChild(h("h3", { text: label }));
-      var grid = h("div", { className: "choice-grid" });
-      RECIPES[key].filter(function (item) { return item.unlock === "start"; }).forEach(function (item) {
-        var selected = state.recipe[key] === item.id;
-        grid.appendChild(h("div", {
-          className: "choice-card" + (selected ? " selected" : ""),
-          onclick: function () { state.recipe[key] = item.id; draw(); }
-        }, [
-          h("div", { className: "emoji", text: item.emoji }),
-          h("div", { className: "name", text: item.name }),
-          h("div", { className: "cost", text: "原価 " + item.cost + "円" }),
-          item.smell != null ? h("div", { className: "sub", text: "匂い " + item.smell }) : null
-        ]));
-      });
-      box.appendChild(grid);
-    });
-    return box;
-  }
-
-  function stepEquipment() {
-    var budget = budgetAtEquipmentStep();
-    var remain = remainingBudget();
-    var grid = h("div", { className: "choice-grid" });
-    PROPERTY_DATA.equipment.forEach(function (eq) {
-      var selected = state.equipment.indexOf(eq.id) >= 0;
-      var afford = selected || eq.cost <= remain;
-      grid.appendChild(h("div", {
-        className: "choice-card" + (selected ? " selected" : "") + (!afford ? " disabled" : ""),
-        onclick: function () {
-          if (selected) {
-            state.equipment = state.equipment.filter(function (id) { return id !== eq.id; });
-          } else if (afford) {
-            state.equipment.push(eq.id);
-          }
-          draw();
-        }
-      }, [
-        h("div", { className: "emoji", text: eq.emoji }),
-        h("div", { className: "name", text: eq.name }),
-        h("div", { className: "cost", text: U.formatMoney(eq.cost) }),
-        h("div", { className: "sub", text: eq.effect }),
-        eq.penalty ? h("div", { className: "sub bad", text: eq.penalty }) : null
-      ]));
-    });
-    return h("div", {}, [
-      h("h2", { text: "4. 初期設備" }),
-      h("p", { className: "dim", text: "残り資金: " + U.formatMoney(remain) + " / 開業資金 " + U.formatMoney(budget) }),
-      grid
-    ]);
-  }
-
-  function stepStaff() {
-    var grid = h("div", { className: "choice-grid" });
-    STAFF.forEach(function (s) {
-      var selected = state.staffHired.indexOf(s.id) >= 0;
-      var full = state.staffHired.length >= 2 && !selected;
-      grid.appendChild(h("div", {
-        className: "choice-card" + (selected ? " selected" : "") + (full ? " disabled" : ""),
-        onclick: function () {
-          if (selected) {
-            state.staffHired = state.staffHired.filter(function (id) { return id !== s.id; });
-          } else if (!full) {
-            state.staffHired.push(s.id);
-          }
-          draw();
-        }
-      }, [
-        h("div", { className: "emoji" }, [s.emoji, " ", window.StatusPanel.rankBadge(window.Scoring.staffRating(s).rank)]),
-        h("div", { className: "name", text: s.name + "（" + s.role + "）" }),
-        h("div", { className: "cost", text: U.formatMoney(s.wage) + "/月" }),
-        window.StatusPanel.staffStats(s),
-        h("div", { className: "sub", text: s.personality }),
-        h("div", { className: "sub", text: s.traits.join(" / ") })
-      ]));
-    });
-    return h("div", {}, [
-      h("h2", { text: "5. 従業員" }),
-      h("p", { className: "dim", text: "1〜2人雇用する（給与が月々かかる）。現在 " + state.staffHired.length + "人選択中。" }),
-      grid
-    ]);
-  }
-
-  function canProceed() {
-    switch (state.setupStep) {
-      case 0: return !!state.funding;
-      case 1: return !!state.property;
-      case 2: return state.recipe.soup && state.recipe.tare && state.recipe.noodle && state.recipe.topping;
-      case 3: return true;
-      case 4: return state.staffHired.length >= 1;
-      default: return true;
-    }
+  function go(delta) {
+    state.setupStep = U.clamp(state.setupStep + delta, 0, STEPS.length - 1);
+    reactLine = null;
+    draw();
   }
 
   function commitAndStart() {
     state.money = remainingBudget();
     var funding = U.findById(PROPERTY_DATA.funding, state.funding);
     state.loan = { monthlyRepay: funding.monthly_repay, monthsLeft: funding.months };
-    state.staffHired.forEach(function (id) {
-      window.EventEngine.ensureStaffState(state, id);
-    });
+    state.staffHired.forEach(function (id) { window.EventEngine.ensureStaffState(state, id); });
     if (state.staffHired.indexOf("yuta") >= 0) state.flags.yutaHireWeek = 1;
     window.EventEngine.initRun(state);
     window.GameState.save();
     onDone();
   }
 
-  var stepRenderers = [stepFunding, stepProperty, stepRecipe, stepEquipment, stepStaff];
-
   function draw() {
     var root = document.getElementById("screen-setup");
     window.UI.clear(root);
-    root.appendChild(renderStepBar());
-    root.appendChild(stepRenderers[state.setupStep]());
-    if (state.setupStep >= 2) root.appendChild(renderPreview());
+    var step = STEPS[state.setupStep];
+    var last = state.setupStep === STEPS.length - 1;
 
-    var footer = h("div", { className: "setup-footer" }, [
+    root.appendChild(G.bar(reactLine || G.ask(step.id), !!reactLine));
+    root.appendChild(stepDots());
+
+    var scroll = h("div", { className: "scroll-area setup-body" }, [body()]);
+    root.appendChild(scroll);
+
+    if (state.setupStep >= PREVIEW_FROM) root.appendChild(renderPreview());
+
+    root.appendChild(h("div", { className: "setup-footer" }, [
       h("button", {
-        className: "btn", text: "戻る", disabled: state.setupStep === 0 ? "disabled" : null,
-        onclick: function () { if (state.setupStep > 0) { state.setupStep--; draw(); } }
+        className: "btn small", text: "戻る",
+        disabled: state.setupStep === 0 ? "disabled" : null,
+        onclick: function () { go(-1); }
       }),
-      state.setupStep < 4
-        ? h("button", { className: "btn primary", text: "次へ", disabled: canProceed() ? null : "disabled",
-            onclick: function () { state.setupStep++; draw(); } })
-        : h("button", { className: "btn primary", text: "開業する！", disabled: canProceed() ? null : "disabled",
-            onclick: commitAndStart })
-    ]);
-    root.appendChild(footer);
+      last
+        ? h("button", { className: "btn primary", text: "開業する！", disabled: canProceed() ? null : "disabled", onclick: commitAndStart })
+        : h("button", { className: "btn primary", text: "次へ", disabled: canProceed() ? null : "disabled", onclick: function () { go(1); } })
+    ]));
   }
 
   function render(gameState, doneCb) {
     state = gameState;
     onDone = doneCb;
+    if (state.setupStep >= STEPS.length) state.setupStep = STEPS.length - 1;
+    reactLine = null;
     draw();
   }
 

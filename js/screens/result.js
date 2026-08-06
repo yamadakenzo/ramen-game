@@ -34,8 +34,11 @@ window.ScreenResult = (function () {
   }
 
   function render(state) {
-    var root = document.getElementById("screen-result");
-    window.UI.clear(root);
+    var screen = document.getElementById("screen-result");
+    window.UI.clear(screen);
+    // 固定枠の中に収める。スクロールしてよいのはこの中だけ。
+    var root = h("div", { className: "scroll-area result-body" });
+    screen.appendChild(root);
 
     var totalRevenue = 0, totalFoodCost = 0, totalFixed = 0, totalProfit = 0;
     state.history.forEach(function (rec) {
@@ -53,8 +56,6 @@ window.ScreenResult = (function () {
       h("div", { className: "catch", text: "「" + catchphrase(totals) + "」" })
     ]));
 
-    var grid = h("div", { className: "result-grid" });
-
     var financePanel = h("div", { className: "pixel-panel" }, [
       h("h2", { text: "年間収支" }),
       h("p", {}, ["年間売上: ", h("span", { className: "money", text: U.formatMoney(totalRevenue) })]),
@@ -65,7 +66,7 @@ window.ScreenResult = (function () {
       h("p", {}, ["最終所持金: ", h("span", { className: "money", text: U.formatMoney(state.money) })]),
       h("p", {}, ["借入残高: ", h("span", { text: U.formatMoney(loanBalance) })])
     ]);
-    grid.appendChild(financePanel);
+    root.appendChild(financePanel);
 
     var chartPanel = h("div", { className: "pixel-panel" });
     chartPanel.appendChild(h("h2", { text: "客層別 年間来店数" }));
@@ -80,9 +81,7 @@ window.ScreenResult = (function () {
       ]));
     });
     chartPanel.appendChild(chart);
-    grid.appendChild(chartPanel);
-
-    root.appendChild(grid);
+    root.appendChild(chartPanel);
 
     var staffPanel = h("div", { className: "pixel-panel" });
     staffPanel.appendChild(h("h2", { text: "従業員の状態" }));

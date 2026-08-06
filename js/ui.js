@@ -34,12 +34,9 @@ window.UI = (function () {
   function toast(msg, ms) {
     var box = document.getElementById("toast-box");
     if (!box) {
-      box = h("div", { id: "toast-box", style: {
-        position: "fixed", bottom: "16px", left: "50%", transform: "translateX(-50%)",
-        background: "#2b2118", border: "3px solid #e8a13b", color: "#f0e6d2",
-        padding: "10px 18px", zIndex: 100, fontSize: "0.85rem", boxShadow: "3px 3px 0 rgba(0,0,0,0.5)"
-      }});
-      document.body.appendChild(box);
+      // 固定枠の中に置く。body に付けるとレターボックスの余白に出てしまう
+      box = h("div", { id: "toast-box" });
+      (document.getElementById("app") || document.body).appendChild(box);
     }
     box.textContent = msg;
     box.style.display = "block";

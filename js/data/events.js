@@ -3,9 +3,12 @@
 //      結果が状況で分岐するものだけ関数 (state, ctx) => string を許容する。
 window.DATA = window.DATA || {};
 window.DATA.events = {
+  // v05: 密度目標を「週1〜2回」から「月2〜3回」に下げた。
+  // 元の v01_データ_イベント.json の _density_target は古い。こちらを正とする。
   "_density_target": {
-    "month_1_2": "週2回", "month_3_8": "週1回", "month_9_12": "週1.5回",
-    "note": "1年=52週として合計60〜70イベント程度。うち固定20、ランダム40〜50"
+    "per_month": "2〜3回", "per_year": "25〜35回",
+    "per_week_max": 1,
+    "note": "同一イベントは1周(52週)で1回のみ。例外は季節・決算・家賃など固定イベントだけ。実装上の上限は js/event-engine.js の MONTHLY_EVENT_CAP / 1週1件。"
   },
   "events": [
     {
@@ -14,11 +17,11 @@ window.DATA.events = {
       "text": "暖簾を出した。誰も来ない時間が30分続いた。……そして一人目が入ってきた。",
       "choices": [
         {
-          "label": "深く頭を下げる", "effect": { "regular_flow": 5 },
+          "label": "深く頭を下げる", "effect": { "regular_flow": 8, "oldman_rel": 10 },
           "react_who": "🧓 最初の客", "react": "「そんなに畏まらんでいい。ラーメン、一つ」"
         },
         {
-          "label": "黙って湯切りをする", "effect": { "staff_morale": 3 },
+          "label": "黙って湯切りをする", "effect": { "staff_morale": 8, "reputation": 3 },
           "react_who": "🧓 最初の客", "react": "「……ふうん。そういう店か」"
         }
       ]
@@ -29,15 +32,15 @@ window.DATA.events = {
       "text": "「これ、ぬるいよ」。カウンターの端の客が箸を置いた。",
       "choices": [
         {
-          "label": "作り直す", "effect": { "money": -600, "reputation": 2 },
+          "label": "作り直す", "effect": { "money": -600, "reputation": 2, "oldman_rel": 10 },
           "react_who": "🍜 苦情の客", "react": "「……ああ、今度は熱い。うん、これでいい」"
         },
         {
-          "label": "謝って値引き", "effect": { "money": -400, "reputation": 0 },
+          "label": "謝って値引き", "effect": { "money": -400, "oldman_rel": 3 },
           "react_who": "🍜 苦情の客", "react": "「まあいいよ。金の問題じゃないんだけどね」"
         },
         {
-          "label": "何も言わない", "effect": { "reputation": -8 },
+          "label": "何も言わない", "effect": { "reputation": -8, "oldman_rel": -15 },
           "react_who": "🍜 苦情の客", "react": "「……そう」半分残して、黙って出ていった。"
         }
       ]
@@ -171,21 +174,22 @@ window.DATA.events = {
     {
       "id": "ev_rival_arrive", "trigger": "fixed", "when": "month_8",
       "title": "向かいに、何かできる",
-      "text": "向かいの空き店舗に工事が入った。看板が上がるまで、あと二週間。",
+      "text": "向かいの空き店舗に工事が入った。看板が上がるまで、あと二週間。ラーメン屋だ。",
       "choices": [
         {
-          "label": "様子を見る", "effect": {},
-          "react_who": "", "react": "何もしなかった。看板が上がるのを、ただ見ていた。"
+          "label": "様子を見る", "effect": { "rival_open": true },
+          "react_who": "", "react": "何もしなかった。看板が上がるのを、ただ見ていた。客が少し流れた。"
         },
         {
-          "label": "先手を打って値下げ", "effect": { "price_delta": -100, "reputation": -3 },
+          "label": "先手を打って値下げ", "effect": { "rival_open": true, "price_delta": -100, "reputation": -3 },
           "react_who": "🧓 常連", "react": "「……安くなったな。何かあったのか？」"
         },
         {
-          "label": "挨拶に行く", "effect": { "rival_cordial": true },
+          "label": "挨拶に行く", "effect": { "rival_open": true, "rival_cordial": true },
           "react_who": "🍜 向かいの店主", "react": "「ご丁寧にどうも。……お互い、やりましょう」"
         }
-      ]
+      ],
+      "note": "v05: どの選択肢でも向かいに店はできる(rival_open)。差が出るのは客足の減り方"
     },
     {
       "id": "ev_staff_quit", "trigger": "conditional", "when": "staff_morale < 30 が2週間継続",
@@ -216,7 +220,7 @@ window.DATA.events = {
           "react_who": "", "react": "暖簾は出さなかった。常連が三人、戸の前で引き返していった。"
         },
         {
-          "label": "そのまま出す", "effect": { "satisfaction_hit": -25, "regular_rel": -20 },
+          "label": "そのまま出す", "effect": { "satisfaction_hit": -25, "regular_rel": -20, "oldman_rel": -15 },
           "react_who": "🧓 うるさい常連", "react": "「今日のスープ、違うな。……分かってて出したのか」"
         },
         {
@@ -257,15 +261,15 @@ window.DATA.events = {
       "text": "いつもの席が、三日続けて空いている。",
       "choices": [
         {
-          "label": "気にしない", "effect": { "regular_flow": -30 },
+          "label": "気にしない", "effect": { "regular_flow": -30, "oldman_rel": -10 },
           "react_who": "", "react": "席は、それからずっと空いたままだった。"
         },
         {
-          "label": "様子を見に行く", "effect": { "regular_rel": 15, "money": -3000 },
+          "label": "様子を見に行く", "effect": { "regular_rel": 15, "oldman_rel": 15, "money": -3000 },
           "react_who": "🧓 常連", "react": "「……なんだ、わざわざ来たのか」湯呑みを置いて、少し笑った。"
         }
       ],
-      "note": "数字ではなく席が空くことで見せる"
+      "note": "数字ではなく席が空くことで見せる。v05: 1周に1回だけ"
     },
     {
       "id": "ev_menya_gonzo_combo", "trigger": "combo", "combo_id": "menya_gonzo",

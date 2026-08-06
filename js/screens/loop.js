@@ -1,9 +1,13 @@
-// 営業ループ本体: 週の自動進行、速度調整、客のアニメーション、プレイヤー操作
+// 営業ループ本体（v05）
+//  - 店の絵を固定枠いっぱいに広げ、その上に情報とボタンを重ねる
+//  - パネルは下半分だけ。上半分の店は見えたまま残す（レシピを変えた瞬間の客の反応が同じ画面で見える）
+//  - 週の終わりに一拍止めて、起きたことを1行の言葉にする
 window.ScreenLoop = (function () {
   var h = window.UI.h;
   var U = window.Utils;
   var Scoring = window.Scoring;
   var EE = window.EventEngine;
+  var G = window.Guide;
   var SEGMENTS = window.DATA.segments.segments;
   var RECIPES = window.DATA.recipes;
   var PROPERTY_DATA = window.DATA.property;
@@ -12,37 +16,43 @@ window.ScreenLoop = (function () {
 
   var state, onGameOver;
   var tickTimer = null;
+  var flashTimer = null;
   var TALK_COST = 1200;
   var TALK_GAIN = 8;
+  // 満足/不満の分け目。この値以上を「満足して帰った客」として数える
+  var SATISFIED_LINE = 55;
   // 直近の週次計算結果。設備変更などで店の絵を組み直すときに再利用する。
   var lastFinance = null, lastCustomers = null;
+  var openSheetKey = null, sheetBuilder = null;
 
   function findStaffDef(id) { return U.findById(STAFF, id); }
-  function findCardDef(id) { return U.findById(CARDS, id); }
 
+  // 2-1: ×1 の実速度を v02 の 1/3（1100ms -> 3300ms）に落とす
   function speedToMs(speed) {
     if (speed === 0) return null;
-    return { 1: 1100, 2: 550, 4: 260 }[speed];
+    return { 1: 3300, 2: 1650, 4: 825 }[speed];
   }
+  // 2-2: 週の終わりの「一拍」。×1 で 0.5 秒、速度倍率に連動して短縮する
+  function beatMs() { return state.speed > 0 ? 500 / state.speed : 0; }
 
   function clearTick() { if (tickTimer) { clearTimeout(tickTimer); tickTimer = null; } }
 
-  function scheduleTick() {
+  function scheduleTick(extraMs) {
     clearTick();
     if (!state.running) return;
     var ms = speedToMs(state.speed);
     if (!ms) return;
-    tickTimer = setTimeout(function () {
-      processWeek();
-    }, ms);
+    tickTimer = setTimeout(processWeek, ms + (extraMs || 0));
   }
 
   function setSpeed(n) {
     state.speed = n;
     window.ShopView.syncSpeed();
-    if (state.eventModalActive) { renderHUD(); return; } // モーダル表示中は再開しない
+    if (n === 0) hideFlash();
+    if (state.eventModalActive) { renderTopBar(); return; } // モーダル表示中は再開しない
     state.running = n > 0;
-    renderHUD();
+    renderTopBar();
+    renderSpeedDock();
     if (n > 0) scheduleTick(); else clearTick();
   }
 
@@ -59,19 +69,23 @@ window.ScreenLoop = (function () {
     return { rent: rent, wages: wages, loanPay: loanPay, total: rent + wages + loanPay };
   }
 
+  // ---------- 週の進行 ----------
   function processWeek() {
     if (state.week > 52) { finishGame(); return; }
     if (state.eventModalActive) return; // モーダル応答待ちの間は絶対に進めない
+
+    var prev = state.history.length ? state.history[state.history.length - 1] : null;
+    var repBefore = state.reputation;
+    var moneyBefore = state.money;
 
     var customers = Scoring.computeWeeklyCustomers(state);
     var finance = Scoring.computeWeeklyFinance(state, customers);
     var avgSat = Scoring.weightedAvgSatisfaction(customers);
     state.lastAvgSatisfaction = avgSat;
 
-    var monthlyCosts = 0, breakdown = null;
+    var monthlyCosts = 0;
     if (U.isFirstWeekOfMonth(state.week)) {
-      breakdown = monthlyCostBreakdown();
-      monthlyCosts = breakdown.total;
+      monthlyCosts = monthlyCostBreakdown().total;
       state.money -= monthlyCosts;
       if (state.loan.monthsLeft > 0) state.loan.monthsLeft--;
     }
@@ -98,10 +112,14 @@ window.ScreenLoop = (function () {
     state.flags.weekSatisfactionHit = null;
     state.flags.forceQueueSpike = false;
 
-    var unlocks = EE.checkCardUnlocks(state);
-    unlocks.forEach(function (u) { window.UI.toast(u.text, 3200); });
+    EE.checkCardUnlocks(state).forEach(function (u) { window.UI.toast(u.text, 3200); });
 
     renderAll(finance, customers);
+    showWeekFlash(finance, customers);
+    emitFloats(prev, finance, state.reputation - repBefore, state.money - moneyBefore);
+
+    var guideLine = G.checkAuto(state, { profit: profit, queueLevel: customers.queueLevel });
+    if (guideLine) G.say(guideLine);
 
     var events = EE.checkWeeklyEvents(state, weekStats);
     if (events.length > 0) {
@@ -110,12 +128,15 @@ window.ScreenLoop = (function () {
       state.running = false;
       state.eventModalActive = true;
       clearTick();
+      closeSheet();      // イベントは全画面で覆うので、開いているパネルは畳む
+      hideFlash();
       window.ScreenEventModal.showQueue(state, events, function () {
         state.eventModalActive = false;
         state.week++;
         window.GameState.save();
         if (state.week > 52) { finishGame(); return; }
-        renderHUD();
+        renderTopBar();
+        refreshShop();
         if (wasRunning && state.speed > 0) { state.running = true; scheduleTick(); }
       });
       return;
@@ -124,11 +145,14 @@ window.ScreenLoop = (function () {
     state.week++;
     window.GameState.save();
     if (state.week > 52) { finishGame(); return; }
-    scheduleTick();
+    scheduleTick(beatMs());
   }
 
   function finishGame() {
     clearTick();
+    hideFlash();
+    closeSheet();
+    G.hide();
     window.ShopView.destroy();
     state.running = false;
     console.log("=== イベント密度ログ ===");
@@ -136,123 +160,164 @@ window.ScreenLoop = (function () {
     onGameOver();
   }
 
+  // ---------- 2-2: 週の結果を1行で ----------
+  function satSplit(finance, customers) {
+    var good = 0, bad = 0;
+    Object.keys(finance.bySegment).forEach(function (id) {
+      var n = finance.bySegment[id];
+      if (!n) return;
+      var s = customers.results[id] ? customers.results[id].satisfaction : null;
+      if (s != null && s >= SATISFIED_LINE) good += n; else bad += n;
+    });
+    return { good: good, bad: bad };
+  }
+
+  function hideFlash() {
+    if (flashTimer) { clearTimeout(flashTimer); flashTimer = null; }
+    var el = document.getElementById("week-flash");
+    if (el) el.classList.remove("show");
+  }
+
+  function showWeekFlash(finance, customers) {
+    var el = document.getElementById("week-flash");
+    if (!el) return;
+    if (state.speed === 0) { el.classList.remove("show"); return; } // 「停止」中は出さない
+    var s = satSplit(finance, customers);
+    el.textContent = "今週：客" + finance.totalCustomers + "人 / 満足" + s.good + "・不満" + s.bad +
+      " / 売上 " + U.formatMoney(finance.revenue);
+    el.classList.add("show");
+    if (flashTimer) clearTimeout(flashTimer);
+    flashTimer = setTimeout(function () { el.classList.remove("show"); },
+      (speedToMs(state.speed) || 1200) + beatMs());
+  }
+
+  // ---------- 2-3: 変化した瞬間に絵の上へ浮かせる ----------
+  function floatUp(text, cls, x, y, delay) {
+    var layer = document.getElementById("float-layer");
+    if (!layer) return;
+    setTimeout(function () {
+      if (!document.getElementById("float-layer")) return;
+      var el = h("div", { className: "float-item " + cls, text: text, style: { left: x + "%", top: y + "%" } });
+      layer.appendChild(el);
+      setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 1800);
+    }, delay || 0);
+  }
+
+  function emitFloats(prev, finance, repDelta, moneyDelta) {
+    if (state.speed === 0) return;
+    var d = 0;
+    if (prev) {
+      var dc = finance.totalCustomers - prev.totalCustomers;
+      if (Math.abs(dc) >= 1) {
+        floatUp((dc > 0 ? "+" : "") + dc + "人", dc > 0 ? "good" : "bad", 30, 46, d); d += 200;
+      }
+    }
+    if (Math.abs(repDelta) >= 0.4) {
+      floatUp("評判 " + (repDelta > 0 ? "↑" : "↓"), repDelta > 0 ? "good" : "bad", 52, 40, d); d += 200;
+    }
+    if (Math.abs(moneyDelta) >= 10000) {
+      floatUp((moneyDelta > 0 ? "+" : "-") + U.formatMoneyShort(Math.abs(moneyDelta)),
+        moneyDelta > 0 ? "money" : "bad", 70, 50, d);
+    }
+  }
+
   // ---------- 描画 ----------
-  function renderHUD() {
-    var root = document.getElementById("hud-area");
+  function renderTopBar() {
+    var root = document.getElementById("top-bar");
     if (!root) return;
     window.UI.clear(root);
-    var month = U.weekToMonth(state.week > 52 ? 52 : state.week);
-    var moraleAvg = state.staffHired.length ? Math.round(state.staffHired.reduce(function (s, id) { return s + EE.ensureStaffState(state, id).morale; }, 0) / state.staffHired.length) : 0;
+    var wk = Math.min(state.week, 52);
+    var month = U.weekToMonth(wk);
+    var queued = lastCustomers && lastCustomers.queueLevel > 0.1;
 
-    root.appendChild(h("div", { className: "hud-item" }, [h("div", { className: "hud-label", text: "週" }), h("div", { className: "hud-value", text: (Math.min(state.week, 52)) + " / 52" })]));
-    root.appendChild(h("div", { className: "hud-item" }, [h("div", { className: "hud-label", text: "月" }), h("div", { className: "hud-value", text: month + "月" })]));
-    root.appendChild(h("div", { className: "hud-item" }, [h("div", { className: "hud-label", text: "所持金" }), h("div", { className: "hud-value money", text: U.formatMoneyShort(state.money) })]));
-    root.appendChild(h("div", { className: "hud-item" }, [h("div", { className: "hud-label", text: "評判" }), h("div", { className: "hud-value", text: Math.round(state.reputation) })]));
-    root.appendChild(h("div", { className: "hud-item" }, [h("div", { className: "hud-label", text: "価格" }), h("div", { className: "hud-value", text: state.price + "円" })]));
+    function item(label, value, cls) {
+      return h("div", { className: "ti" }, [
+        h("div", { className: "tl", text: label }),
+        h("div", { className: "tv" + (cls ? " " + cls : ""), text: value })
+      ]);
+    }
+    root.appendChild(item("日付", month + "月 " + U.weekOfMonth(wk) + "週目"));
+    root.appendChild(item("所持金", U.formatMoneyShort(state.money), "money"));
+    root.appendChild(item("今週の客", (lastFinance ? lastFinance.totalCustomers : 0) + "人"));
+    root.appendChild(item("評判", String(Math.round(state.reputation))));
+    if (queued) root.appendChild(h("div", { className: "ti queue-mark", text: "🚶行列" }));
+  }
 
-    var staffStrip = h("div", { className: "staff-strip" });
-    state.staffHired.forEach(function (id) {
-      var def = findStaffDef(id);
-      var s = EE.ensureStaffState(state, id);
-      var color = s.morale >= 60 ? "#6fbf5c" : (s.morale >= 30 ? "#e8a13b" : "#d9534f");
-      staffStrip.appendChild(h("div", { className: "staff-badge" }, [
-        h("span", { text: def.emoji }),
-        h("span", { text: def.name }),
-        h("span", { className: "morale-dot", style: { background: color } })
-      ]));
-    });
-    root.appendChild(staffStrip);
-
-    var speedBox = h("div", { className: "speed-controls" });
-    [[0, "停止"], [1, "×1"], [2, "×2"], [4, "×4"]].forEach(function (pair) {
-      speedBox.appendChild(h("button", {
+  function renderSpeedDock() {
+    var dock = document.getElementById("speed-dock");
+    if (!dock) return;
+    window.UI.clear(dock);
+    [[0, "■"], [1, "×1"], [2, "×2"], [4, "×4"]].forEach(function (pair) {
+      dock.appendChild(h("button", {
         className: "btn small" + (state.speed === pair[0] ? " selected" : ""),
         text: pair[1],
         onclick: function () { setSpeed(pair[0]); }
       }));
     });
-    root.appendChild(speedBox);
   }
 
-  function refreshShop() {
-    window.ShopView.update(state, lastFinance, lastCustomers);
-  }
-
-  function renderStatus() {
-    window.StatusPanel.render(state, document.getElementById("status-area"));
-  }
-
-  function renderQueueBanner(customers) {
-    var banner = document.getElementById("queue-banner");
-    if (!banner) return;
-    if (customers && customers.queueLevel > 0.1) {
-      banner.classList.add("show");
-      banner.textContent = "🚶行列ができている（並びたくない客層の足が遠のく）";
-    } else {
-      banner.classList.remove("show");
-    }
-  }
-
-  function renderWeekLog() {
-    var panel = document.getElementById("week-log-area");
-    if (!panel) return;
-    window.UI.clear(panel);
-    var recent = state.history.slice(-10).reverse();
-    recent.forEach(function (rec) {
-      panel.appendChild(h("div", {
-        text: "第" + rec.week + "週(" + rec.month + "月): 客" + rec.totalCustomers + "人 / 売上" + U.formatMoneyShort(rec.revenue) + " / 満足度" + rec.avgSatisfaction
-      }));
-    });
-  }
+  function refreshShop() { window.ShopView.update(state, lastFinance, lastCustomers); }
 
   function renderAll(finance, customers) {
     lastFinance = finance;
     lastCustomers = customers;
-    renderHUD();
+    renderTopBar();
     refreshShop();
-    renderQueueBanner(customers);
-    renderStatus();
-    renderWeekLog();
+    if (openSheetKey) refreshSheet(); // 開きっぱなしのパネルも週ごとに更新する
   }
 
-  // ---------- サブモーダル(プレイヤー操作) ----------
-  function openSubModal(title, contentNode) {
-    var wasRunning = state.running;
-    state.running = false;
-    clearTick();
-    var overlay = document.getElementById("event-modal-overlay");
-    var box = document.getElementById("event-modal-box");
-    box.className = "modal-box sub-modal";
-    window.UI.clear(box);
-    box.appendChild(h("h2", { text: title }));
-    box.appendChild(contentNode);
-    box.appendChild(h("div", { className: "modal-choices" }, [
-      h("button", {
-        className: "btn", text: "閉じる",
-        onclick: function () {
-          overlay.classList.remove("show");
-          renderHUD();
-          refreshShop();   // 設備や席数の変更を店の絵に反映する
-          renderStatus();
-          if (wasRunning) { state.running = true; scheduleTick(); }
-        }
-      })
-    ]));
-    overlay.classList.add("show");
+  // ---------- 1-3: 下半分のパネル ----------
+  // 意図的にゲームを止めない。レシピを変えた瞬間に上の店で客の反応が変わるのを見せるため。
+  function openSheet(key, title, builder) {
+    if (openSheetKey === key) { closeSheet(); return; }
+    openSheetKey = key;
+    sheetBuilder = builder;
+    document.getElementById("sheet-title").textContent = title;
+    document.getElementById("sheet").classList.add("open");
+    document.getElementById("sheet-backdrop").classList.add("open");
+    raiseControls(true);
+    refreshSheet();
+    renderFabs();
   }
 
-  function actionChangeRecipe() {
-    var content = h("div", {});
+  // 速度切替とパネル切替はパネルに隠させない
+  function raiseControls(on) {
+    ["speed-dock", "fab-col"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.classList.toggle("raised", on);
+    });
+  }
+
+  function refreshSheet() {
+    var body = document.getElementById("sheet-body");
+    if (!body || !sheetBuilder) return;
+    var scrollTop = body.scrollTop;
+    window.UI.clear(body);
+    body.appendChild(sheetBuilder());
+    body.scrollTop = scrollTop;
+  }
+
+  function closeSheet() {
+    openSheetKey = null;
+    sheetBuilder = null;
+    var sheet = document.getElementById("sheet");
+    if (sheet) sheet.classList.remove("open");
+    var bd = document.getElementById("sheet-backdrop");
+    if (bd) bd.classList.remove("open");
+    raiseControls(false);
+    renderFabs();
+  }
+
+  // ---------- パネルの中身 ----------
+  function panelRecipe() {
+    var box = h("div", {});
     if (state.flags.recipeLockWeeksLeft > 0) {
-      content.appendChild(h("p", { className: "bad", text: "ゴンゾウとの約束であと" + state.flags.recipeLockWeeksLeft + "週はレシピを変更できない。" }));
-      openSubModal("レシピの変更", content);
-      return;
+      box.appendChild(h("p", { className: "bad", text: "ゴンゾウとの約束で、あと" + state.flags.recipeLockWeeksLeft + "週はレシピを変更できない。" }));
     }
-    content.appendChild(h("p", { className: "dim", text: "変更は常連とゴンゾウが敏感に反応する。" }));
     var cats = [["soup", "スープ"], ["tare", "タレ"], ["noodle", "麺"], ["topping", "トッピング"]];
     cats.forEach(function (c) {
       var key = c[0];
-      content.appendChild(h("h3", { text: c[1] }));
+      var sec = h("div", { className: "sheet-section" }, [h("h3", { text: c[1] })]);
       var grid = h("div", { className: "choice-grid" });
       RECIPES[key].filter(function (item) {
         if (item.unlock === "start") return true;
@@ -260,48 +325,48 @@ window.ScreenLoop = (function () {
         return false;
       }).forEach(function (item) {
         var selected = state.recipe[key] === item.id;
+        var locked = state.flags.recipeLockWeeksLeft > 0;
         grid.appendChild(h("div", {
-          className: "choice-card" + (selected ? " selected" : ""),
+          className: "choice-card" + (selected ? " selected" : "") + (locked ? " disabled" : ""),
           onclick: function () {
-            if (state.recipe[key] !== item.id) {
-              state.recipe[key] = item.id;
-              state.recipeChangeLog.push(state.week);
-              window.UI.toast(c[1] + "を" + item.name + "に変更した");
-              renderStatus(); // 完成度が選んだ瞬間に動くのを見せる
-              actionChangeRecipe();
-            }
+            if (locked || selected) return;
+            state.recipe[key] = item.id;
+            state.recipeChangeLog.push(state.week);
+            window.UI.toast(c[1] + "を" + item.name + "に変更した");
+            refreshSheet();
           }
         }, [
           h("div", { className: "emoji", text: item.emoji }),
-          h("div", { className: "name", text: item.name })
+          h("div", { className: "name", text: item.name }),
+          h("div", { className: "blurb", text: G.blurb(item.id) })
         ]));
       });
-      content.appendChild(grid);
+      sec.appendChild(grid);
+      box.appendChild(sec);
     });
-    openSubModal("レシピの変更", content);
-  }
 
-  function actionChangePrice() {
-    var content = h("div", {});
-    content.appendChild(h("p", {}, ["現在価格: ", h("span", { className: "money", text: state.price + "円" })]));
-    var row = h("div", { style: { display: "flex", gap: "8px" } });
+    var priceSec = h("div", { className: "sheet-section" }, [
+      h("h3", { text: "価格" }),
+      h("p", {}, ["1杯 ", h("span", { className: "money", text: state.price + "円" })])
+    ]);
+    var row = h("div", { style: { display: "flex", gap: "6px", flexWrap: "wrap" } });
     [-100, -50, 50, 100].forEach(function (delta) {
       row.appendChild(h("button", {
         className: "btn small", text: (delta > 0 ? "+" : "") + delta + "円",
         onclick: function () {
           state.price = U.clamp(state.price + delta, 300, 3000);
-          renderStatus();
-          actionChangePrice();
+          refreshSheet();
         }
       }));
     });
-    content.appendChild(row);
-    openSubModal("価格の変更", content);
+    priceSec.appendChild(row);
+    box.appendChild(priceSec);
+    return box;
   }
 
-  function actionBuyEquipment() {
-    var content = h("div", {});
-    content.appendChild(h("p", {}, ["所持金: ", h("span", { className: "money", text: U.formatMoneyShort(state.money) })]));
+  function panelEquipment() {
+    var box = h("div", {});
+    box.appendChild(h("p", {}, ["所持金: ", h("span", { className: "money", text: U.formatMoneyShort(state.money) })]));
     var grid = h("div", { className: "choice-grid" });
     PROPERTY_DATA.equipment.forEach(function (eq) {
       var owned = state.equipment.indexOf(eq.id) >= 0;
@@ -313,71 +378,116 @@ window.ScreenLoop = (function () {
           state.money -= eq.cost;
           state.equipment.push(eq.id);
           window.UI.toast(eq.name + "を導入した");
-          renderStatus();
           refreshShop();  // 券売機やテーブル席は買った瞬間に絵へ出す
-          actionBuyEquipment();
+          renderTopBar();
+          refreshSheet();
         }
       }, [
         h("div", { className: "emoji", text: eq.emoji }),
         h("div", { className: "name", text: eq.name + (owned ? "（導入済）" : "") }),
         h("div", { className: "cost", text: U.formatMoney(eq.cost) }),
-        h("div", { className: "sub", text: eq.effect })
+        h("div", { className: "blurb", text: eq.effect })
       ]));
     });
-    content.appendChild(grid);
-    openSubModal("設備の購入", content);
+    box.appendChild(grid);
+    return box;
   }
 
-  function actionStaff() {
-    var content = h("div", {});
-    var grid = h("div", { className: "choice-grid" });
-    STAFF.forEach(function (def) {
-      var hired = state.staffHired.indexOf(def.id) >= 0;
-      var rating = Scoring.staffRating(def);
-      grid.appendChild(h("div", {
-        className: "choice-card" + (hired ? " selected" : ""),
-        onclick: function () {
-          if (hired) {
-            state.staffHired = state.staffHired.filter(function (id) { return id !== def.id; });
+  function panelPeople() {
+    var box = h("div", {});
+
+    // 4-1-2: 案内役はここからいつでも呼べる
+    var guideSec = h("div", { className: "sheet-section" }, [
+      h("div", { className: "staff-card" }, [
+        h("div", { className: "staff-head" }, [
+          h("span", { className: "staff-emoji", text: G.def().emoji }),
+          h("span", { className: "staff-name", text: G.def().name }),
+          h("span", { className: "dim", text: "（" + G.def().role + "）" })
+        ]),
+        h("button", {
+          className: "btn small", text: "呼ぶ",
+          onclick: function () { G.say(G.summary(state)); closeSheet(); }
+        })
+      ])
+    ]);
+    box.appendChild(guideSec);
+
+    var staffSec = h("div", { className: "sheet-section" }, [h("h3", { text: "従業員" })]);
+    state.staffHired.forEach(function (id) {
+      var def = findStaffDef(id);
+      if (!def) return;
+      var block = window.StatusPanel.staffBlock(def, EE.ensureStaffState(state, id));
+      var actions = h("div", { style: { display: "flex", gap: "6px", marginTop: "6px" } }, [
+        h("button", {
+          className: "btn small", text: "話す（" + TALK_COST + "円）",
+          disabled: state.money < TALK_COST ? "disabled" : null,
+          onclick: function () {
+            if (state.money < TALK_COST) return;
+            var s = EE.ensureStaffState(state, id);
+            state.money -= TALK_COST;
+            s.rel = U.clamp(s.rel + TALK_GAIN, 0, 100);
+            s.morale = U.clamp(s.morale + 4, 0, 100);
+            window.UI.toast(def.name + "と話した（関係値 " + s.rel + "）");
+            renderTopBar();
+            refreshSheet();
+          }
+        }),
+        h("button", {
+          className: "btn small", text: "辞めてもらう",
+          onclick: function () {
+            state.staffHired = state.staffHired.filter(function (x) { return x !== id; });
             window.UI.toast(def.name + "が店を離れた");
-          } else {
+            refreshShop();
+            refreshSheet();
+          }
+        })
+      ]);
+      block.appendChild(actions);
+      staffSec.appendChild(block);
+    });
+    var hireable = STAFF.filter(function (d) { return state.staffHired.indexOf(d.id) < 0; });
+    if (hireable.length) {
+      staffSec.appendChild(h("h3", { text: "雇う" }));
+      var grid = h("div", { className: "choice-grid wide" });
+      hireable.forEach(function (def) {
+        grid.appendChild(h("div", {
+          className: "choice-card",
+          onclick: function () {
             state.staffHired.push(def.id);
             EE.ensureStaffState(state, def.id);
             if (def.id === "yuta") state.flags.yutaHireWeek = state.week;
             window.UI.toast(def.name + "を雇用した");
+            refreshShop();
+            refreshSheet();
           }
-          renderStatus();
-          refreshShop();  // 店員が絵に増える/減る
-          actionStaff();
-        }
-      }, [
-        h("div", { className: "emoji" }, [
-          def.emoji, " ", window.StatusPanel.rankBadge(rating.rank)
-        ]),
-        h("div", { className: "name", text: def.name + "（" + def.role + "）" + (hired ? " 雇用中" : "") }),
-        h("div", { className: "cost", text: U.formatMoney(def.wage) + "/月" }),
-        window.StatusPanel.staffStats(def),
-        h("div", { className: "sub", text: def.personality })
-      ]));
-    });
-    content.appendChild(grid);
-    openSubModal("従業員の雇用・解雇", content);
-  }
+        }, [
+          h("div", { className: "emoji" }, [def.emoji, " ", window.StatusPanel.rankBadge(Scoring.staffRating(def).rank)]),
+          h("div", { className: "name", text: def.name + "（" + def.role + "）" }),
+          h("div", { className: "cost", text: U.formatMoney(def.wage) + "/月" }),
+          window.StatusPanel.staffStats(def),
+          h("div", { className: "blurb", text: G.blurb(def.id) })
+        ]));
+      });
+      staffSec.appendChild(grid);
+    }
+    box.appendChild(staffSec);
 
-  function actionTalk() {
-    var content = h("div", {});
-    content.appendChild(h("p", { className: "dim", text: "1回 " + TALK_COST + "円。関係値+" + TALK_GAIN + "。" }));
-    var grid = h("div", { className: "choice-grid" });
+    var cardSec = h("div", { className: "sheet-section" }, [
+      h("h3", { text: "人カード" }),
+      h("div", { className: "dim", text: "1回 " + TALK_COST + "円。関係値 +" + TALK_GAIN + "。" })
+    ]);
+    var cgrid = h("div", { className: "choice-grid" });
     CARDS.forEach(function (c) {
       var rel = state.relationships[c.id] || 0;
-      grid.appendChild(h("div", {
+      cgrid.appendChild(h("div", {
         className: "choice-card" + (state.money < TALK_COST ? " disabled" : ""),
         onclick: function () {
           if (state.money < TALK_COST) return;
           state.money -= TALK_COST;
           state.relationships[c.id] = U.clamp(rel + TALK_GAIN, 0, 100);
           window.UI.toast(c.name + "と話した（関係値 " + state.relationships[c.id] + "）");
-          actionTalk();
+          renderTopBar();
+          refreshSheet();
         }
       }, [
         h("div", { className: "emoji", text: c.emoji }),
@@ -385,66 +495,104 @@ window.ScreenLoop = (function () {
         h("div", { className: "sub", text: "関係値 " + rel })
       ]));
     });
-    state.staffHired.forEach(function (id) {
-      var def = findStaffDef(id);
-      var s = EE.ensureStaffState(state, id);
-      grid.appendChild(h("div", {
-        className: "choice-card" + (state.money < TALK_COST ? " disabled" : ""),
-        onclick: function () {
-          if (state.money < TALK_COST) return;
-          state.money -= TALK_COST;
-          s.rel = U.clamp(s.rel + TALK_GAIN, 0, 100);
-          s.morale = U.clamp(s.morale + 4, 0, 100);
-          window.UI.toast(def.name + "と話した（関係値 " + s.rel + "）");
-          actionTalk();
-        }
+    cardSec.appendChild(cgrid);
+    box.appendChild(cardSec);
+    return box;
+  }
+
+  function panelData() {
+    var box = h("div", {});
+    box.appendChild(h("div", { className: "sheet-section" }, [window.StatusPanel.renderRamen(state)]));
+
+    var last = state.history.length ? state.history[state.history.length - 1] : null;
+    var num = h("div", { className: "sheet-section status-card" }, [h("h3", { text: "📊 直近の週" })]);
+    if (!last) {
+      num.appendChild(h("p", { className: "dim", text: "まだ1週目が終わっていない。" }));
+    } else {
+      num.appendChild(h("p", {}, ["客数 ", h("span", { text: last.totalCustomers + "人" }),
+        "　満足度 ", h("span", { text: String(last.avgSatisfaction) })]));
+      num.appendChild(h("p", {}, ["売上 ", h("span", { className: "money", text: U.formatMoney(last.revenue) }),
+        "　原価 ", h("span", { text: U.formatMoney(last.foodCost) })]));
+      num.appendChild(h("p", {}, ["週の損益 ",
+        h("span", { className: last.profit >= 0 ? "good" : "bad", text: U.formatMoney(last.profit) })]));
+      var mc = monthlyCostBreakdown();
+      num.appendChild(h("p", { className: "dim", text: "毎月の固定費: 家賃 " + U.formatMoney(mc.rent) +
+        " / 給与 " + U.formatMoney(mc.wages) + " / 返済 " + U.formatMoney(mc.loanPay) }));
+    }
+    box.appendChild(num);
+
+    var logSec = h("div", { className: "sheet-section" }, [h("h3", { text: "週次ログ" })]);
+    var panel = h("div", { className: "week-log-panel" });
+    state.history.slice(-12).reverse().forEach(function (rec) {
+      panel.appendChild(h("div", {
+        text: "第" + rec.week + "週(" + rec.month + "月): 客" + rec.totalCustomers + "人 / 売上" +
+          U.formatMoneyShort(rec.revenue) + " / 満足度" + rec.avgSatisfaction
+      }));
+    });
+    if (!state.history.length) panel.appendChild(h("div", { className: "dim", text: "まだ記録がない。" }));
+    logSec.appendChild(panel);
+    box.appendChild(logSec);
+
+    box.appendChild(window.StatusPanel.renderStaff(state));
+    return box;
+  }
+
+  function renderFabs() {
+    var col = document.getElementById("fab-col");
+    if (!col) return;
+    window.UI.clear(col);
+    [
+      ["recipe", "🍜", "レシピ", "レシピと価格", panelRecipe],
+      ["people", "👥", "人", "人", panelPeople],
+      ["equip", "🛠", "設備", "設備", panelEquipment],
+      ["data", "📊", "データ", "データ", panelData]
+    ].forEach(function (f) {
+      col.appendChild(h("button", {
+        className: "fab" + (openSheetKey === f[0] ? " active" : ""),
+        onclick: function () { openSheet(f[0], f[3], f[4]); }
       }, [
-        h("div", { className: "emoji", text: def.emoji }),
-        h("div", { className: "name", text: def.name }),
-        h("div", { className: "sub", text: "関係値 " + s.rel + " / 士気 " + s.morale })
+        h("span", { className: "fab-icon", text: f[1] }),
+        h("span", { className: "fab-label", text: f[2] })
       ]));
     });
-    content.appendChild(grid);
-    openSubModal("人と話す", content);
   }
 
-  function renderActionBar() {
-    var bar = document.getElementById("action-bar-area");
-    if (!bar) return;
-    window.UI.clear(bar);
-    [
-      ["🍜 レシピ変更", actionChangeRecipe],
-      ["💴 価格変更", actionChangePrice],
-      ["🛠 設備購入", actionBuyEquipment],
-      ["👥 従業員", actionStaff],
-      ["💬 人と話す", actionTalk]
-    ].forEach(function (pair) {
-      bar.appendChild(h("button", { className: "btn", text: pair[0], onclick: pair[1] }));
-    });
-  }
-
+  // ---------- 組み立て ----------
   function render(gameState, gameOverCb) {
     state = gameState;
     onGameOver = gameOverCb;
     var root = document.getElementById("screen-loop");
     window.UI.clear(root);
-    root.appendChild(h("div", { className: "hud pixel-panel", id: "hud-area" }));
-    root.appendChild(h("div", { className: "shop-floor", id: "shop-floor-area" }));
-    root.appendChild(h("div", { className: "queue-banner", id: "queue-banner" }));
-    root.appendChild(h("div", { className: "action-bar", id: "action-bar-area" }));
-    root.appendChild(h("div", { className: "status-row", id: "status-area" }));
-    root.appendChild(h("div", { className: "week-log-panel", id: "week-log-area" }));
+
+    root.appendChild(h("div", { className: "shop-fill", id: "shop-fill" }));
+    root.appendChild(h("div", { className: "top-bar", id: "top-bar" }));
+    root.appendChild(h("div", { className: "week-flash", id: "week-flash" }));
+    root.appendChild(h("div", { className: "float-layer", id: "float-layer" }));
+    root.appendChild(h("div", { className: "speed-dock", id: "speed-dock" }));
+    root.appendChild(h("div", { className: "fab-col", id: "fab-col" }));
+    G.mountBubble(root);
+
+    root.appendChild(h("div", { className: "sheet-backdrop", id: "sheet-backdrop", onclick: closeSheet }));
+    root.appendChild(h("div", { className: "sheet", id: "sheet" }, [
+      h("div", { className: "sheet-head" }, [
+        h("div", { className: "sheet-title", id: "sheet-title" }),
+        h("button", { className: "btn small", text: "閉じる", onclick: closeSheet })
+      ]),
+      h("div", { className: "sheet-body", id: "sheet-body" })
+    ]));
 
     lastFinance = null;
     lastCustomers = null;
-    window.ShopView.destroy();
-    window.ShopView.mount(document.getElementById("shop-floor-area"), state);
+    openSheetKey = null;
+    sheetBuilder = null;
 
-    renderActionBar();
-    renderHUD();
-    renderStatus();
-    renderWeekLog();
-    setSpeed(1);
+    window.ShopView.destroy();
+    window.ShopView.mount(document.getElementById("shop-fill"), state);
+
+    renderTopBar();
+    renderSpeedDock();
+    renderFabs();
+    setSpeed(1); // 2-1: 初期速度は ×1
   }
 
   return { render: render, setSpeed: setSpeed };

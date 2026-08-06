@@ -108,6 +108,10 @@ window.Scoring = (function () {
     var results = {};
     var totalDemand = 0;
 
+    // v05: 向かいにライバル店ができた後は客足が落ちる。挨拶に行っていれば落ち方が軽い。
+    var rivalMult = 1;
+    if (state.flags && state.flags.rivalOpen) rivalMult = state.flags.rivalCordial ? 0.94 : 0.85;
+
     SEGMENTS.forEach(function (seg) {
       if (!meetsRequires(seg, state)) {
         results[seg.id] = { count: 0, satisfaction: null, blocked: true };
@@ -119,7 +123,7 @@ window.Scoring = (function () {
       var seasonMult = seasonalFactor(property, seg, state.week);
       var repeatMult = U.clamp(sat.value / 65, 0.15, 1.7);
       var boost = state.tempBoosts && state.tempBoosts[seg.id] ? state.tempBoosts[seg.id].mult : 1;
-      var potential = Math.max(0, flow * BASE_CUSTOMERS * repMult * seasonMult * repeatMult * boost);
+      var potential = Math.max(0, flow * BASE_CUSTOMERS * repMult * seasonMult * repeatMult * boost * rivalMult);
       results[seg.id] = { count: potential, satisfaction: sat.value, blocked: false };
       totalDemand += potential;
     });

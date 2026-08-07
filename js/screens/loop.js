@@ -188,6 +188,16 @@ window.ScreenLoop = (function () {
     renderTopBar(true); // trueで数字が変わった合図(軽い強調)を出す
   }
 
+  // v13-3: 客が食べ終わって退店した瞬間にShopViewから呼ばれる。その1杯の売価(price)を所持金へ
+  // 加算する。週末(runWeeklyCalc)側は費用だけを引く形に変えてあるので、ここが売上を反映する唯一の
+  // 場所になる(二重計上防止)。
+  function onCustomerExit(segId, price) {
+    if (!price) return;
+    state.money += price;
+    renderTopBar();
+    window.GameState.save();
+  }
+
   // ---------- 週の計算(7日ぶんのティックがたまった時に1回だけ走る) ----------
   function runWeeklyCalc() {
     if (state.day > window.DAYS_PER_RUN) { finishGame(); return; } // 安全弁。実際の終了判定はadvanceWeek側
@@ -224,7 +234,10 @@ window.ScreenLoop = (function () {
       if (state.loan.monthsLeft > 0) state.loan.monthsLeft--;
     }
 
-    state.money += finance.revenue - finance.foodCost;
+    // v13-3: 売上(finance.revenue)は客の退店ごとにonCustomerExit()で既に所持金へ加算済み。
+    // ここで再び足すと二重計上になるため、週末は費用(仕入)だけを引く。表示用のprofit(週の損益)は
+    // これまで通り売上込みの式のまま——週末の収支画面の「残り」の表示内容は変えない指示のため。
+    state.money -= finance.foodCost;
     var profit = finance.revenue - finance.foodCost - monthlyCosts;
 
     state.reputation = U.clamp(state.reputation + (avgSat - 50) * 0.04, 0, 100);
@@ -1015,7 +1028,7 @@ window.ScreenLoop = (function () {
     }
 
     window.ShopView.destroy();
-    window.ShopView.mount(document.getElementById("shop-fill"), state, { onEnter: onCustomerEnter });
+    window.ShopView.mount(document.getElementById("shop-fill"), state, { onEnter: onCustomerEnter, onExit: onCustomerExit });
     // v12-2: 新規開始・セーブからの再開のどちらでも、この時点で「今この瞬間の状態」を使って
     // 今週ぶんの客数・湧きスケジュールを確定させる(内部でrenderTopBar/refreshShopも行う)。
     // これで1週目から(セーブ再開なら週の途中からでも)絵に客が出るようになる。

@@ -1,3 +1,22 @@
+/* v13-4: 絵文字の見た目をOS任せにすると端末ごとに別の絵(線の太さ・彩度)が出てしまうため、
+   Noto Emoji(OFL、クレジット表記不要)を同梱して絵文字を出す要素にだけ当てる。
+   実際に使っている絵文字だけをサブセット化した約25KBのwoff2(css/fonts/、ライセンスは
+   css/fonts/OFL.txt)。本文フォント(bodyのMS Gothic等)には触れない。 */
+@font-face {
+  font-family: "NotoEmojiGame";
+  src: url("fonts/NotoEmojiGame-subset.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+/* 絵文字を出す要素だけに当てる(本文フォントの並び.MS Gothic等.はそのままフォールバックに残す。
+   絵文字以外の文字(暖簾の「らーめん」等)はサブセットに無いのでこの並びの続きへ自然に落ちる)。
+   対象: 客・店員・設備・厨房の丼(.shop-stage)/ 客層マーカー(.segment-chip, .hours-seg-chip)/
+   レシピ・設備・人物などの絵文字アイコン(.emoji, .staff-emoji)。満足度アイコンは.shop-stage内。 */
+.shop-stage, .emoji, .staff-emoji, .segment-chip, .hours-seg-chip {
+  font-family: "NotoEmojiGame", "MS Gothic", "Osaka-Mono", "Consolas", monospace;
+}
+
 /* ================================================================
    v05: スマホゲームの固定枠。ページ自体はスクロールしない。
    レイアウトは縦長(9:16)1種類だけ。PCではレターボックスで中央に置く。
@@ -602,15 +621,40 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 }
 .sv-cust.show-bubble .sv-bubble { opacity: 1; }
 
+/* v13-2: 退店時の「評判 +1」ポップアップ。指示どおり実秒0.8sで固定(ゲーム速度に連動させない)。
+   数字と記号だけの短い文字列なので、翻訳が伸びても崩れにくい white-space: nowrap にしておく。 */
+.sv-rep-pop {
+  position: absolute; left: 50%; top: -1.9em; transform: translateX(-50%);
+  font-size: 0.48em; white-space: nowrap; font-weight: bold; z-index: 6;
+  opacity: 0; animation: svRepPop 0.8s ease-out forwards;
+}
+.sv-rep-pop.good { color: var(--good); }
+.sv-rep-pop.bad { color: var(--bad); }
+@keyframes svRepPop {
+  0% { opacity: 0; transform: translateX(-50%) translateY(0); }
+  15% { opacity: 1; }
+  75% { opacity: 1; transform: translateX(-50%) translateY(-6px); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+}
+
+/* v13-1: 店員は客と同じくmove()(JS)が left/top を直接動かす。旧・往復専用のCSSキーフレーム
+   (svPace)は、実際の作業動線(寸胴→茹で麺器→盛り付け→客席→厨房)に置き換えたため廃止した。 */
 .sv-staff {
   position: absolute; transform: translateX(-50%); font-size: 0.9em; line-height: 1; z-index: 4;
-  animation: svPace 6s ease-in-out infinite;
+  transition: left 600ms linear, top 500ms ease-in-out; will-change: left, top;
 }
-@keyframes svPace {
-  0% { left: 14%; } 45% { left: 56%; } 50% { left: 56%; } 95% { left: 14%; } 100% { left: 14%; }
+.sv-staff .sv-bowl {
+  position: absolute; left: 50%; top: -0.85em; font-size: 0.6em;
+  transform: translateX(-50%) scale(0); transition: transform 200ms ease;
 }
-/* v09-1: 一時停止中は食事の弾みアニメーションも止める(以前は店員の往復だけ止まっていた) */
-.shop-stage.paused .sv-staff,
+.sv-staff.carrying .sv-bowl { transform: translateX(-50%) scale(1); }
+
+/* v13-1: 誰も取っていない注文(丼)が厨房に積まれて見える列 */
+.sv-order-pile { position: absolute; display: flex; gap: 2px; z-index: 4; }
+.sv-pile-bowl { font-size: 0.55em; }
+.sv-pile-more { font-size: 0.4em; color: var(--text-dim); align-self: center; }
+
+/* v09-1: 一時停止中は食事の弾みアニメーションも止める */
 .shop-stage.paused .sv-cust.eating .sv-body { animation-play-state: paused; }
 
 /* ---- ステータス表示（パネルの中で使う） ---- */

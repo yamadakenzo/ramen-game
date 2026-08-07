@@ -29,6 +29,8 @@ window.ScreenLoop = (function () {
   var lastFinance = null, lastCustomers = null, lastSchedule = null;
   var openSheetKey = null, sheetBuilder = null;
   var lastFlashData = null; // 週末の収支表示(詳細/1行トグル用に直近データを保持)
+  // v12-3:「今週の客」= 実際に入店した人数を1人ずつ数えるカウンタ。週の開始でリセットする。
+  var weekLiveCount = 0;
 
   function findStaffDef(id) { return U.findById(STAFF, id); }
 
@@ -53,11 +55,11 @@ window.ScreenLoop = (function () {
   }
   document.addEventListener("visibilitychange", onVisibilityChange);
 
-  // v10-2-1: ×1 = 1時間5秒。v09の「1日1.8秒」は破棄する指示に従った(1日の中で時刻が
-  // 進むのを見せるため)。TICK_MIN(15分)刻みで進めるので、1ティックの実時間はこの1/4。
+  // v12-1: ×1 = 1時間1.7秒(window.BASE_HOUR_MS。js/utils.jsの1箇所だけで持つ)。
+  // TICK_MIN(15分)刻みで進めるので、1ティックの実時間はこの1/4。
+  // 倍率テーブルはここには持たない(U.hourMsがBASE_HOUR_MS/速度倍率を計算する)。
   function hourMs() {
-    if (state.speed === 0) return null;
-    return { 1: 5000, 2: 2500, 4: 1250 }[state.speed];
+    return U.hourMs(state.speed);
   }
   function tickMs() {
     var hm = hourMs();
@@ -160,6 +162,32 @@ window.ScreenLoop = (function () {
     return { rent: rent, wages: wages, loanPay: loanPay, total: rent + wages + loanPay };
   }
 
+  // ---------- v12-2: 週の客数・売上・湧きスケジュールを「週の開始」で確定する ----------
+  // 以前は週の終わり(runWeeklyCalc)で計算し、その数字を「次の週」の絵の湧きに回していた
+  // (店の絵は常に1週遅れの数字で動いていた)。このため開業直後の1週目は参照する前週データが
+  // 無く、絵に客が一人も出ないまま収支だけが立っていた(v12指示2)。
+  // 今回、この週の実時間が動き出す前(新規開始時のrender()、または前の週からのadvanceWeek())に
+  // 計算を確定させ、その週の絵の湧きと週末の収支表示の両方に必ず同じ数字を使うようにする。
+  // 収支の計算式そのもの(Scoringの中身)は一切変えていない——呼ぶタイミングだけを動かした。
+  function stageWeekCustomers() {
+    var customers = Scoring.computeWeeklyCustomers(state);
+    var finance = Scoring.computeWeeklyFinance(state, customers);
+    lastCustomers = customers;
+    lastFinance = finance;
+    // v10-3: この週、実際に絵の上へ湧かせる「曜日×帯」の内訳。計算(売上・満足度)には一切使わない、
+    // 可視化専用のデータ。ShopView.openBand()がここから今日・今の帯ぶんを取り出して湧かせる。
+    lastSchedule = Scoring.weeklyBandSchedule(state, customers);
+    weekLiveCount = 0; // v12-3:「今週の客」は来店ごとに数える。週替わりで0に戻す
+    refreshShop();
+    renderTopBar();
+  }
+
+  // v12-3: 客が実際に入店した瞬間(暖簾をくぐって席へ向かう瞬間)にShopViewから呼ばれる。
+  function onCustomerEnter() {
+    weekLiveCount++;
+    renderTopBar(true); // trueで数字が変わった合図(軽い強調)を出す
+  }
+
   // ---------- 週の計算(7日ぶんのティックがたまった時に1回だけ走る) ----------
   function runWeeklyCalc() {
     if (state.day > window.DAYS_PER_RUN) { finishGame(); return; } // 安全弁。実際の終了判定はadvanceWeek側
@@ -177,13 +205,13 @@ window.ScreenLoop = (function () {
     var repBefore = state.reputation;
     var moneyBefore = state.money;
 
-    var customers = Scoring.computeWeeklyCustomers(state);
-    var finance = Scoring.computeWeeklyFinance(state, customers);
+    // v12-2: この週の客数・売上はstageWeekCustomers()で週の開始時に確定済み。ここで計算し直すと
+    // 「週の途中の変更が今週の数字に混ざる」上に、絵の湧きと収支の数字がズレてしまうため、
+    // 確定済みの値をそのまま使う。
+    var customers = lastCustomers;
+    var finance = lastFinance;
     var avgSat = Scoring.weightedAvgSatisfaction(customers);
     state.lastAvgSatisfaction = avgSat;
-    // v10-3: この週、実際に絵の上へ湧かせる「曜日×帯」の内訳。計算(売上・満足度)には一切使わない、
-    // 可視化専用のデータ。ShopView.openBand()がここから今日・今の帯ぶんを取り出して湧かせる。
-    lastSchedule = Scoring.weeklyBandSchedule(state, customers);
 
     var monthlyCosts = 0;
     var chargedBreakdown = { rent: 0, wages: 0, loanPay: 0 }; // 月次まとめ用に、実際に引き落とされた内訳を週次ログへ残す
@@ -294,9 +322,9 @@ window.ScreenLoop = (function () {
     state.clockMin = bands.length ? bands[0].start * 60 : 0;
     if (state.day > window.DAYS_PER_RUN) { window.GameState.save(); finishGame(); return; }
     window.GameState.save();
-    renderTopBar();
+    // v12-2: 新しい週の客数・湧きスケジュールをここで確定する(内部でrenderTopBar/refreshShopも行う)。
+    stageWeekCustomers();
     renderSpeedDock();
-    refreshShop();
     if (bands.length) window.ShopView.openBand(bands[0].key);
     resume("weekend"); // pauseReasonsが空になれば(パネル等も閉じていれば)ここで自動的にtickが再開する
   }
@@ -508,7 +536,10 @@ window.ScreenLoop = (function () {
       "(" + U.dowLabel(state.day) + ") " + U.timeLabel(state.clockMin);
   }
 
-  function renderTopBar() {
+  // v12-4: 上帯は固定グリッド(2行)。1行目=日時+所持金、2行目=今週の客/評判/疲労(+行列)。
+  // 要素同士が重ならないことは幅(グリッド列+ellipsis)で保証する(CSSの.top-bar側)。
+  // pulse: trueなら「今週の客」の数字が今変わったことを軽く強調する(v12-3)。
+  function renderTopBar(pulse) {
     var root = document.getElementById("top-bar");
     if (!root) return;
     window.UI.clear(root);
@@ -522,12 +553,20 @@ window.ScreenLoop = (function () {
         h("div", { className: "tv" + (cls ? " " + cls : ""), text: value })
       ]);
     }
-    root.appendChild(item("日時", dateLabel()));
-    root.appendChild(item("所持金", U.formatMoneyShort(state.money), "money"));
-    root.appendChild(item("今週の客", (lastFinance ? lastFinance.totalCustomers : 0) + "人"));
-    root.appendChild(item("評判", String(Math.round(state.reputation))));
-    root.appendChild(item("疲労", String(fatigue), fatigueCls));
-    if (queued) root.appendChild(h("div", { className: "ti queue-mark", text: "🚶行列" }));
+    var mainRow = h("div", { className: "tb-row tb-row-main" }, [
+      item("日時", dateLabel()),
+      item("所持金", U.formatMoneyShort(state.money), "money")
+    ]);
+    // v12-3:「今週の客」は週の初めからの合計ではなく、実際に入店した人数を1人ずつ数えるカウンタ。
+    var custCls = pulse ? "tv-pulse" : null;
+    var subRow = h("div", { className: "tb-row tb-row-sub" }, [
+      item("今週の客", weekLiveCount + "人", custCls),
+      item("評判", String(Math.round(state.reputation))),
+      item("疲労", String(fatigue), fatigueCls)
+    ]);
+    if (queued) subRow.appendChild(h("div", { className: "ti queue-mark" }, [h("span", { text: "🚶行列" })]));
+    root.appendChild(mainRow);
+    root.appendChild(subRow);
   }
 
   function renderSpeedDock() {
@@ -976,10 +1015,13 @@ window.ScreenLoop = (function () {
     }
 
     window.ShopView.destroy();
-    window.ShopView.mount(document.getElementById("shop-fill"), state);
+    window.ShopView.mount(document.getElementById("shop-fill"), state, { onEnter: onCustomerEnter });
+    // v12-2: 新規開始・セーブからの再開のどちらでも、この時点で「今この瞬間の状態」を使って
+    // 今週ぶんの客数・湧きスケジュールを確定させる(内部でrenderTopBar/refreshShopも行う)。
+    // これで1週目から(セーブ再開なら週の途中からでも)絵に客が出るようになる。
+    stageWeekCustomers();
     syncBandForNow(); // 今いる帯(セーブからの再開なら帯の途中のこともある)ぶんの客を湧かせ始める
 
-    renderTopBar();
     renderSpeedDock();
     renderFabs();
     onVisibilityChange(); // 開いた時点でタブが非表示なら最初からpauseしておく

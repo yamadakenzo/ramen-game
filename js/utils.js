@@ -4,6 +4,10 @@
 window.WEEKS_PER_RUN = 52;
 // v09-3: 内部で持つ時間の単位は「開業からの通算日数」だけ。52週 × 7日 = 364日。
 window.DAYS_PER_RUN = window.WEEKS_PER_RUN * 7;
+// v12-1: 「1時間の実秒(×1)」をここ1箇所だけに持つ。速度の実秒(loop.js)も、客・店員の
+// アニメーションの尺(shop-view.js)も、どちらもこの値からしか実msを作らない
+// (実秒の直値をコードの他の場所に書かないための唯一の物差し)。
+window.BASE_HOUR_MS = 1700; // ×1 = 1時間1.7秒
 
 window.Utils = (function () {
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -109,6 +113,19 @@ window.Utils = (function () {
   function rand(min, max) { return min + Math.random() * (max - min); }
   function randInt(min, max) { return Math.floor(rand(min, max + 1)); }
   function pick(arr) { return arr[randInt(0, arr.length - 1)]; }
+
+  // v12-1: 速度倍率(1,2,4...)から「1時間の実ms」を作る唯一の関数。速度0(停止)はnull。
+  // BASE_HOUR_MSを変えるだけで×1〜×4のすべてが追随する(loop.jsは倍率テーブルを持たない)。
+  function hourMs(speedMult) {
+    if (!speedMult) return null;
+    return window.BASE_HOUR_MS / speedMult;
+  }
+  // v12-1: 「ゲーム内でN分」を実ms(速度×1基準)に変換する。歩行・食事などのアニメーション尺は
+  // すべてこれで作る(実秒の直値を書かない)。呼び出し側(later()等)がさらに速度で割る。
+  function gameMinMs(min) {
+    return min * (window.BASE_HOUR_MS / 60);
+  }
+
   return {
     clamp: clamp, findById: findById,
     calMonth: calMonth, dayOfMonth: dayOfMonth, weekOfRun: weekOfRun, monthSeq: monthSeq, monthSeqToCal: monthSeqToCal,
@@ -116,6 +133,7 @@ window.Utils = (function () {
     dow: dow, isWeekend: isWeekend, dowLabel: dowLabel, bandDef: bandDef, timeLabel: timeLabel,
     bandEmoji: bandEmoji, bandTimeLabel: bandTimeLabel,
     formatMoney: formatMoney, formatMoneyShort: formatMoneyShort,
-    rand: rand, randInt: randInt, pick: pick
+    rand: rand, randInt: randInt, pick: pick,
+    hourMs: hourMs, gameMinMs: gameMinMs
   };
 })();

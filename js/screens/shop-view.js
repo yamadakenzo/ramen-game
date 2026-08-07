@@ -24,9 +24,28 @@ window.ShopView = (function () {
     drawMaxCounter: 8, drawMaxTable: 4
   };
 
-  // v10-2: loop.js の hourMs(×1) と揃えること(×1で1時間=5000ms)。later()は1x基準のmsを
-  // 受け取って内部でspd()で割る作りなので、ここでも1x基準のまま渡す(実時間へは変換しない)。
-  var BAND_HOUR_MS = 5000;
+  // v12-1: 各フェーズの尺は「ゲーム内で何分か」で持ち、gm()でwindow.BASE_HOUR_MS(js/utils.js の
+  // 1箇所だけ)から実ms(×1基準)を作る。later()/move()は1x基準のmsを受け取って内部でspd()で
+  // 割る作りなので、ここでも1x基準のまま渡す(実時間へは変換しない)。
+  // 下の分数値は、旧基準(1時間=5000ms@×1)のときに実際に使っていた実秒の直値を「その時点で
+  // 何ゲーム内分だったか」に換算しただけで、体感の尺そのものは変えていない
+  // (BASE_HOUR_MSを変えても客の動きが速すぎ/遅すぎにならないようにするための書き換え)。
+  var OLD_MS_PER_MIN = 5000 / 60; // 換算の物差し。以後この値そのものを直接使うことはない
+  var WALK_MIN_PER_PCT = 22 / OLD_MS_PER_MIN;        // 通常の歩行、横1%あたりの分
+  var SEAT_WALK_MIN_PER_PCT = 20 / OLD_MS_PER_MIN;   // 席へ向かう/席から出るときの歩行
+  var ENTER_EXTRA_MIN = 200 / OLD_MS_PER_MIN;        // 席へ向かう前の一拍
+  var SIT_MIN = 420 / OLD_MS_PER_MIN;                // 席に着く/席を立つ
+  var LEAVE_WAIT_MIN = 460 / OLD_MS_PER_MIN;         // 席を立ってから実際に歩き出すまでの間
+  var QUEUE_REFLOW_MIN = 500 / OLD_MS_PER_MIN;       // 行列の詰め直し
+  var QUEUE_PATIENCE_BASE_MIN = 4000 / OLD_MS_PER_MIN; // 行列を諦めるか判定するまでの最短
+  var QUEUE_PATIENCE_TOL_MIN = 9000 / OLD_MS_PER_MIN;  // 行列耐性ぶんの上乗せ(客層ごとに変わる)
+  var MEAL_MIN_MIN = 2500 / OLD_MS_PER_MIN;          // 提供+食事(最短)。約30分
+  var MEAL_MIN_MAX = 3500 / OLD_MS_PER_MIN;          // 提供+食事(最長)。約42分
+  var STAFF_PACE_MIN = 6000 / OLD_MS_PER_MIN;        // 店員が厨房〜カウンターを往復する1周
+  var RESUME_FLOOR_MIN = 200 / OLD_MS_PER_MIN;       // 一時停止/速度変更からの再開時の最短尺
+  var RESUME_Y_MIN_PER_PCT = 6 / OLD_MS_PER_MIN;     // 同、縦移動ぶんの上乗せ(%あたり)
+
+  function gm(min) { return U.gameMinMs(min); }
 
   var stage = null;      // 舞台のDOM
   var actorLayer = null; // 客・店員を載せるレイヤー
@@ -46,6 +65,11 @@ window.ShopView = (function () {
   // 以前は state.speed===0 を「止まっている」の代用にしていたが、v09で速度の選択と一時停止を
   // 分離したため(停止中でも「選んでいる速度」自体は保持し続ける)、ここでは専用のフラグを持つ。
   var frozen = false;
+  // v12-1: 直近にsyncSpeed()した時点の速度。これと今のspd()がズレていたら「速度が変わった瞬間」と
+  // 判定し、画面上の客の残り時間・移動もその場で新しい速度に追随させる(retime())。
+  var curSpd = 1;
+  // v12-3:「今週の客」カウンタ用。客が実際に入店した瞬間(enterAndSit)にloop.js側へ知らせる。
+  var onEnterCb = null;
 
   function spd() { return state && state.speed > 0 ? state.speed : 1; }
   function paused() { return frozen; }
@@ -99,7 +123,7 @@ window.ShopView = (function () {
     var tgtY = a.tgtY != null ? a.tgtY : curY;
     if (isNaN(tgtX)) return;
     if (Math.abs(curX - tgtX) < 0.5 && Math.abs(curY - tgtY) < 0.5) return; // 既に目的地
-    move(a, tgtX, tgtY, Math.max(200, walkMs(curX, tgtX) + Math.abs(curY - tgtY) * 6));
+    move(a, tgtX, tgtY, Math.max(gm(RESUME_FLOOR_MIN), walkMs(curX, tgtX) + Math.abs(curY - tgtY) * gm(RESUME_Y_MIN_PER_PCT)));
   }
 
   function freeze() {
@@ -122,6 +146,27 @@ window.ShopView = (function () {
     timers.forEach(armTimer);
     actors.forEach(resumeActor);
     syncSpeed();
+  }
+
+  // ---------- v12-1: 速度を切り替えた瞬間、画面上の客の残り時間・移動を新しい速度に追随させる ----------
+  // pause/resume(freeze/unfreeze)と同じ考え方(残り時間を覚えて作り直す)を、止めずにその場で行う。
+  // timers.remaining は「現在の速度での実ms」を持っているので、旧速度/新速度の比率を掛け直すだけで
+  // 正しい実msに変換できる。移動中の客はpinActor→resumeActorで、今いる位置から新しい尺で動き直す。
+  function retime() {
+    var ns = spd();
+    if (ns === curSpd) return;
+    var ratio = curSpd / ns; // 旧速度/新速度
+    var now = Date.now();
+    timers.forEach(function (rec) {
+      if (rec.id) {
+        clearTimeout(rec.id);
+        rec.remaining = Math.max(0, rec.remaining - (now - rec.startedAt));
+      }
+      rec.remaining = Math.max(16, rec.remaining * ratio);
+      if (!frozen) armTimer(rec);
+    });
+    if (!frozen) actors.forEach(function (a) { pinActor(a); resumeActor(a); });
+    curSpd = ns;
   }
 
   // ---------- 静物(店の躯体・設備) ----------
@@ -303,8 +348,8 @@ window.ShopView = (function () {
     a.el.dataset.x = x;
   }
 
-  function walkMs(fromX, toX, perPct) {
-    return Math.abs(toX - fromX) * (perPct || 22);
+  function walkMs(fromX, toX, minPerPct) {
+    return Math.abs(toX - fromX) * gm(minPerPct || WALK_MIN_PER_PCT);
   }
 
   function spawnCustomer(segId) {
@@ -339,7 +384,7 @@ window.ShopView = (function () {
   function layoutQueue() {
     queue.forEach(function (a, i) {
       var slot = Math.min(i, GEO.queueMax - 1);
-      move(a, queueSlot(slot), GEO.walkY, 500);
+      move(a, queueSlot(slot), GEO.walkY, gm(QUEUE_REFLOW_MIN));
     });
   }
 
@@ -353,7 +398,7 @@ window.ShopView = (function () {
     later(function () {
       if (a.gone || !a.queued) return;
       if (Math.random() > tol * 0.9 + 0.05) leaveQueue(a);
-    }, 4000 + tol * 9000);
+    }, gm(QUEUE_PATIENCE_BASE_MIN + tol * QUEUE_PATIENCE_TOL_MIN));
   }
 
   function leaveQueue(a) {
@@ -381,18 +426,22 @@ window.ShopView = (function () {
   function enterAndSit(a, seat) {
     seat.occupant = a;
     a.seat = seat;
+    // v12-3:「今週の客」は実際に入店した(=席へ向かい始めた)瞬間に+1する。諦めて帰った行列客は
+    // ここを通らないので数えない。
+    if (onEnterCb) onEnterCb(a.segId);
     var fromX = parseFloat(a.el.dataset.x || GEO.doorX);
-    var ms = walkMs(fromX, seat.x, 20) + 200;
+    var ms = walkMs(fromX, seat.x, SEAT_WALK_MIN_PER_PCT) + gm(ENTER_EXTRA_MIN);
     move(a, seat.x, GEO.walkY, ms);
     later(function () {
       if (a.gone) return;
-      move(a, seat.x, seat.sitY, 420);      // 席に着く
+      move(a, seat.x, seat.sitY, gm(SIT_MIN));      // 席に着く
       later(function () {
         if (a.gone) return;
         a.el.classList.add("eating");
-        // v10-3: 滞在時間を実時間に合わせる(提供+食事で30〜40分 ≒ 2.5〜3.5秒@×1)
-        later(function () { finishMeal(a); }, U.rand(2500, 3500));
-      }, 420);
+        // v10-3/v12-1: 滞在時間はゲーム内時間で持つ(提供+食事で30〜40分程度)。実秒は
+        // BASE_HOUR_MS(js/utils.js)から作るので、速度体系を変えても比率は崩れない。
+        later(function () { finishMeal(a); }, gm(U.rand(MEAL_MIN_MIN, MEAL_MIN_MAX)));
+      }, gm(SIT_MIN));
     }, ms);
   }
 
@@ -402,16 +451,16 @@ window.ShopView = (function () {
     a.bubble.textContent = faceFor(a.segId);
     a.el.classList.add("show-bubble");
     var seat = a.seat;
-    move(a, seat.x, GEO.walkY, 420);        // 席を立つ
+    move(a, seat.x, GEO.walkY, gm(SIT_MIN));        // 席を立つ
     later(function () {
       if (a.gone) return;
       seat.occupant = null;
       a.seat = null;
-      var ms = walkMs(seat.x, GEO.offX, 20);
+      var ms = walkMs(seat.x, GEO.offX, SEAT_WALK_MIN_PER_PCT);
       move(a, GEO.offX, GEO.walkY, ms);
       later(function () { removeActor(a); }, ms);
       pullFromQueue();
-    }, 460);
+    }, gm(LEAVE_WAIT_MIN));
   }
 
   // ---------- v10-3: 送り出し(客の湧き)。帯の開始時にその帯ぶんを一括で予約する ----------
@@ -425,7 +474,7 @@ window.ShopView = (function () {
     if (!band) return;
     var dow = U.dow(state.day);
     var counts = (traffic.schedule && traffic.schedule[dow] && traffic.schedule[dow][bandKey]) || {};
-    var durationMs = (band.end - band.start) * BAND_HOUR_MS; // 1x基準。実際の速さはlater()側で調整される
+    var durationMs = gm((band.end - band.start) * 60); // ゲーム内分→1x基準ms。実際の速さはlater()側で調整される
     Object.keys(counts).forEach(function (segId) {
       var n = counts[segId];
       for (var i = 0; i < n; i++) {
@@ -442,22 +491,26 @@ window.ShopView = (function () {
   function closeBand(bandKey) { /* noop */ }
 
   function syncSpeed() {
-    var sec = 6 / spd();
+    var sec = (gm(STAFF_PACE_MIN) / spd()) / 1000;
     staffActors.forEach(function (el) {
       el.style.animationDuration = sec + "s";
       // ディレイも速度に比例させないと、速いときに全員の動きが揃ってしまう
       el.style.animationDelay = (-(Number(el.dataset.idx) || 0) * sec * 0.37) + "s";
     });
     if (stage) stage.classList.toggle("paused", paused());
+    retime(); // v12-1: 速度が変わっていれば、画面上の客の残り時間もここで追随させる
   }
 
   // ---------- 外部API ----------
-  function mount(container, gameState) {
+  // callbacks: { onEnter(segId) } v12-3。客が実際に入店した瞬間に呼ばれる。
+  function mount(container, gameState, callbacks) {
     state = gameState;
+    onEnterCb = (callbacks && callbacks.onEnter) || null;
     clearTimers();
     stage = h("div", { className: "shop-stage" });
     container.appendChild(stage);
     builtSig = "";
+    curSpd = spd();
     ensureBuilt();
   }
 
@@ -500,6 +553,7 @@ window.ShopView = (function () {
     staffActors = [];
     builtSig = "";
     frozen = false;
+    onEnterCb = null;
     traffic = { schedule: null, queueLevel: 0, satBySeg: {} };
   }
 

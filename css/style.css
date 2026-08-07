@@ -270,19 +270,46 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 
 .shop-fill { position: absolute; inset: 0; z-index: 1; }
 
-/* 上部の薄い帯。背景は半透明で店が透ける */
+/* 上部の薄い帯。背景は半透明で店が透ける。
+   v12-4: 固定グリッド(2行)にして、各要素に列を割り当てる。要素同士が重ならないことは
+   グリッド列の幅+ellipsis(はみ出したら省略)で保証する。メディアクエリは使わず、#appの幅に
+   対する比率(rem・%)だけで組む(既存方針どおり)。上帯の高さは画面高の12%を目安に収める。 */
 .top-bar {
   position: absolute; left: 0; right: 0; top: 0; z-index: 20;
-  display: flex; align-items: center; justify-content: space-around; gap: 4px;
+  display: flex; flex-direction: column; gap: 2px;
   padding: 6px 8px 8px;
   background: linear-gradient(180deg, rgba(14, 10, 7, 0.85) 0%, rgba(14, 10, 7, 0.55) 60%, rgba(14, 10, 7, 0) 100%);
 }
-.top-bar .ti { text-align: center; line-height: 1.2; min-width: 0; flex: 1; }
-.top-bar .tl { font-size: 0.54rem; color: var(--text-dim); }
-.top-bar .tv { font-size: 0.8rem; white-space: nowrap; }
+.top-bar .tb-row { display: grid; gap: 4px; align-items: start; }
+/* 1行目: 日時(やや広め) + 所持金。この2つが重なるのが元の不具合だったので、専用の行に分ける */
+.top-bar .tb-row-main { grid-template-columns: 1.3fr 1fr; }
+/* 2行目: 今週の客・評判・疲労(+行列がいれば右にもう1列) */
+.top-bar .tb-row-sub { grid-template-columns: repeat(3, 1fr) auto; }
+.top-bar .ti {
+  text-align: center; line-height: 1.2;
+  min-width: 0;   /* グリッド項目を内容幅より縮められるようにする(縮めないと隣に重なる) */
+  overflow: hidden; /* 縮めてもなお長い文字列は、次の要素にはみ出さずここで切る */
+}
+.top-bar .tb-row-main .ti:first-child { text-align: left; }
+.top-bar .tb-row-main .ti:last-child { text-align: right; }
+.top-bar .tl {
+  font-size: 0.5rem; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.top-bar .tv {
+  font-size: 0.78rem; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; /* 幅を超える分は「…」で切る。隣と重ねない */
+}
 .top-bar .tv.warn { color: var(--accent); }
 .top-bar .tv.bad { color: var(--bad); }
-.top-bar .queue-mark { color: var(--accent-2); font-size: 0.7rem; }
+.top-bar .queue-mark { color: var(--accent-2); font-size: 0.68rem; text-align: right; white-space: nowrap; }
+/* v12-3: 「今週の客」が変わった瞬間だけ軽く強調する(0.2秒・派手にしない) */
+.top-bar .tv-pulse { animation: tvPulse 0.2s ease; }
+@keyframes tvPulse {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.16); color: var(--accent); }
+  100% { transform: scale(1); }
+}
 
 /* 速度切替は押す回数が多いので常時表示 */
 .speed-dock {

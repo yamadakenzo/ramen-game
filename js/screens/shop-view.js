@@ -425,6 +425,16 @@ window.ShopView = (function () {
     return "😒";
   }
 
+  // v14-2: 絵文字が単色フォント(Noto Emoji)になり表情の区別が付きにくいため、faceFor()と
+  // 同じ閾値で満足/普通/不満のクラス名を作り、CSS側(.sv-bubble.mood-*)で色を分ける。
+  function moodClassFor(segId) {
+    var sat = traffic.satBySeg[segId];
+    if (sat == null) return "mood-neutral";
+    if (sat >= 60) return "mood-good";
+    if (sat >= 45) return "mood-neutral";
+    return "mood-bad";
+  }
+
   // ---------- v13-2: 退店時のフィードバック(表情の下に「評判 +1」を出す) ----------
   // 週の評判は既存の式(runWeeklyCalc: reputation += (avgSat-50)*0.04)で週の平均満足度から
   // 一括更新されており、客1人ぶんの寄与という数値は元々存在しない。ここでは新しい数値を作らず、
@@ -557,6 +567,7 @@ window.ShopView = (function () {
     if (i >= 0) queue.splice(i, 1);
     layoutQueue();
     a.bubble.textContent = "😒";
+    a.bubble.className = "sv-bubble mood-bad"; // 行列を諦めて帰るのは常に不満扱い
     a.el.classList.add("show-bubble");
     var ms = walkMs(queueSlot(i < 0 ? 0 : i), GEO.offX);
     move(a, GEO.offX, GEO.walkY, ms);
@@ -600,6 +611,7 @@ window.ShopView = (function () {
     if (a.gone) return;
     a.el.classList.remove("eating");
     a.bubble.textContent = faceFor(a.segId);
+    a.bubble.className = "sv-bubble " + moodClassFor(a.segId);
     a.el.classList.add("show-bubble");
     showExitPopup(a); // v13-2: 退店の動きが始まった瞬間、表情の下に「評判 ±1」を出す(変化があるときだけ)
     if (onExitCb) onExitCb(a.segId, a.priceOwed); // v13-3: 退店の瞬間、その1杯の売価を所持金へ

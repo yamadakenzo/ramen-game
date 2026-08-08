@@ -227,7 +227,8 @@ window.ScreenLoop = (function () {
     var chargedBreakdown = { rent: 0, wages: 0, loanPay: 0 }; // 月次まとめ用に、実際に引き落とされた内訳を週次ログへ残す
     // v09-3: 「月初」の判定を、週→月の近似(4.333週/月)から、表示上の月が実際に変わったかへ変更。
     // 週が月をまたいでよくなったため、月の請求は「その週で月が変わったこと」で判定する。
-    if (U.monthJustChanged(state.day)) {
+    var monthCharged = U.monthJustChanged(state.day);
+    if (monthCharged) {
       chargedBreakdown = monthlyCostBreakdown();
       monthlyCosts = chargedBreakdown.total;
       state.money -= monthlyCosts;
@@ -281,7 +282,7 @@ window.ScreenLoop = (function () {
     // 1. 今週の収支 → 2. イベント(あれば) → 3. 月次まとめ(あれば) → 4. 定休日のアクション、の順で必ず止めて見せる。
     // どの段階も「次へ」を押すまで進まない。state.dayはこの間ずっと今週の最終日のまま動かさない
     // (advanceWeekで初めて次の週の頭に進める)。
-    showWeeklyBalance(finance, customers, function () {
+    showWeeklyBalance(finance, customers, chargedBreakdown, monthCharged, function () {
       proceedToEvents(finishedWeek, weekStats);
     });
   }
@@ -439,9 +440,12 @@ window.ScreenLoop = (function () {
   }
 
   // 「今週：客52人/満足38・不満14/売上¥46,800」のようなデータをまとめておく。トグル切替の再描画にも使う。
-  function buildFlashData(finance, customers) {
+  // v14-3: 月額費用(家賃・人件費・返済)は「週割りの概算」ではなく、runWeeklyCalcが実際に
+  // 所持金から引いた額(chargedBreakdown)をそのまま使う。月初でない週はここが全て0になるので、
+  // その週は表示側でも「発生しない」として出す(推測で埋め直さない=逆算しない)。
+  function buildFlashData(finance, customers, chargedBreakdown, monthCharged) {
     var s = satSplit(finance, customers);
-    var mc = monthlyCostBreakdown(); // 表示用に月額を毎週割り出す(実際の引き落としは月初のみ)
+    var cb = chargedBreakdown || { rent: 0, wages: 0, loanPay: 0 };
     var revenue = finance.revenue;
     return {
       week: U.weekOfRun(state.day),
@@ -449,15 +453,16 @@ window.ScreenLoop = (function () {
       satGood: s.good, satBad: s.bad,
       revenue: revenue, foodCost: finance.foodCost,
       foodCostPct: revenue > 0 ? Math.round((finance.foodCost / revenue) * 100) : 0,
-      wageShare: mc.wages / 4.333, rentShare: mc.rent / 4.333, loanShare: mc.loanPay / 4.333,
-      net: revenue - finance.foodCost - mc.total / 4.333
+      monthCharged: !!monthCharged,
+      wages: cb.wages, rent: cb.rent, loanPay: cb.loanPay,
+      net: revenue - finance.foodCost - cb.rent - cb.wages - cb.loanPay
     };
   }
 
   // 週末停止の第1段階。読んでいる間に裏で時間が進むことは絶対にない(タイマーを一切使わない)。
   // 「次へ」を押すまでここで止まる。
-  function showWeeklyBalance(finance, customers, onDone) {
-    lastFlashData = buildFlashData(finance, customers);
+  function showWeeklyBalance(finance, customers, chargedBreakdown, monthCharged, onDone) {
+    lastFlashData = buildFlashData(finance, customers, chargedBreakdown, monthCharged);
     renderWeeklyBalanceModal(onDone);
   }
 
@@ -484,19 +489,29 @@ window.ScreenLoop = (function () {
     ]));
 
     if (isDetailedFlash()) {
-      var table = h("div", { className: "wf-table" }, [
+      var rows = [
         moneyRow("売上", d.revenue),
-        moneyRow("仕入", -d.foodCost, { tone: "bad", suffix: "（原価率 " + d.foodCostPct + "%）" }),
-        moneyRow("人件費", -d.wageShare, { tone: "bad" }),
-        moneyRow("家賃", -d.rentShare, { tone: "bad" }),
-        moneyRow("返済", -d.loanShare, { tone: "bad" }),
-        h("div", { className: "wf-divider" }),
-        moneyRow("残り", d.net, { sign: true })
-      ]);
+        moneyRow("仕入", -d.foodCost, { tone: "bad", suffix: "（原価率 " + d.foodCostPct + "%）" })
+      ];
+      // v14-3: 家賃・人件費・返済は月初の週にしか引き落とされない固定費。実際に引かれた週だけ、
+      // 実際に引かれた額をそのまま出す(それ以外の週は行ごと出さない=無かったことにする)。
+      if (d.monthCharged) {
+        if (d.wages) rows.push(moneyRow("人件費", -d.wages, { tone: "bad" }));
+        if (d.rent) rows.push(moneyRow("家賃", -d.rent, { tone: "bad" }));
+        if (d.loanPay) rows.push(moneyRow("返済", -d.loanPay, { tone: "bad" }));
+      }
+      rows.push(h("div", { className: "wf-divider" }));
+      rows.push(moneyRow("残り", d.net, { sign: true }));
+      var table = h("div", { className: "wf-table" }, rows);
       table.lastChild.className = "wf-row wf-net";
       table.lastChild.querySelector(".wf-val").classList.add(d.net >= 0 ? "good" : "bad");
       box.appendChild(table);
-      box.appendChild(h("div", { className: "wf-note", text: "人件費・家賃・返済は月額を週割りした概算。実際の引き落としは月初にまとめて。" }));
+      box.appendChild(h("div", {
+        className: "wf-note",
+        text: d.monthCharged
+          ? "人件費・家賃・返済は月初のこの週にまとめて引き落とし済み。"
+          : "人件費・家賃・返済は月初の週にまとめて引き落とし。今週の引き落としはなし。"
+      }));
     } else {
       box.appendChild(h("p", { text: "売上 " + U.formatMoney(d.revenue) }));
     }

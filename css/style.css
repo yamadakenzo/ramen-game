@@ -1,7 +1,7 @@
 /* v13-4: 絵文字の見た目をOS任せにすると端末ごとに別の絵(線の太さ・彩度)が出てしまうため、
    Noto Emoji(OFL、クレジット表記不要)を同梱して絵文字を出す要素にだけ当てる。
    実際に使っている絵文字だけをサブセット化した約25KBのwoff2(css/fonts/、ライセンスは
-   css/fonts/OFL.txt)。本文フォント(bodyのMS Gothic等)には触れない。 */
+   css/fonts/OFL.txt)。本文フォント(v14で M PLUS Rounded 1c に統一。css/fonts.css参照)には触れない。 */
 @font-face {
   font-family: "NotoEmojiGame";
   src: url("fonts/NotoEmojiGame-subset.woff2") format("woff2");
@@ -9,41 +9,57 @@
   font-style: normal;
   font-display: swap;
 }
-/* 絵文字を出す要素だけに当てる(本文フォントの並び.MS Gothic等.はそのままフォールバックに残す。
+/* 絵文字を出す要素だけに当てる(本文フォントの並びはそのままフォールバックに残す。
    絵文字以外の文字(暖簾の「らーめん」等)はサブセットに無いのでこの並びの続きへ自然に落ちる)。
    対象: 客・店員・設備・厨房の丼(.shop-stage)/ 客層マーカー(.segment-chip, .hours-seg-chip)/
    レシピ・設備・人物などの絵文字アイコン(.emoji, .staff-emoji)。満足度アイコンは.shop-stage内。 */
 .shop-stage, .emoji, .staff-emoji, .segment-chip, .hours-seg-chip {
-  font-family: "NotoEmojiGame", "MS Gothic", "Osaka-Mono", "Consolas", monospace;
+  font-family: "NotoEmojiGame", "Hiragino Maru Gothic ProN", "Meiryo", sans-serif;
 }
+
+/* ================================================================
+   v14-1: 本文フォントは M PLUS Rounded 1c(400/700の2ウェイトのみ)。
+   丸ゴシックで日本語とアルファベットが同じ設計思想で描かれている。取得手順は
+   tools/fetch-font.sh、実体はcss/fonts/mplus-rounded-1c/(ライセンスは同ディレクトリのOFL.txt)。
+   index.html側でcss/fonts.css(@font-face定義)をこのファイルより先に読み込んでいる。
+   ================================================================ */
 
 /* ================================================================
    v05: スマホゲームの固定枠。ページ自体はスクロールしない。
    レイアウトは縦長(9:16)1種類だけ。PCではレターボックスで中央に置く。
+   v14-2: 色は4色相(生成り／濃茶／朱／緑)だけに固定する。これ以外の色をここから下に書かない。
+   薄い色・境界線・無効状態は濃茶(--c-ink)の透過だけで作る(新しいグレーを持ち込まない)。
    ================================================================ */
 :root {
-  --bg: #1a1410;
-  --bg-2: #241b14;
-  --panel: #2b2118;
-  --panel-2: #362a1e;
-  --border: #6b4a2a;
-  --border-light: #a87c45;
-  --text: #f0e6d2;
-  --text-dim: #b8a888;
-  --accent: #e8a13b;
-  --accent-2: #d95c3a;
-  --good: #6fbf5c;
-  --bad: #d9534f;
-  --money: #f4d35e;
-  --shadow: rgba(0, 0, 0, 0.5);
+  --c-bg:     #EFE4CB;  /* 生成り・地 */
+  --c-panel:  #F8F1E1;  /* 生成り・面(パネルやカード) */
+  --c-ink:    #2E211A;  /* 濃茶・文字と枠 */
+  --c-accent: #E0451D;  /* 朱・暖簾と強調とボタン */
+  --c-up:     #2F7A4A;  /* 緑・増加 */
+  --c-down:   #A8321A;  /* 朱の暗色・減少(新しい色相ではなく朱を暗くしたもの) */
 
-  /* 枠の幅。これ1つで画面全体のスケールが決まる。
+  --c-ink-64: rgba(46, 33, 26, .64);  /* 副次的な文字 */
+  --c-ink-32: rgba(46, 33, 26, .32);  /* 無効・グレーアウト */
+  --c-ink-16: rgba(46, 33, 26, .16);  /* 罫線・区切り・立体感の代わりのベタずらし影 */
+  --c-ink-08: rgba(46, 33, 26, .08);  /* 面のわずかな沈み */
+
+  --r: 12px;    /* 角丸(ボタン・パネル共通) */
+  --r-s: 8px;   /* 角丸(小さい要素) */
+
+  /* v14-1: 文字の階層。サイズはこの5段階だけ(px固定、frame-wに連動させない=モバイルでも縮めない)。 */
+  --fs-note: 12px;     /* 注記・単位 / 400 / 行間1.5 */
+  --fs-body: 14px;     /* 本文 / 400 / 行間1.6 */
+  --fs-label: 16px;    /* ボタン・ラベル / 700 / 行間1.4 */
+  --fs-heading: 20px;  /* 見出し / 700 / 行間1.3 */
+  --fs-number: 28px;   /* 数字(所持金・客数など) / 700 / 行間1.2 */
+
+  /* 枠の幅。これ1つで画面全体(絵文字アイコンや余白などの装飾寸法)のスケールが決まる。
      dvh ではなく svh を使う: dvh はスマホのアドレスバーの出没に応じて値が変わり、
      タップの最中(touchstart〜touchend の間)に枠の大きさが動いてタップが外れる原因になる。
-     svh は「アドレスバーが出ている前提の最小値」で固定なので、タップ中に枠が動かない。 */
+     svh は「アドレスバーが出ている前提の最小値」で固定なので、タップ中に枠が動かない。
+     v14-1: 文字そのもの(--fs-*)はここから切り離してある。frame-wは絵文字・アイコン・
+     店の絵の寸法にのみ使う(掛け算のスケール基準)。 */
   --frame-w: min(100vw, calc(100svh * 9 / 16));
-  /* 文字も枠の幅に比例させる。以降 rem を使えば全部まとめて拡大縮小できる */
-  font-size: clamp(11px, calc(var(--frame-w) * 0.042), 17px);
 }
 
 * { box-sizing: border-box; }
@@ -55,9 +71,12 @@ html, body {
   height: 100vh;   /* 古いブラウザ向けの土台 */
   height: 100svh;  /* 対応ブラウザではこちらが勝つ(タップ中に値が動かない) */
   overflow: hidden;              /* ページ本体は絶対にスクロールさせない */
-  background: #0a0806;           /* レターボックスの余白 */
-  color: var(--text);
-  font-family: "MS Gothic", "Osaka-Mono", "Consolas", monospace;
+  background: var(--c-ink);      /* レターボックスの余白(枠の外側) */
+  color: var(--c-ink);
+  font-family: 'M PLUS Rounded 1c', 'Hiragino Maru Gothic ProN', 'Meiryo', sans-serif;
+  font-size: var(--fs-body);
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums; /* v14-1: 数字が変わっても桁位置が動かないよう全体に効かせる */
   overscroll-behavior: none;
 }
 
@@ -69,8 +88,8 @@ body { display: flex; justify-content: center; align-items: center; }
   height: 100vh;
   height: 100svh;
   overflow: hidden;
-  background: var(--bg);
-  box-shadow: 0 0 60px rgba(0, 0, 0, 0.9);
+  background: var(--c-bg);
+  box-shadow: 0 0 0 3px var(--c-ink); /* v14-2: ぼかし影の代わりに枠を1本、ベタで囲む */
   /* iOS のノッチ・下部バーを避ける */
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
@@ -97,9 +116,9 @@ body { display: flex; justify-content: center; align-items: center; }
 
 /* ---- 共通パーツ ---- */
 .pixel-panel {
-  background: var(--panel);
-  border: 3px solid var(--border);
-  box-shadow: inset 0 0 0 2px var(--bg-2), 3px 3px 0 var(--shadow);
+  background: var(--c-panel);
+  border: 2px solid var(--c-ink);
+  box-shadow: 3px 3px 0 var(--c-ink-16); /* v14-2: ぼかさない、べたずらしの影 */
   padding: 10px;
 }
 
@@ -110,65 +129,98 @@ body { display: flex; justify-content: center; align-items: center; }
   touch-action: manipulation;
 }
 
+/* v14-2: ボタン(副)= 地--c-panel/文字--c-ink/枠--c-ink。v14-1: ラベル階層(16px/700)。 */
 .btn {
   font-family: inherit;
-  background: var(--panel-2);
-  color: var(--text);
-  border: 3px solid var(--border);
-  box-shadow: 3px 3px 0 var(--shadow);
+  background: var(--c-panel);
+  color: var(--c-ink);
+  border: 2px solid var(--c-ink);
+  border-radius: var(--r-s);
+  box-shadow: 2px 2px 0 var(--c-ink-16);
   padding: 8px 12px;
-  font-size: 0.9rem;
+  font-size: var(--fs-label);
+  font-weight: 700;
   cursor: pointer;
   transition: transform 0.06s ease;
 }
-.btn:hover:not(:disabled) { background: #443423; border-color: var(--border-light); }
-.btn:active:not(:disabled) { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--shadow); }
-.btn:disabled { opacity: 0.35; cursor: not-allowed; }
-.btn.primary { background: var(--accent-2); border-color: #7a2a15; color: #fff; }
-.btn.primary:hover:not(:disabled) { background: #ef6a44; }
-.btn.small { padding: 4px 8px; font-size: 0.75rem; }
-.btn.selected { background: var(--accent); color: #241b14; border-color: #fff3d0; }
+.btn:hover:not(:disabled) { background: var(--c-ink-08); }
+.btn:active:not(:disabled) { transform: translate(2px, 2px); box-shadow: 0 0 0 var(--c-ink-16); }
+.btn:disabled { color: var(--c-ink-32); border-color: var(--c-ink-32); cursor: not-allowed; }
+/* v14-2: ボタン(主)= 地--c-accent/文字--c-panel/枠--c-ink */
+.btn.primary { background: var(--c-accent); border-color: var(--c-ink); color: var(--c-panel); }
+.btn.primary:hover:not(:disabled) { background: var(--c-down); }
+.btn.small { padding: 4px 8px; }
+.btn.selected { background: var(--c-accent); color: var(--c-panel); border-color: var(--c-ink); }
 
-h1, h2, h3 { margin: 0 0 6px 0; letter-spacing: 0.02em; }
-h1 { font-size: 1.25rem; color: var(--accent); }
-h2 { font-size: 1.05rem; color: var(--accent); }
-h3 { font-size: 0.9rem; color: var(--text-dim); }
+/* v14-2: 見出しの形(今回入れる唯一の装飾)。画面タイトルとパネル見出しを暖簾の帯にする。
+   朱の帯に生成りの抜き文字。帯の下端に切れ込みを2本入れる(画像は使わない、::afterに
+   --c-bgの細い矩形を2枚重ねるだけ)。これ以外の装飾は足さない。 */
+h1, h2, .sheet-title {
+  position: relative;
+  display: block;
+  margin: 0 0 8px 0;
+  padding: 8px 16px 10px;
+  background: var(--c-accent);
+  color: var(--c-panel);
+  border-radius: var(--r-s);
+  font-size: var(--fs-heading);
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+}
+h1::after, h2::after, .sheet-title::after {
+  content: "";
+  position: absolute;
+  left: 18px; bottom: 0;
+  width: 5px; height: 8px;
+  background: var(--c-bg);
+  box-shadow: 18px 0 0 var(--c-bg);
+}
+h3 {
+  margin: 0 0 6px 0;
+  letter-spacing: 0.02em;
+  font-size: var(--fs-label);
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--c-ink-64);
+}
 p { line-height: 1.6; margin: 0 0 6px 0; }
-.dim { color: var(--text-dim); font-size: 0.78rem; }
-.money { color: var(--money); font-weight: bold; }
-.good { color: var(--good); }
-.bad { color: var(--bad); }
+.dim { color: var(--c-ink-64); font-size: var(--fs-note); line-height: 1.5; }
+.money { color: var(--c-ink); font-weight: 700; }
+.good { color: var(--c-up); }
+.bad { color: var(--c-down); }
 
 ::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-thumb { background: var(--border); }
+::-webkit-scrollbar-thumb { background: var(--c-ink-32); }
 
 /* ---- オープニング ---- */
 #screen-opening { align-items: center; justify-content: center; padding: 20px; }
 .opening-box { text-align: center; animation: fadeIn 0.6s ease; }
-.opening-box p { font-size: 1rem; }
+.opening-box p { font-size: var(--fs-body); }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 .opening-actions { display: flex; gap: 10px; justify-content: center; margin-top: 16px; }
 
-/* ================= 案内役（開業フェーズ／営業中） ================= */
+/* ================= 案内役(開業フェーズ/営業中) ================= */
 .guide-bar {
   display: flex; gap: 8px; align-items: flex-start;
   padding: 9px 10px;
-  background: var(--panel);
-  border-bottom: 3px solid var(--border);
+  background: var(--c-panel);
+  border-bottom: 2px solid var(--c-ink);
   flex: 0 0 auto;
 }
 .guide-face {
   font-size: calc(var(--frame-w) * 0.105);
   line-height: 1;
-  border: 2px solid var(--border-light);
-  background: var(--panel-2);
+  border: 2px solid var(--c-ink);
+  border-radius: var(--r-s);
+  background: var(--c-bg);
   padding: 4px;
   flex: 0 0 auto;
 }
 .guide-text { flex: 1; min-width: 0; }
-.guide-name { font-size: 0.62rem; color: var(--accent); margin-bottom: 2px; }
-.guide-line { font-size: 0.8rem; line-height: 1.5; min-height: 2.4em; }
-.guide-line.react { color: var(--accent); }
+.guide-name { font-size: var(--fs-note); color: var(--c-accent); margin-bottom: 2px; font-weight: 700; }
+.guide-line { font-size: var(--fs-body); line-height: 1.5; min-height: 2.4em; }
+.guide-line.react { color: var(--c-accent); }
 
 /* 営業ループ中に下から出す吹き出し */
 .guide-bubble {
@@ -180,51 +232,54 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   display: none;
   gap: 7px;
   padding: 7px 9px;
-  background: rgba(28, 21, 15, 0.95);
-  border: 3px solid var(--border-light);
-  box-shadow: 3px 3px 0 var(--shadow);
+  background: var(--c-panel);
+  border: 2px solid var(--c-ink);
+  border-radius: var(--r-s);
+  box-shadow: 3px 3px 0 var(--c-ink-16);
   cursor: pointer;
   animation: fadeIn 0.2s ease;
 }
 .guide-bubble.show { display: flex; }
 .guide-bubble .guide-face { font-size: calc(var(--frame-w) * 0.07); padding: 2px; }
-.guide-bubble .guide-line { font-size: 0.72rem; min-height: 0; }
+.guide-bubble .guide-line { font-size: var(--fs-note); min-height: 0; }
 
-/* ================= 開業フェーズ（1画面1問） ================= */
+/* ================= 開業フェーズ(1画面1問) ================= */
 #screen-setup { padding: 0; }
 
 .step-dots { display: flex; gap: 3px; padding: 6px 10px 0; flex: 0 0 auto; }
-.step-dots .dot { flex: 1; height: 4px; background: #120e0a; border: 1px solid var(--border); }
-.step-dots .dot.done { background: var(--good); }
-.step-dots .dot.active { background: var(--accent); }
+.step-dots .dot { flex: 1; height: 4px; background: var(--c-ink-16); border: 1px solid var(--c-ink); }
+.step-dots .dot.done { background: var(--c-up); }
+.step-dots .dot.active { background: var(--c-accent); }
 
 .setup-body { padding: 8px 10px 12px; }
-.setup-hint { font-size: 0.72rem; color: var(--text-dim); margin-bottom: 6px; }
+.setup-hint { font-size: var(--fs-note); color: var(--c-ink-64); margin-bottom: 6px; }
 
 .choice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .choice-grid.wide { grid-template-columns: 1fr; }
 .choice-card {
-  background: var(--panel-2);
-  border: 3px solid var(--border);
+  background: var(--c-panel);
+  border: 2px solid var(--c-ink);
+  border-radius: var(--r);
   padding: 8px;
   cursor: pointer;
   transition: border-color 0.1s, background 0.1s;
 }
-.choice-card:hover { border-color: var(--border-light); }
-.choice-card.selected { border-color: var(--accent); background: #3a2c1a; }
-.choice-card.disabled { opacity: 0.4; cursor: not-allowed; filter: grayscale(0.7); }
+.choice-card:hover { background: var(--c-ink-08); }
+.choice-card.selected { border-color: var(--c-accent); background: var(--c-ink-08); }
+.choice-card.disabled { opacity: 0.45; cursor: not-allowed; }
 .choice-card .emoji { font-size: 1.5rem; line-height: 1.1; }
-.choice-card .name { font-weight: bold; margin: 3px 0 2px; font-size: 0.85rem; }
-.choice-card .blurb { font-size: 0.7rem; color: var(--text-dim); line-height: 1.45; }
-.choice-card .cost { color: var(--money); font-size: 0.78rem; }
-.choice-card .sub { font-size: 0.7rem; color: var(--text-dim); }
-.choice-card .locked { font-size: 0.68rem; color: var(--bad); margin-top: 3px; }
+.choice-card .name { font-weight: 700; margin: 3px 0 2px; font-size: var(--fs-label); }
+.choice-card .blurb { font-size: var(--fs-note); color: var(--c-ink-64); line-height: 1.45; }
+.choice-card .cost { color: var(--c-ink); font-weight: 700; font-size: var(--fs-note); }
+.choice-card .sub { font-size: var(--fs-note); color: var(--c-ink-64); }
+.choice-card .locked { font-size: var(--fs-note); color: var(--c-down); margin-top: 3px; }
 /* v10-2-2: 営業時間帯カードの「この帯に来る客層」チップ */
 .hours-seg-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .hours-seg-chip {
   display: inline-flex; align-items: center; justify-content: center;
   width: 1.5em; height: 1.5em; font-size: 0.85rem;
-  background: var(--panel); border: 2px solid var(--border);
+  background: var(--c-bg); border: 2px solid var(--c-ink); border-radius: var(--r-s);
+  color: var(--c-ink-64); /* v14-2: 客層マーカー(理想値の縦線と同じ扱い) */
 }
 .hours-seg-chip.weekend { opacity: 0.55; border-style: dashed; }
 
@@ -233,58 +288,64 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   margin-top: 6px;
   font-family: inherit;
   background: none;
-  border: 2px solid var(--border);
-  color: var(--text-dim);
+  border: 2px solid var(--c-ink-32);
+  border-radius: var(--r-s);
+  color: var(--c-ink-64);
   padding: 2px 6px;
-  font-size: 0.62rem;
+  font-size: var(--fs-note);
   cursor: pointer;
 }
-.detail-btn:hover { border-color: var(--border-light); color: var(--text); }
+.detail-btn:hover { border-color: var(--c-ink); color: var(--c-ink); }
 .card-detail {
   display: none;
   margin-top: 6px;
   padding-top: 5px;
-  border-top: 1px solid var(--border);
-  font-size: 0.66rem;
-  color: var(--text-dim);
+  border-top: 1px solid var(--c-ink-16);
+  font-size: var(--fs-note);
+  color: var(--c-ink-64);
   line-height: 1.5;
 }
 .choice-card.show-detail .card-detail { display: block; }
 
-/* 4-5: 客層プレビュー（固定枠に収まる横スクロールの帯） */
+/* 4-5: 客層プレビュー(固定枠に収まる横スクロールの帯) */
 .setup-preview {
   flex: 0 0 auto;
   padding: 6px 10px;
-  background: rgba(0, 0, 0, 0.3);
-  border-top: 2px solid var(--border);
+  background: var(--c-ink-08);
+  border-top: 2px solid var(--c-ink);
 }
-.preview-head { display: flex; align-items: baseline; gap: 6px; font-size: 0.72rem; margin-bottom: 5px; }
+.preview-head { display: flex; align-items: baseline; gap: 6px; font-size: var(--fs-note); margin-bottom: 5px; }
 .segment-preview { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 3px; }
 .segment-chip {
   flex: 0 0 auto;
   display: flex; align-items: center; gap: 5px;
-  border: 2px solid var(--border);
+  border: 2px solid var(--c-ink);
+  border-radius: var(--r-s);
   padding: 4px 7px;
-  background: var(--panel-2);
+  background: var(--c-panel);
   opacity: 0.35;
   transition: opacity 0.2s, border-color 0.2s;
-  font-size: 0.68rem;
+  font-size: var(--fs-note);
   white-space: nowrap;
 }
-.segment-chip .bar { width: 34px; height: 5px; background: #1a1410; border: 1px solid var(--border); position: relative; }
-.segment-chip .bar-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); }
-.segment-chip.lit { opacity: 1; border-color: var(--accent); }
-.segment-chip.blocked { opacity: 0.22; filter: grayscale(1); }
+/* v14-2で気づいた既存不具合: position:relativeが無く、子の.bar-fill(position:absolute)が
+   最寄りの配置済み祖先(#app等)まで飛んで画面全体に色面を描いていた。旧配色(暗色地に
+   琥珀のbar-fill)では紛れて気づきにくかったが、新配色で朱の巨大な矩形として表面化した。
+   数値・ロジックには触れていない、位置指定の土台を足すだけの修正。 */
+.segment-chip .bar { position: relative; width: 34px; height: 5px; background: var(--c-ink-16); border: 1px solid var(--c-ink); }
+.segment-chip .bar-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--c-accent); }
+.segment-chip.lit { opacity: 1; border-color: var(--c-accent); }
+.segment-chip.blocked { opacity: 0.3; }
 
 .setup-footer {
   flex: 0 0 auto;
   display: flex; justify-content: space-between; align-items: center; gap: 8px;
   padding: 8px 10px;
-  background: var(--panel);
-  border-top: 3px solid var(--border);
+  background: var(--c-panel);
+  border-top: 2px solid var(--c-ink);
 }
 
-/* ================= 営業ループ（店の絵を枠いっぱいに） ================= */
+/* ================= 営業ループ(店の絵を枠いっぱいに) ================= */
 #screen-loop { padding: 0; }
 
 .shop-fill { position: absolute; inset: 0; z-index: 1; }
@@ -292,12 +353,15 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 /* 上部の薄い帯。背景は半透明で店が透ける。
    v12-4: 固定グリッド(2行)にして、各要素に列を割り当てる。要素同士が重ならないことは
    グリッド列の幅+ellipsis(はみ出したら省略)で保証する。メディアクエリは使わず、#appの幅に
-   対する比率(rem・%)だけで組む(既存方針どおり)。上帯の高さは画面高の12%を目安に収める。 */
+   対する比率(rem・%)だけで組む(既存方針どおり)。上帯の高さは画面高の12%を目安に収める。
+   v14-2: 「店が透ける」半透明の演出はやめ、パレット内の変数だけで塗れる不透明の生成り面にした
+   (透過ぶんの色を新しく作らないため)。帯の下端の境界線だけで店の絵との区切りを付ける。 */
 .top-bar {
   position: absolute; left: 0; right: 0; top: 0; z-index: 20;
   display: flex; flex-direction: column; gap: 2px;
   padding: 6px 8px 8px;
-  background: linear-gradient(180deg, rgba(14, 10, 7, 0.85) 0%, rgba(14, 10, 7, 0.55) 60%, rgba(14, 10, 7, 0) 100%);
+  background: var(--c-panel);
+  border-bottom: 2px solid var(--c-ink);
 }
 .top-bar .tb-row { display: grid; gap: 4px; align-items: start; }
 /* 1行目: 日時(やや広め) + 所持金。この2つが重なるのが元の不具合だったので、専用の行に分ける */
@@ -312,21 +376,21 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .top-bar .tb-row-main .ti:first-child { text-align: left; }
 .top-bar .tb-row-main .ti:last-child { text-align: right; }
 .top-bar .tl {
-  font-size: 0.5rem; color: var(--text-dim);
+  font-size: 10px; color: var(--c-ink-64);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .top-bar .tv {
-  font-size: 0.78rem; white-space: nowrap;
+  font-size: var(--fs-note); font-weight: 700; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; /* 幅を超える分は「…」で切る。隣と重ねない */
 }
-.top-bar .tv.warn { color: var(--accent); }
-.top-bar .tv.bad { color: var(--bad); }
-.top-bar .queue-mark { color: var(--accent-2); font-size: 0.68rem; text-align: right; white-space: nowrap; }
+.top-bar .tv.warn { color: var(--c-accent); }
+.top-bar .tv.bad { color: var(--c-down); }
+.top-bar .queue-mark { color: var(--c-accent); font-size: var(--fs-note); text-align: right; white-space: nowrap; }
 /* v12-3: 「今週の客」が変わった瞬間だけ軽く強調する(0.2秒・派手にしない) */
 .top-bar .tv-pulse { animation: tvPulse 0.2s ease; }
 @keyframes tvPulse {
   0% { transform: scale(1); }
-  45% { transform: scale(1.16); color: var(--accent); }
+  45% { transform: scale(1.16); color: var(--c-accent); }
   100% { transform: scale(1); }
 }
 
@@ -334,13 +398,14 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .speed-dock {
   position: absolute; left: 8px; bottom: 10px; z-index: 22;
   display: flex; gap: 3px;
-  background: rgba(14, 10, 7, 0.72);
-  border: 2px solid var(--border);
+  background: var(--c-panel);
+  border: 2px solid var(--c-ink);
+  border-radius: var(--r-s);
   padding: 3px;
 }
-.speed-dock .btn { padding: 4px 6px; font-size: 0.68rem; border-width: 2px; box-shadow: none; }
+.speed-dock .btn { padding: 4px 6px; border-width: 2px; box-shadow: none; }
 /* v09-2: 週末の完全停止中、速度ボタンの代わりに出す表示 */
-.speed-locked { display: flex; align-items: center; padding: 4px 6px; font-size: 0.68rem; color: var(--accent); }
+.speed-locked { display: flex; align-items: center; padding: 4px 6px; font-size: var(--fs-note); color: var(--c-accent); font-weight: 700; }
 
 /* パネルを開いている間はパネルの上へ逃がす。速度切替とパネル切替は常に押せること */
 .speed-dock.raised, .fab-col.raised { bottom: calc(52% + 8px); z-index: 31; }
@@ -354,69 +419,69 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   width: calc(var(--frame-w) * 0.115);
   height: calc(var(--frame-w) * 0.115);
   border-radius: 50%;
-  border: 3px solid var(--border-light);
-  background: rgba(43, 33, 24, 0.88);
-  color: var(--text);
+  border: 2px solid var(--c-ink);
+  background: var(--c-panel);
+  color: var(--c-ink);
   font-family: inherit;
   cursor: pointer;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   line-height: 1;
-  box-shadow: 2px 2px 0 var(--shadow);
+  box-shadow: 2px 2px 0 var(--c-ink-16);
   padding: 0;
   touch-action: manipulation;
 }
 .fab .fab-icon { font-size: calc(var(--frame-w) * 0.042); }
-.fab .fab-label { font-size: calc(var(--frame-w) * 0.02); color: var(--text-dim); margin-top: 2px; }
-.fab.active { border-color: var(--accent); background: rgba(92, 66, 30, 0.95); }
+.fab .fab-label { font-size: calc(var(--frame-w) * 0.02); color: var(--c-ink-64); margin-top: 2px; }
+.fab.active { border-color: var(--c-accent); background: var(--c-ink-08); }
 .fab:active { transform: translate(1px, 1px); }
 
 /* v07-2: 週の終わりの収支表示。以前は画面上に浮かせる自動フェードのバッジだったが、
    「読んでいる間に裏で時間が進む」不具合の元だったため、週末の完全停止シーケンスの
    1段階目として #event-modal-box に描画するブロッキングのモーダルに変更した(js/screens/loop.js の
    showWeeklyBalance)。.wf-* のクラス群はそのモーダルの中身の見た目として引き続き使う。 */
-.wf-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
-.wf-sub { color: var(--text-dim); font-size: 0.75rem; margin-top: 2px; }
+.wf-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; gap: 8px; }
+.wf-head h2 { margin-bottom: 0; }
+.wf-sub { color: var(--c-ink-64); font-size: var(--fs-note); margin-top: 4px; }
 .wf-toggle {
-  font-family: inherit; background: none; border: 1px solid var(--border);
-  color: var(--text-dim); padding: 3px 8px; font-size: 0.68rem; cursor: pointer;
-  touch-action: manipulation;
+  font-family: inherit; background: none; border: 1px solid var(--c-ink-32);
+  border-radius: var(--r-s);
+  color: var(--c-ink-64); padding: 3px 8px; font-size: var(--fs-note); cursor: pointer;
+  touch-action: manipulation; flex: 0 0 auto;
 }
-.wf-table { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; font-size: 0.85rem; }
+.wf-table { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; font-size: var(--fs-body); }
 .wf-row { display: flex; justify-content: space-between; padding: 1px 0; }
-.wf-row .wf-label { color: var(--text-dim); }
+.wf-row .wf-label { color: var(--c-ink-64); }
 .wf-row .wf-val { font-variant-numeric: tabular-nums; }
-.wf-row.wf-bad .wf-val { color: var(--bad); }
-.wf-row.wf-good .wf-val { color: var(--good); }
-.wf-divider { border-top: 2px solid var(--border); margin: 4px 0; }
-.wf-row.wf-net { font-weight: bold; font-size: 1.1rem; padding-top: 2px; }
-.wf-row.wf-net .wf-val.good { color: var(--good); }
-.wf-row.wf-net .wf-val.bad { color: var(--bad); }
-.wf-note { color: var(--text-dim); font-size: 0.68rem; margin-top: 6px; }
+.wf-row.wf-bad .wf-val { color: var(--c-down); }
+.wf-row.wf-good .wf-val { color: var(--c-up); }
+.wf-divider { border-top: 2px solid var(--c-ink-16); margin: 4px 0; }
+.wf-row.wf-net { font-weight: 700; font-size: var(--fs-number); padding-top: 2px; }
+.wf-row.wf-net .wf-val.good { color: var(--c-up); }
+.wf-row.wf-net .wf-val.bad { color: var(--c-down); }
+.wf-note { color: var(--c-ink-64); font-size: var(--fs-note); margin-top: 6px; }
 
-/* 月次まとめ(イベントモーダルを流用。少し大きい扱いにするため専用の見た目を足す) */
-.modal-box.month-recap { border-color: var(--money); }
-.modal-box.month-recap h2 { color: var(--money); }
+/* 月次まとめ(イベントモーダルを流用) */
+.modal-box.month-recap { border-color: var(--c-accent); }
 
-/* v07-3: 定休日のアクション画面(イベントモーダルを流用。色だけ変えて見分けをつける) */
-.modal-box.dayoff-box { border-color: var(--good); }
-.modal-box.dayoff-box h2 { color: var(--good); }
+/* v07-3: 定休日のアクション画面(イベントモーダルを流用) */
+.modal-box.dayoff-box { border-color: var(--c-up); }
 .dayoff-box .sheet-section { margin-bottom: 10px; }
 .recap-table { display: flex; flex-direction: column; gap: 3px; margin: 10px 0; }
-.recap-row { display: flex; justify-content: space-between; font-size: 0.85rem; }
-.recap-row .recap-label { color: var(--text-dim); }
-.recap-row.recap-total { font-size: 1.1rem; font-weight: bold; border-top: 2px solid var(--border); padding-top: 6px; margin-top: 4px; }
-.recap-diff { font-size: 0.72rem; color: var(--text-dim); }
-.recap-diff.good { color: var(--good); }
-.recap-diff.bad { color: var(--bad); }
+.recap-row { display: flex; justify-content: space-between; font-size: var(--fs-body); }
+.recap-row .recap-label { color: var(--c-ink-64); }
+.recap-row.recap-total { font-size: var(--fs-number); font-weight: 700; border-top: 2px solid var(--c-ink-16); padding-top: 6px; margin-top: 4px; }
+.recap-diff { font-size: var(--fs-note); color: var(--c-ink-64); }
+.recap-diff.good { color: var(--c-up); }
+.recap-diff.bad { color: var(--c-down); }
 
 /* 2-3: 変化した瞬間に絵の上へ浮かせる */
 .float-layer { position: absolute; inset: 0; z-index: 19; pointer-events: none; overflow: hidden; }
 .float-item {
   position: absolute;
-  font-size: 0.82rem;
-  font-weight: bold;
+  font-size: var(--fs-note);
+  font-weight: 700;
   white-space: nowrap;
-  text-shadow: 0 0 4px #000, 1px 1px 0 #000;
+  text-shadow: 1px 1px 0 var(--c-panel); /* v14-2: ぼかさない縁取り */
   animation: floatUp 1.7s ease-out forwards;
 }
 @keyframes floatUp {
@@ -434,9 +499,9 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .sheet {
   position: absolute; left: 0; right: 0; bottom: 0; height: 52%;
   z-index: 30;
-  background: #1c150f;
-  border-top: 3px solid var(--border-light);
-  box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.6);
+  background: var(--c-bg);
+  border-top: 2px solid var(--c-ink);
+  box-shadow: 0 -2px 0 var(--c-ink-16);
   transform: translateY(102%);
   transition: transform 0.22s ease;
   display: flex; flex-direction: column;
@@ -446,157 +511,165 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   flex: 0 0 auto;
   display: flex; align-items: center; justify-content: space-between;
   padding: 6px 10px;
-  border-bottom: 2px solid var(--border);
+  border-bottom: 2px solid var(--c-ink-16);
 }
-.sheet-title { color: var(--accent); font-size: 0.88rem; }
+.sheet-title { margin-bottom: 0; }
 .sheet-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 8px 10px 16px; }
 .sheet-section { margin-bottom: 12px; }
 .sheet-section:last-child { margin-bottom: 0; }
 
 /* ---- モーダル(イベントは全画面で覆ってよい) ---- */
 .modal-overlay {
-  position: absolute; inset: 0; background: rgba(0, 0, 0, 0.72);
+  position: absolute; inset: 0; background: var(--c-ink-64);
   display: none; align-items: center; justify-content: center; z-index: 50;
   padding: 12px;
 }
 .modal-overlay.show { display: flex; }
 .modal-box {
-  background: var(--panel); border: 4px solid var(--accent);
-  box-shadow: 5px 5px 0 var(--shadow);
+  background: var(--c-panel); border: 2px solid var(--c-ink);
+  border-radius: var(--r);
+  box-shadow: 4px 4px 0 var(--c-ink-16);
   width: 100%; max-height: 100%; overflow-y: auto;
   padding: 14px;
   animation: fadeIn 0.25s ease;
 }
-.modal-box h2 { color: var(--accent); }
-.modal-box p { font-size: 0.85rem; }
+.modal-box p { font-size: var(--fs-body); }
 .modal-choices { display: flex; flex-direction: column; gap: 7px; margin-top: 12px; }
-.modal-choices .btn { text-align: left; width: 100%; font-size: 0.82rem; }
+.modal-choices .btn { text-align: left; width: 100%; }
 
 /* ---- イベント結果モーダル ---- */
-.result-choice { color: var(--text-dim); font-size: 0.78rem; margin-bottom: 7px; }
-.react-box { border-left: 3px solid var(--accent); background: #241b14; padding: 7px 9px; margin-bottom: 10px; }
-.react-who { color: var(--accent); font-size: 0.72rem; margin-bottom: 3px; }
-.react-line { line-height: 1.55; font-size: 0.82rem; }
-.delta-box { display: flex; flex-direction: column; gap: 4px; border: 2px solid var(--border); padding: 7px 9px; background: #1e1710; }
-.delta-row { font-size: 0.78rem; display: flex; gap: 5px; align-items: center; }
-.delta-row.good { color: var(--good); }
-.delta-row.bad { color: var(--bad); }
-.delta-row.flat { color: var(--text-dim); }
-.delta-mark { font-size: 0.6rem; }
-.delta-none { color: var(--text-dim); font-size: 0.8rem; }
-/* v10-1: 定休日アクションの判定(大成功/成功/空振り)バッジ */
-.tier-badge { display: inline-block; padding: 2px 8px; border: 2px solid; font-weight: bold; font-size: 0.74rem; margin-bottom: 8px; }
-.tier-great { color: #ffd76e; border-color: #ffd76e; background: #453510; }
-.tier-good { color: #8fd66f; border-color: #8fd66f; background: #1f3a18; }
-.tier-miss { color: var(--text-dim); border-color: var(--border); background: #1e1710; }
+.result-choice { color: var(--c-ink-64); font-size: var(--fs-note); margin-bottom: 7px; }
+.react-box { border-left: 3px solid var(--c-accent); background: var(--c-ink-08); border-radius: 0 var(--r-s) var(--r-s) 0; padding: 7px 9px; margin-bottom: 10px; }
+.react-who { color: var(--c-accent); font-size: var(--fs-note); margin-bottom: 3px; font-weight: 700; }
+.react-line { line-height: 1.55; font-size: var(--fs-body); }
+.delta-box { display: flex; flex-direction: column; gap: 4px; border: 2px solid var(--c-ink-16); border-radius: var(--r-s); padding: 7px 9px; background: var(--c-ink-08); }
+.delta-row { font-size: var(--fs-note); display: flex; gap: 5px; align-items: center; }
+.delta-row.good { color: var(--c-up); }
+.delta-row.bad { color: var(--c-down); }
+.delta-row.flat { color: var(--c-ink-64); }
+.delta-mark { font-size: var(--fs-note); }
+.delta-none { color: var(--c-ink-64); font-size: var(--fs-note); }
+/* v10-1: 定休日アクションの判定(大成功/成功/空振り)バッジ。v14-2: 4色相の中で表現する
+   (great=強調の朱、good=緑、miss=中立の濃茶透過) */
+.tier-badge { display: inline-block; padding: 2px 8px; border: 2px solid; border-radius: var(--r-s); font-weight: 700; font-size: var(--fs-note); margin-bottom: 8px; }
+.tier-great { color: var(--c-accent); border-color: var(--c-accent); background: var(--c-ink-08); }
+.tier-good { color: var(--c-up); border-color: var(--c-up); background: var(--c-ink-08); }
+.tier-miss { color: var(--c-ink-64); border-color: var(--c-ink-32); background: var(--c-ink-08); }
 
 /* ---- 結果画面 ---- */
 #screen-result { padding: 0; }
 .result-body { padding: 10px; display: flex; flex-direction: column; gap: 10px; }
 .result-title { text-align: center; padding: 12px; }
-.result-title .catch { font-size: 1.05rem; color: var(--accent); margin-top: 5px; }
+.result-title .catch { font-size: var(--fs-heading); font-weight: 700; color: var(--c-accent); margin-top: 5px; }
 .bar-chart { display: flex; flex-direction: column; gap: 5px; }
-.bar-chart-row { display: flex; align-items: center; gap: 6px; font-size: 0.75rem; }
+.bar-chart-row { display: flex; align-items: center; gap: 6px; font-size: var(--fs-note); }
 .bar-chart-row .label { width: 6.5em; }
-.bar-chart-row .track { flex: 1; height: 12px; background: #1a1410; border: 1px solid var(--border); }
-.bar-chart-row .fill { height: 100%; background: var(--accent); }
+.bar-chart-row .track { flex: 1; height: 12px; background: var(--c-ink-16); border: 1px solid var(--c-ink); border-radius: var(--r-s); overflow: hidden; }
+.bar-chart-row .fill { height: 100%; background: var(--c-accent); }
 .bar-chart-row .val { width: 3.4em; text-align: right; }
 .card-collection { display: flex; gap: 6px; flex-wrap: wrap; }
-.card-item { border: 2px solid var(--border); padding: 5px 8px; text-align: center; font-size: 0.7rem; background: var(--panel-2); }
+.card-item { border: 2px solid var(--c-ink-16); border-radius: var(--r-s); padding: 5px 8px; text-align: center; font-size: var(--fs-note); background: var(--c-panel); }
 .card-item .emoji { font-size: 1.3rem; }
 
 /* ================= 店舗の断面図 =================
    画像は一切使わず CSS ブロック + 絵文字だけ。
-   縦位置(%)は js/screens/shop-view.js の GEO と揃えること。
-   絵の中の大きさは .shop-stage の font-size(枠幅比例)に対する em で書く。 */
+   縦位置(%)は js/screens/shop-view.js の GEO と揃えること(v14では位置・寸法に一切触れていない)。
+   絵の中の大きさは .shop-stage の font-size(枠幅比例)に対する em で書く。
+   v14-2: 色は4色相+濃茶の透過だけで塗り直した。グラデーションは使わない(既存のグラデーションは
+   全て単色のベタ塗りへ置き換えた)。「明るい照明を買ったときの.shop-stage.bright」は色を変えず、
+   .sv-roomに重ねていた--c-ink-08の沈みを外すことで表現する。 */
 .shop-stage {
   position: absolute; inset: 0;
   overflow: hidden;
-  background: #120e0a;
+  background: var(--c-bg);
   line-height: 1;
+  color: var(--c-ink); /* v14-2: 客・店員・設備はこの既定色(濃茶)に従う */
   /* 絵の中の大きさの基準。縦長の枠に対して人が小さく見えないよう枠幅の 8.5% に取る */
   font-size: calc(var(--frame-w) * 0.085);
 }
 .sv-sky {
   position: absolute; left: 80%; right: 0; top: 0; height: 42%;
-  background: linear-gradient(180deg, #10161f 0%, #212b39 100%);
+  background: var(--c-bg);
 }
 .sv-outwall {
   position: absolute; left: 80%; right: 0; top: 42%; height: 39%;
-  background: linear-gradient(180deg, #2b2a30 0%, #1c1b20 100%);
-  border-top: 3px solid #3d3b45;
+  background: var(--c-ink-16);
+  border-top: 2px solid var(--c-ink);
 }
 .sv-street {
   position: absolute; left: 80%; right: 0; top: 81%; bottom: 0;
-  background: #33302c; border-top: 2px solid #4d463d;
+  background: var(--c-ink-32); border-top: 2px solid var(--c-ink);
 }
 .sv-room {
   position: absolute; left: 0; width: 76%; top: 0; bottom: 0;
-  background: linear-gradient(180deg, #2a2018 0%, #1d1610 100%);
+  background: var(--c-panel);
+  box-shadow: inset 0 0 0 999px var(--c-ink-08); /* 「暗い」既定状態。明るい照明でこの沈みを外す */
 }
-.shop-stage.bright .sv-room { background: linear-gradient(180deg, #4b3927 0%, #33271b 100%); }
+.shop-stage.bright .sv-room { box-shadow: none; }
 .sv-ceiling {
   position: absolute; left: 0; width: 80%; top: 0; height: 5%;
-  background: #3a2c1e; border-bottom: 2px solid #4a3826;
+  background: var(--c-ink-16); border-bottom: 2px solid var(--c-ink);
 }
 .sv-floor {
   position: absolute; left: 0; width: 80%; top: 81%; bottom: 0;
-  background: #3a2c1e; border-top: 3px solid #55402a;
+  background: var(--c-ink-16); border-top: 2px solid var(--c-ink);
 }
 .sv-wall-right {
   position: absolute; left: 76%; width: 4%; top: 0; height: 52%;
-  background: #3a2c1e; border-left: 2px solid #55402a; border-right: 2px solid #55402a;
-  border-bottom: 3px solid #55402a;
+  background: var(--c-ink-16); border-left: 2px solid var(--c-ink); border-right: 2px solid var(--c-ink);
+  border-bottom: 2px solid var(--c-ink);
 }
 .sv-doorway {
   position: absolute; width: 4%; transform: translateX(-50%);
   top: 52%; height: 29%;
-  background: rgba(0, 0, 0, 0.35);
-  border-left: 2px solid #55402a; border-right: 2px solid #55402a;
+  background: var(--c-ink-32);
+  border-left: 2px solid var(--c-ink); border-right: 2px solid var(--c-ink);
 }
+/* v14-2: 暖簾は元々「朱地に生成りの縦縞」だったが縞はrepeating-gradientなので廃止し、
+   見出し帯と同じ朱のベタへ寄せた(装飾は画面に1種類、という指示に合わせて見出し帯と統一)。 */
 .sv-noren {
   position: absolute; width: 9%; transform: translateX(-50%);
   top: 42%; height: 10%; z-index: 8;
-  background: repeating-linear-gradient(90deg, #b8322c 0 7px, #f0e6d2 7px 14px);
-  border-top: 3px solid #7a1f1a;
+  background: var(--c-accent);
+  border-top: 2px solid var(--c-ink);
   display: flex; align-items: center; justify-content: center;
 }
-.sv-noren-text { font-size: 0.26em; color: #2b1210; font-weight: bold; letter-spacing: -1px; }
+.sv-noren-text { font-size: 0.26em; color: var(--c-panel); font-weight: 700; letter-spacing: -1px; }
 .sv-signboard {
   position: absolute; left: 82%; top: 9%;
-  background: #4a2a18; border: 2px solid #a87c45; color: var(--text);
+  background: var(--c-panel); border: 2px solid var(--c-ink); color: var(--c-ink);
   padding: 2px 4px; font-size: 0.26em; max-width: 17%;
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
 .sv-lamp { position: absolute; top: 5%; transform: translateX(-50%); text-align: center; }
-.sv-lamp-cord { width: 2px; height: 0.5em; background: #5a4630; margin: 0 auto; }
+.sv-lamp-cord { width: 2px; height: 0.5em; background: var(--c-ink-32); margin: 0 auto; }
 .sv-lamp-bulb { font-size: 0.56em; }
 .sv-duct { position: absolute; top: 6.5%; transform: translateX(-50%); font-size: 0.6em; }
 .sv-kitchen-counter {
   position: absolute; left: 4%; width: 62%; top: 28%; height: 2.5%;
-  background: #4a3826; border-top: 2px solid #6b5236;
+  background: var(--c-ink-16); border-top: 2px solid var(--c-ink);
 }
 .sv-kit-item { position: absolute; top: 21%; transform: translateX(-50%); font-size: 0.82em; }
 .sv-wall-sign {
   position: absolute; top: 32%; transform: translateX(-50%);
-  font-size: 0.28em; background: #2e2418; border: 1px solid var(--border); padding: 2px 4px;
+  font-size: 0.28em; background: var(--c-panel); border: 1px solid var(--c-ink); padding: 2px 4px;
 }
 .sv-counter {
   position: absolute; left: 3%; width: 70%; top: 39.5%; height: 3.5%; z-index: 4;
-  background: linear-gradient(180deg, #8a6238 0%, #5c4126 100%);
-  border: 2px solid #34261a;
+  background: var(--c-ink-16);
+  border: 2px solid var(--c-ink);
 }
 .sv-stool {
   position: absolute; transform: translateX(-50%); width: 0.7em; height: 0.62em; z-index: 2;
-  background: #4a3826; border: 2px solid #6b5236; border-radius: 3px 3px 0 0;
+  background: var(--c-ink-16); border: 2px solid var(--c-ink); border-radius: 3px 3px 0 0;
 }
 .sv-table {
   position: absolute; transform: translateX(-50%); width: 11%; height: 2.5%; z-index: 3;
-  background: #6b4a2a; border: 2px solid #34261a;
+  background: var(--c-ink-16); border: 2px solid var(--c-ink);
 }
 .sv-ticket {
   position: absolute; transform: translateX(-50%); top: 57%; width: 0.95em; height: 24%; z-index: 3;
-  background: #33414f; border: 2px solid #6b8299;
+  background: var(--c-panel); border: 2px solid var(--c-ink);
   display: flex; align-items: center; justify-content: center; font-size: 0.55em;
 }
 
@@ -610,6 +683,7 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .sv-cust.flip .sv-body { transform: scaleX(-1); }
 .sv-cust .sv-bowl {
   position: absolute; left: 50%; top: -0.85em; font-size: 0.65em;
+  color: var(--c-down); /* v14-2: 厨房に積まれた丼と同じ「注文を抱えている」印象で揃える */
   transform: translateX(-50%) scale(0); transition: transform 200ms ease;
 }
 .sv-cust.eating .sv-bowl { transform: translateX(-50%) scale(1); }
@@ -618,18 +692,23 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .sv-cust .sv-bubble {
   position: absolute; left: 92%; top: -0.6em; font-size: 0.62em;
   opacity: 0; transition: opacity 200ms ease;
+  color: var(--c-ink-64); /* v14-2: 既定(普通の表情)。satisfaction別の色は.mood-*で上書きする */
 }
 .sv-cust.show-bubble .sv-bubble { opacity: 1; }
+/* v14-2: 絵文字の表情は単色フォントになったので区別が付きにくい。満足/普通/不満を色で分ける。 */
+.sv-bubble.mood-good { color: var(--c-up); }
+.sv-bubble.mood-neutral { color: var(--c-ink-64); }
+.sv-bubble.mood-bad { color: var(--c-down); }
 
 /* v13-2: 退店時の「評判 +1」ポップアップ。指示どおり実秒0.8sで固定(ゲーム速度に連動させない)。
    数字と記号だけの短い文字列なので、翻訳が伸びても崩れにくい white-space: nowrap にしておく。 */
 .sv-rep-pop {
   position: absolute; left: 50%; top: -1.9em; transform: translateX(-50%);
-  font-size: 0.48em; white-space: nowrap; font-weight: bold; z-index: 6;
+  font-size: 0.48em; white-space: nowrap; font-weight: 700; z-index: 6;
   opacity: 0; animation: svRepPop 0.8s ease-out forwards;
 }
-.sv-rep-pop.good { color: var(--good); }
-.sv-rep-pop.bad { color: var(--bad); }
+.sv-rep-pop.good { color: var(--c-up); }
+.sv-rep-pop.bad { color: var(--c-down); }
 @keyframes svRepPop {
   0% { opacity: 0; transform: translateX(-50%) translateY(0); }
   15% { opacity: 1; }
@@ -649,69 +728,72 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 }
 .sv-staff.carrying .sv-bowl { transform: translateX(-50%) scale(1); }
 
-/* v13-1: 誰も取っていない注文(丼)が厨房に積まれて見える列 */
+/* v13-1: 誰も取っていない注文(丼)が厨房に積まれて見える列。v14-2: 溜まっているのが
+   危険信号だと分かるよう--c-downで色を付ける(指示どおり)。 */
 .sv-order-pile { position: absolute; display: flex; gap: 2px; z-index: 4; }
-.sv-pile-bowl { font-size: 0.55em; }
-.sv-pile-more { font-size: 0.4em; color: var(--text-dim); align-self: center; }
+.sv-pile-bowl { font-size: 0.55em; color: var(--c-down); }
+.sv-pile-more { font-size: 0.4em; color: var(--c-down); align-self: center; }
 
 /* v09-1: 一時停止中は食事の弾みアニメーションも止める */
 .shop-stage.paused .sv-cust.eating .sv-body { animation-play-state: paused; }
 
-/* ---- ステータス表示（パネルの中で使う） ---- */
-.status-card { background: var(--panel); border: 3px solid var(--border); padding: 9px; }
-.status-card h3 { color: var(--accent); margin-bottom: 5px; }
+/* ---- ステータス表示(パネルの中で使う) ---- */
+.status-card { background: var(--c-panel); border: 2px solid var(--c-ink); border-radius: var(--r); padding: 9px; }
+.status-card h3 { color: var(--c-ink); margin-bottom: 5px; }
 
+/* v14-2: ランクは4色相の中に収める(S=強調の朱、A=緑、B=濃茶、C=濃茶の薄色、D=朱の暗色) */
 .rank-badge {
-  display: inline-block; min-width: 18px; text-align: center; font-weight: bold;
-  padding: 0 4px; border: 2px solid; font-size: 0.72rem;
+  display: inline-block; min-width: 18px; text-align: center; font-weight: 700;
+  padding: 0 4px; border: 2px solid; border-radius: var(--r-s); font-size: var(--fs-note);
 }
-.rank-S { color: #ffd76e; border-color: #ffd76e; background: #453510; }
-.rank-A { color: #8fd66f; border-color: #8fd66f; background: #1f3a18; }
-.rank-B { color: #7fc4e8; border-color: #7fc4e8; background: #16303c; }
-.rank-C { color: #e8a13b; border-color: #e8a13b; background: #3a2c12; }
-.rank-D { color: #d9534f; border-color: #d9534f; background: #3a1614; }
+.rank-S { color: var(--c-accent); border-color: var(--c-accent); background: var(--c-ink-08); }
+.rank-A { color: var(--c-up); border-color: var(--c-up); background: var(--c-ink-08); }
+.rank-B { color: var(--c-ink); border-color: var(--c-ink); background: var(--c-ink-08); }
+.rank-C { color: var(--c-ink-64); border-color: var(--c-ink-64); background: var(--c-ink-08); }
+.rank-D { color: var(--c-down); border-color: var(--c-down); background: var(--c-ink-08); }
 
 .score-head { display: flex; align-items: baseline; gap: 7px; margin: 3px 0; }
-.score-num { font-size: 1.6rem; color: var(--accent); font-weight: bold; }
-.score-max { font-size: 0.72rem; color: var(--text-dim); }
-.recipe-line { font-size: 0.76rem; margin: 4px 0; }
+.score-num { font-size: var(--fs-number); color: var(--c-accent); font-weight: 700; }
+.score-max { font-size: var(--fs-note); color: var(--c-ink-64); }
+.recipe-line { font-size: var(--fs-body); margin: 4px 0; }
 
 .axes-box { margin-top: 26px; display: flex; flex-direction: column; gap: 22px; }
-.axis-row { display: flex; align-items: center; gap: 7px; font-size: 0.74rem; }
-.axis-name { width: 2.2em; color: var(--text-dim); }
-.axis-track { position: relative; flex: 1; height: 12px; background: #120e0a; border: 1px solid var(--border); }
-.axis-fill { height: 100%; background: linear-gradient(90deg, #b8722c, #e8a13b); }
-.axis-tick { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--text-dim); }
-.axis-tick.blocked { opacity: 0.25; }
-.axis-mark { position: absolute; transform: translateX(-50%); font-size: 0.8rem; line-height: 1; }
-.axis-mark.blocked { opacity: 0.3; filter: grayscale(1); }
-.axis-num { width: 2.2em; text-align: right; }
+.axis-row { display: flex; align-items: center; gap: 7px; font-size: var(--fs-note); }
+.axis-name { width: 2.2em; color: var(--c-ink-64); }
+.axis-track { position: relative; flex: 1; height: 12px; background: var(--c-ink-16); border: 1px solid var(--c-ink); border-radius: var(--r-s); }
+.axis-fill { height: 100%; background: var(--c-accent); border-radius: var(--r-s); }
+/* v14-2: 客層マーカー(理想値の縦線)。--c-ink-64、来店できない層は--c-ink-32 */
+.axis-tick { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--c-ink-64); }
+.axis-tick.blocked { background: var(--c-ink-32); }
+.axis-mark { position: absolute; transform: translateX(-50%); font-size: 0.8rem; line-height: 1; color: var(--c-ink-64); }
+.axis-mark.blocked { color: var(--c-ink-32); }
+.axis-num { width: 2.2em; text-align: right; font-size: var(--fs-note); }
 .axis-legend { margin-top: 10px; }
 
-.staff-card { border: 2px solid var(--border); background: var(--panel-2); padding: 6px 7px; margin-bottom: 6px; }
-.staff-head { display: flex; align-items: center; gap: 5px; font-size: 0.78rem; flex-wrap: wrap; margin-bottom: 4px; }
+.staff-card { border: 2px solid var(--c-ink-16); border-radius: var(--r-s); background: var(--c-panel); padding: 6px 7px; margin-bottom: 6px; }
+.staff-head { display: flex; align-items: center; gap: 5px; font-size: var(--fs-body); flex-wrap: wrap; margin-bottom: 4px; }
 .staff-emoji { font-size: 1.1rem; }
-.staff-name { font-weight: bold; }
-.stat-grid { display: grid; grid-template-columns: auto 1fr auto; gap: 3px 5px; align-items: center; font-size: 0.66rem; }
-.stat-name { color: var(--text-dim); white-space: nowrap; }
+.staff-name { font-weight: 700; }
+.stat-grid { display: grid; grid-template-columns: auto 1fr auto; gap: 3px 5px; align-items: center; font-size: var(--fs-note); }
+.stat-name { color: var(--c-ink-64); white-space: nowrap; }
 .stat-num { width: 1.8em; text-align: right; }
-.mini-track { height: 7px; background: #120e0a; border: 1px solid var(--border); }
-.mini-fill { height: 100%; background: var(--accent); }
-.mini-fill.good-fill { background: var(--good); }
-.mini-fill.warn-fill { background: #e8a13b; }
-.mini-fill.bad-fill { background: var(--bad); }
-.mini-fill.rel-fill { background: #7fc4e8; }
+.mini-track { height: 7px; background: var(--c-ink-16); border: 1px solid var(--c-ink); border-radius: var(--r-s); }
+.mini-fill { height: 100%; background: var(--c-accent); border-radius: var(--r-s); }
+.mini-fill.good-fill { background: var(--c-up); }
+.mini-fill.warn-fill { background: var(--c-accent); }
+.mini-fill.bad-fill { background: var(--c-down); }
+.mini-fill.rel-fill { background: var(--c-ink-64); }
 .choice-card .stat-grid { margin: 5px 0; }
 
-/* 週次ログ（データパネルの中） */
-.week-log-panel { background: #1e1710; border: 2px solid var(--border); padding: 7px; font-size: 0.7rem; }
-.week-log-panel div { border-bottom: 1px solid #3a2c1a; padding: 2px 0; }
+/* 週次ログ(データパネルの中) */
+.week-log-panel { background: var(--c-ink-08); border: 2px solid var(--c-ink-16); border-radius: var(--r-s); padding: 7px; font-size: var(--fs-note); }
+.week-log-panel div { border-bottom: 1px solid var(--c-ink-16); padding: 2px 0; }
 .week-log-panel div:last-child { border-bottom: none; }
 
-/* トースト（枠の中に置く） */
+/* トースト(枠の中に置く) */
 #toast-box {
   position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
-  background: #2b2118; border: 3px solid var(--accent); color: var(--text);
-  padding: 8px 14px; z-index: 100; font-size: 0.75rem; max-width: 90%;
-  box-shadow: 3px 3px 0 var(--shadow); display: none; text-align: center;
+  background: var(--c-panel); border: 2px solid var(--c-accent); border-radius: var(--r); color: var(--c-ink);
+  padding: 8px 14px; z-index: 100; font-size: var(--fs-note); max-width: 90%;
+  box-shadow: 3px 3px 0 var(--c-ink-16); display: none; text-align: center;
 }

@@ -409,10 +409,14 @@ window.ScreenLoop = (function () {
     clearTick();
     closeSheet();
     G.hide();
+    // v15-6: destroy()の前に読む(destroy自体はログを消さないが、読む場所を明示するため先に確保)
+    var lifecycleLog = window.ShopView.getLifecycleLog();
     window.ShopView.destroy();
     pauseReasons.clear(); // 次のプレイに影響しないよう、理由集合をリセットしておく
     console.log("=== イベント密度ログ ===");
     console.table(state.eventLog);
+    console.log("=== 客ライフサイクルログ(着席/注文/丼受取/食事開始/退店/理由) ===");
+    console.table(lifecycleLog);
     onGameOver();
   }
 

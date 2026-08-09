@@ -47,7 +47,7 @@ window.StatusPanel = (function () {
     marks.forEach(function (m) {
       var tick = h("span", { className: "axis-tick" + (m.blocked ? " blocked" : ""), style: { left: m.x + "%" } });
       var mark = h("span", {
-        className: "axis-mark" + (m.blocked ? " blocked" : ""),
+        className: "axis-mark emoji-font" + (m.blocked ? " blocked" : ""),
         style: { left: m.x + "%", top: (m.row === 1 ? -30 : -16) + "px" },
         text: seg_emoji(m.seg)
       });
@@ -78,14 +78,14 @@ window.StatusPanel = (function () {
   function renderRamen(state) {
     var r = window.Scoring.ramenScore(state);
     var box = h("div", { className: "status-card" }, [
-      h("h3", { text: "🍜 ラーメンの完成度" }),
+      h("h3", { className: "emoji-font", text: "🍜 ラーメンの完成度" }),
       h("div", { className: "score-head" }, [
         rankBadge(r.rank),
         h("span", { className: "score-num", text: String(r.score) }),
         h("span", { className: "score-max", text: "/ 100" })
       ]),
       h("div", { className: "dim", text: "味の相性 " + r.fit + " ・ 素材の質 " + r.material }),
-      h("div", { className: "recipe-line", text: recipeLine(state) }),
+      h("div", { className: "recipe-line emoji-font", text: recipeLine(state) }),
       h("div", { className: "dim", text: "原価 " + r.cost + "円 / 価格 " + state.price + "円" })
     ]);
     var axesBox = h("div", { className: "axes-box" });
@@ -116,7 +116,7 @@ window.StatusPanel = (function () {
     var rating = window.Scoring.staffRating(def, bonus);
     var block = h("div", { className: "staff-card" }, [
       h("div", { className: "staff-head" }, [
-        h("span", { className: "staff-emoji", text: def.emoji }),
+        h("span", { className: "staff-emoji emoji-font", text: def.emoji }),
         h("span", { className: "staff-name", text: def.name }),
         h("span", { className: "dim", text: "（" + def.role + "）" }),
         rankBadge(rating.rank),
@@ -140,7 +140,7 @@ window.StatusPanel = (function () {
   }
 
   function renderStaff(state) {
-    var box = h("div", { className: "status-card" }, [h("h3", { text: "👥 従業員" })]);
+    var box = h("div", { className: "status-card" }, [h("h3", { className: "emoji-font", text: "👥 従業員" })]);
     if (!state.staffHired.length) {
       box.appendChild(h("p", { className: "dim", text: "従業員がいない。全部ひとりでやっている。" }));
       return box;

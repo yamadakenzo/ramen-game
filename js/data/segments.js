@@ -69,7 +69,7 @@ window.DATA.segments = {
       "id": "family",
       "name": "家族連れ",
       "name_en": "Family",
-      "emoji": "👨‍👩‍👧",
+      "emoji": "🧑👧",
       "desc": "週末に来る。テーブル席がないと入れない。一度に人数が入る。",
       "taste": { "richness": 45, "oiliness": 40, "volume": 55 },
       "tolerance": 30,

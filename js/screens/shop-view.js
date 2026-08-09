@@ -58,9 +58,10 @@ window.ShopView = (function () {
   var actors = [];       // 客
   var staffActors = [];  // 互換用。実体はkitchenWorkers(下)
   var queue = [];        // 入店待ちの客
-  // v13-1: 厨房の作業動線。1人 = state.staffHired の1人ぶん。
-  var kitchenWorkers = []; // {id, def, el, gone, busy, homeX, curY}
-  var orderQueue = [];     // {id, seat, actor} まだどの店員も掴んでいない注文(=丼が厨房に積まれて見える)
+  // v13-1/v14-5: 厨房・ホールの作業動線。1人 = state.staffHired の1人ぶん。
+  var kitchenWorkers = []; // {id, def, el, gone, busy, homeX, curY, role: "kitchen"|"hall"|"both"}
+  var orderQueue = [];     // {id, seat, actor} まだ厨房が着手していない注文
+  var readyQueue = [];     // {id, seat, actor} 盛り付け済みで、ホールが客席へ運ぶのを待っている丼(=丼の山)
   var orderSeq = 0;
   var orderPileEl = null;  // 積まれた丼を表示するDOM
   var timers = [];       // {fn, remaining(ms), id, startedAt} v09: 残り時間を持たせ、凍結中は完全に止める
@@ -248,9 +249,10 @@ window.ShopView = (function () {
     kit.forEach(function (k) {
       stage.appendChild(block("sv-kit-item", { left: k.x + "%" }, [h("span", { text: k.e })]));
     });
-    // v13-1: 誰も取っていない注文(丼)が積まれて見える場所。既存のスープ鍋(x=20)の位置を起点に、
-    // 新しい座標系を作らず既存の厨房カウンター上へ並べる。
-    orderPileEl = block("sv-order-pile", { left: "20%", top: "9%" });
+    // v13-1/v14-5: 盛り付け済みでホールが運ぶのを待っている丼が積まれて見える場所。
+    // 「受け渡し口」の座標(PLATE_X=56、既存の盛り付け位置)を起点に、新しい座標系を作らず
+    // 既存の厨房カウンター上へ並べる(位置づけ直しの経緯はrenderReadyPile()のコメント参照)。
+    orderPileEl = block("sv-order-pile", { left: "56%", top: "9%" });
     stage.appendChild(orderPileEl);
     if (has("multilingual")) {
       stage.appendChild(block("sv-wall-sign", { left: "50%" }, [h("span", { text: "🌏 MENU" })]));
@@ -304,45 +306,88 @@ window.ShopView = (function () {
     buildStaff();
   }
 
-  // v13-1: 店員1人 = 厨房で働く1人ぶんの俳優(kitchenWorkers)。移動はcustomerと同じmove()/later()を
-  // 使うので、一時停止・速度追随はmovingActors()経由でそのまま効く。
+  // v14-5: 店員の役割を「厨房」「ホール」に分ける(プレイヤーには選ばせない。既存の接客能力から
+  // 自動で決める)。2人以上いれば接客(service)が最も高い1名をホール・残りを厨房、1人なら兼任。
+  // 役割は既存の従業員能力(effectiveStat。「教える」の伸びも反映済み)を読むだけで、新しい設定項目・
+  // 新しい数値は一切増やしていない。定位置(homeX)も役割ごとに分け、厨房は寸胴側、ホールは
+  // 受け渡し口(PLATE_X)寄りに置く(1人兼任のときは厨房側の定位置のまま)。
+  function assignRoles(workers) {
+    if (workers.length >= 2) {
+      var bestIdx = 0;
+      for (var i = 1; i < workers.length; i++) {
+        if (effectiveOf(workers[i], "service") > effectiveOf(workers[bestIdx], "service")) bestIdx = i;
+      }
+      workers.forEach(function (w, idx) { w.role = (idx === bestIdx) ? "hall" : "kitchen"; });
+    } else {
+      workers.forEach(function (w) { w.role = "both"; });
+    }
+  }
+
+  function effectiveOf(w, key) {
+    var bonus = state.staffState && state.staffState[w.id] && state.staffState[w.id].statBonus;
+    return window.Scoring.effectiveStat(w.def, bonus, key);
+  }
+
+  // v13-1: 店員1人 = 厨房またはホールで働く1人ぶんの俳優(kitchenWorkers。名前はv13のまま、
+  // 実際には両役割を含む)。移動はcustomerと同じmove()/later()を使うので、一時停止・速度追随は
+  // movingActors()経由でそのまま効く。
   function buildStaff() {
     staffActors = [];
     kitchenWorkers = [];
     orderQueue = [];
-    var homeXs = spread(state.staffHired.length, 10, 18); // 複数人いても定位置が重ならないよう少しだけ散らす
-    state.staffHired.forEach(function (id, i) {
+    readyQueue = [];
+    var workers = state.staffHired.map(function (id) {
       var def = U.findById(STAFF, id);
-      if (!def) return;
-      var homeX = homeXs[i] != null ? homeXs[i] : 14;
+      return def ? { id: id, def: def } : null;
+    }).filter(Boolean);
+    assignRoles(workers);
+    var kitchenHomeXs = spread(workers.filter(function (w) { return w.role !== "hall"; }).length, 10, 18);
+    var hallHomeX = U.clamp(PLATE_X + 6, GEO.inMinX, GEO.inMaxX);
+    var kIdx = 0;
+    workers.forEach(function (w) {
+      var homeX = w.role === "hall" ? hallHomeX : (kitchenHomeXs[kIdx++] != null ? kitchenHomeXs[kIdx - 1] : 14);
       var el = h("div", { className: "sv-staff", style: { top: GEO.kitchenY + "%", left: homeX + "%" } }, [
-        h("span", { className: "sv-body", text: def.emoji }),
+        h("span", { className: "sv-body", text: w.def.emoji }),
         h("span", { className: "sv-bowl", text: "🍜" })
       ]);
       el.dataset.x = homeX;
       actorLayer.appendChild(el);
-      var w = { id: id, def: def, el: el, gone: false, busy: false, homeX: homeX, curY: GEO.kitchenY };
+      w.el = el; w.gone = false; w.busy = false; w.homeX = homeX; w.curY = GEO.kitchenY;
       kitchenWorkers.push(w);
       staffActors.push(el);
     });
-    renderOrderPile();
+    renderReadyPile();
     dispatchOrders();
     syncSpeed();
   }
 
-  // ---------- v13-1: 厨房の作業動線(寸胴→茹で麺器→盛り付け→客席→厨房) ----------
+  // ---------- v13-1/v14-5: 厨房の作業動線(寸胴→茹で麺器→盛り付け→[受け渡し口]→客席→戻る) ----------
   // 「絵は計算を決めない」の指示どおり、ここは既に計算済みの値(客の入店タイミング=既存の週次客数を
   // 帯へ配分したスケジュール由来、Scoring.computeShopStats().speed、Scoring.effectiveStatの
-  // 麺上げ能力)を読むだけで、ここから週次計算(scoring.js)側へ書き戻すことは一切しない。
+  // 麺上げ能力・接客能力)を読むだけで、ここから週次計算(scoring.js)側へ書き戻すことは一切しない。
+  //
+  // v14-5: 役割を「厨房」(寸胴→茹で麺器→盛り付け→受け渡し口に置く)と「ホール」(受け渡し口の丼を
+  // 取る→客席へ運ぶ→戻る)に分けた。1人だけの店は兼任(runSoloCycle。v13までと同じ、作って自分で
+  // 運んで戻るの一続き)。厨房・ホールで別々に動くのは2人以上のときだけ(runKitchenCycle/runHallCycle、
+  // orderQueue=厨房が未着手の注文/readyQueue=盛り付け済みでホール待ちの丼、の2段構え)。
   function soupStationX() { return 20; }             // 既存: 寸胴/鍋の座標(buildScenery)
   function noodleStationX() { return has("noodle_boiler") ? 32 : 8; } // 既存: 茹で麺器、無ければ既存の別の厨房座標で代用
-  var PLATE_X = 56;      // 既存: 店員の待機ペーシング可動域の右端(旧svPaceキーフレームと同じ値を踏襲)
+  var PLATE_X = 56;      // 既存: 盛り付け台=受け渡し口の座標(旧svPaceキーフレームの右端を踏襲)
   var KITCHEN_PILE_MAX = 6; // 積める丼アイコンの表示上限(それ以上は「+N」で表す)
+  // v14-5: 注文から一定時間ホールに届かなければ、演出上の詰まりで客を無限に待たせないための安全弁。
+  // 通常のサービス(厨房3工程+受け渡し)より十分長い値にしてある。これに掛かるのは従業員が
+  // 0人になった/注文がロスト(役割再編成などで稀に起こりうる)といった異常系だけを想定している。
+  var SERVE_TIMEOUT_MIN = 60;
 
-  function renderOrderPile() {
+  // v14-5: 「厨房が遅い→受け渡し口に丼が無い」「ホールが足りない→受け渡し口に丼が積み上がる」と
+  // 詰まっている場所によって絵が変わるようにするため、v13で入れた「丼の山」はホール側の詰まり
+  // (=盛り付け済みで運ばれるのを待っているreadyQueue)を表すものとして位置づけ直した
+  // (厨房側の未着手の注文=orderQueueには専用の絵を足していない。客が席で待ったままなのが
+  // 「厨房が遅い」の見え方になる)。
+  function renderReadyPile() {
     if (!orderPileEl) return;
     window.UI.clear(orderPileEl);
-    var n = orderQueue.length;
+    var n = readyQueue.length;
     var shown = Math.min(n, KITCHEN_PILE_MAX);
     for (var i = 0; i < shown; i++) {
       orderPileEl.appendChild(h("span", { className: "sv-pile-bowl", text: "🍜" }));
@@ -352,32 +397,43 @@ window.ShopView = (function () {
     }
   }
 
-  // 客が入店した瞬間(=席へ向かい始めた瞬間)に「注文」を1件発生させる。手が空いている店員がいれば
-  // すぐに掴む。全員手一杯なら丼が積まれて見える(このqueueは表示専用。売上・満足度には使わない)。
-  function placeOrder(seat) {
-    orderQueue.push({ id: ++orderSeq, seat: seat });
-    renderOrderPile();
+  // 客が入店した瞬間(=席へ向かい始めた瞬間)に「注文」を1件発生させる。手が空いている厨房担当が
+  // いればすぐに掴む。全員手一杯なら(厨房側は絵を出さず)客が席で待ったままになる。
+  // v14-5: 客の実体(actor)も持たせておき、配膳時に「まだその客がその席にいるか」を確認できるようにする。
+  function placeOrder(seat, actor) {
+    orderQueue.push({ id: ++orderSeq, seat: seat, actor: actor });
     dispatchOrders();
   }
 
   function dispatchOrders() {
     kitchenWorkers.forEach(function (w) {
-      if (w.gone || w.busy || !orderQueue.length) return;
+      if (w.gone || w.busy) return;
+      if (w.role === "hall") return; // ホール専任は厨房の注文を取らない
+      if (!orderQueue.length) return;
       var order = orderQueue.shift();
-      renderOrderPile();
-      runOrderCycle(w, order);
+      if (w.role === "both") runSoloCycle(w, order); else runKitchenCycle(w, order);
+    });
+    kitchenWorkers.forEach(function (w) {
+      if (w.gone || w.busy || w.role !== "hall") return;
+      if (!readyQueue.length) return;
+      var ready = readyQueue.shift();
+      renderReadyPile();
+      runHallCycle(w, ready);
     });
   }
 
-  // 既存の提供速度(店の"speed"、equipment由来)と、その店員自身の麺上げ能力(既存のeffectiveStat。
+  // 既存の提供速度(店の"speed"、equipment由来)と、その店員自身の能力(既存のeffectiveStat。
   // 「教える」で伸びた分も既に反映済み)から、1中継地点あたりの作業ポーズをスケールする係数を作る。
   // どちらも既に計算済みの値を読むだけで、ここで新しい週次パラメータは作らない。
-  function workerPace(w) {
+  // v14-5: 厨房工程は麺上げ(noodle)、ホールの運びは接客(service)で別々にスケールする
+  // (「接客の高い人をホールに置くと運びが速くなる」という確認項目への対応)。
+  function paceFrom(w, key) {
     var shopSpeed = window.Scoring.computeShopStats(state).speed; // 既存(equipment由来、0〜100)
-    var bonus = state.staffState && state.staffState[w.id] && state.staffState[w.id].statBonus;
-    var noodle = window.Scoring.effectiveStat(w.def, bonus, "noodle"); // 既存(staffRatingで使っている値と同じ)
-    return U.clamp((shopSpeed * 0.4 + noodle * 0.6) / 100, 0.15, 1.4);
+    var stat = effectiveOf(w, key); // 既存(staffRatingで使っている値と同じ)
+    return U.clamp((shopSpeed * 0.4 + stat * 0.6) / 100, 0.15, 1.4);
   }
+  function workerPace(w) { return paceFrom(w, "noodle"); }
+  function hallPace(w) { return paceFrom(w, "service"); }
 
   function moveWorker(w, x, y) {
     var fromX = parseFloat(w.el.dataset.x != null ? w.el.dataset.x : x);
@@ -388,7 +444,16 @@ window.ShopView = (function () {
     return travelMs;
   }
 
-  function runOrderCycle(w, order) {
+  // 客がまだその席で待っているときだけ、実際に食べ始めさせる(丼が届くまで食べない)。
+  function deliverToSeat(order) {
+    var seat = order.seat, a = order.actor;
+    if (!a || a.gone || seat.occupant !== a) return; // 客が既にいない/入れ替わっていたら何もしない
+    startEating(a);
+  }
+
+  // v14-5: 兼任(1人)。v13までと同じ、寸胴→茹で麺器→盛り付け→客席→定位置、の一続き。
+  // 客席へ届けた瞬間に食べ始めさせる(以前は席に着いてから固定時間で自動的に食べ始めていた)。
+  function runSoloCycle(w, order) {
     w.busy = true;
     w.el.classList.add("carrying");
     var pace = workerPace(w);
@@ -399,7 +464,7 @@ window.ShopView = (function () {
       { x: noodleStationX(), y: GEO.kitchenY, wait: pauseMs },
       { x: PLATE_X, y: GEO.kitchenY, wait: pauseMs },
       { x: order.seat.x, y: order.seat.sitY, wait: handoffMs, deliver: true }, // 客席へ運ぶ
-      { x: w.homeX, y: GEO.kitchenY, wait: 0 }                                 // 厨房へ戻る
+      { x: w.homeX, y: GEO.kitchenY, wait: 0 }                                 // 定位置へ戻る
     ];
     function step(i) {
       if (w.gone) return;
@@ -407,7 +472,58 @@ window.ShopView = (function () {
       var s = stops[i];
       var travelMs = moveWorker(w, s.x, s.y);
       later(function () {
-        if (s.deliver) w.el.classList.remove("carrying");
+        if (s.deliver) { w.el.classList.remove("carrying"); deliverToSeat(order); }
+        step(i + 1);
+      }, travelMs + s.wait);
+    }
+    step(0);
+  }
+
+  // v14-5: 厨房担当。寸胴→茹で麺器→盛り付けまでで、客席へは行かない。盛り付けたら受け渡し口
+  // (readyQueue)へ置き、すぐ次の注文へ取り掛かる。
+  function runKitchenCycle(w, order) {
+    w.busy = true;
+    w.el.classList.add("carrying");
+    var pace = workerPace(w);
+    var pauseMs = gm(KITCHEN_STATION_MIN / pace);
+    var stops = [
+      { x: soupStationX(), y: GEO.kitchenY, wait: pauseMs },
+      { x: noodleStationX(), y: GEO.kitchenY, wait: pauseMs },
+      { x: PLATE_X, y: GEO.kitchenY, wait: pauseMs }
+    ];
+    function step(i) {
+      if (w.gone) return;
+      if (i >= stops.length) {
+        w.el.classList.remove("carrying");
+        w.busy = false;
+        readyQueue.push(order);
+        renderReadyPile();
+        dispatchOrders(); // 次の注文と、待っているホール担当の両方へ回す
+        return;
+      }
+      var travelMs = moveWorker(w, stops[i].x, stops[i].y);
+      later(function () { step(i + 1); }, travelMs + stops[i].wait);
+    }
+    step(0);
+  }
+
+  // v14-5: ホール担当。受け渡し口の丼を取る→客席へ運ぶ→受け渡し口寄りの定位置へ戻る。調理設備には触れない。
+  function runHallCycle(w, order) {
+    w.busy = true;
+    var handoffMs = gm(KITCHEN_HANDOFF_MIN / hallPace(w));
+    var stops = [
+      { x: PLATE_X, y: GEO.kitchenY, wait: 0, pickup: true },
+      { x: order.seat.x, y: order.seat.sitY, wait: handoffMs, deliver: true },
+      { x: w.homeX, y: GEO.kitchenY, wait: 0 }
+    ];
+    function step(i) {
+      if (w.gone) return;
+      if (i >= stops.length) { w.busy = false; dispatchOrders(); return; }
+      var s = stops[i];
+      var travelMs = moveWorker(w, s.x, s.y);
+      later(function () {
+        if (s.pickup) w.el.classList.add("carrying");
+        if (s.deliver) { w.el.classList.remove("carrying"); deliverToSeat(order); }
         step(i + 1);
       }, travelMs + s.wait);
     }
@@ -476,6 +592,7 @@ window.ShopView = (function () {
     ]);
     var a = {
       segId: segId, el: el, seat: null, queued: false, gone: false,
+      eatingStarted: false, // v14-5: 丼が届いて食べ始めたかどうか(届くまでは席で待つ)
       // v13-3: 湧いた瞬間の「今週の1杯あたり売価」を固定で持たせる。週をまたいで退店した場合でも
       // (v12で分かった、帯の終盤に来た客がまれに週をまたいで完食するケース)、この客が本来属していた
       // 週の額のまま計上されるようにするため、退店時ではなく湧いた時点の値を握らせておく。
@@ -590,7 +707,7 @@ window.ShopView = (function () {
     // v12-3:「今週の客」は実際に入店した(=席へ向かい始めた)瞬間に+1する。諦めて帰った行列客は
     // ここを通らないので数えない。
     if (onEnterCb) onEnterCb(a.segId);
-    placeOrder(seat); // v13-1: 入店=厨房への注文発生。手が空いている店員がいなければ丼が積まれる
+    placeOrder(seat, a); // v13-1: 入店=注文発生。手が空いている厨房担当がいなければ席で待ったままになる
     var fromX = parseFloat(a.el.dataset.x || GEO.doorX);
     var ms = walkMs(fromX, seat.x, SEAT_WALK_MIN_PER_PCT) + gm(ENTER_EXTRA_MIN);
     move(a, seat.x, GEO.walkY, ms);
@@ -599,12 +716,28 @@ window.ShopView = (function () {
       move(a, seat.x, seat.sitY, gm(SIT_MIN));      // 席に着く
       later(function () {
         if (a.gone) return;
-        a.el.classList.add("eating");
-        // v10-3/v12-1: 滞在時間はゲーム内時間で持つ(提供+食事で30〜40分程度)。実秒は
-        // BASE_HOUR_MS(js/utils.js)から作るので、速度体系を変えても比率は崩れない。
-        later(function () { finishMeal(a); }, gm(U.rand(MEAL_MIN_MIN, MEAL_MIN_MAX)));
+        // v14-5: 席に着いた瞬間に自動で食べ始めるのをやめ、丼が届くまで待たせる。
+        // 従業員が1人もいない(異常系)ときだけは、待たせ続けても誰も届けに来ないので即座に食べ始める。
+        if (!kitchenWorkers.length) { startEating(a); return; }
+        a.bubble.textContent = "🕐";
+        a.bubble.className = "sv-bubble mood-neutral";
+        a.el.classList.add("show-bubble");
+        // 安全弁: 注文が積み上がったまま(役割の再編成などで)ロストしても、客が無限に待ち続けない
+        later(function () { if (!a.gone && !a.eatingStarted) startEating(a); }, gm(SERVE_TIMEOUT_MIN));
       }, gm(SIT_MIN));
     }, ms);
+  }
+
+  // v14-5: 丼が実際に届いた瞬間(runSoloCycle/runHallCycleのdeliverステップ)にだけ食べ始めさせる。
+  function startEating(a) {
+    if (a.gone || a.eatingStarted) return;
+    a.eatingStarted = true;
+    a.bubble.textContent = "";
+    a.el.classList.remove("show-bubble");
+    a.el.classList.add("eating");
+    // v10-3/v12-1: 滞在時間はゲーム内時間で持つ(提供+食事で30〜40分程度)。実秒は
+    // BASE_HOUR_MS(js/utils.js)から作るので、速度体系を変えても比率は崩れない。
+    later(function () { finishMeal(a); }, gm(U.rand(MEAL_MIN_MIN, MEAL_MIN_MAX)));
   }
 
   function finishMeal(a) {
@@ -719,6 +852,7 @@ window.ShopView = (function () {
     staffActors = [];
     kitchenWorkers = [];
     orderQueue = [];
+    readyQueue = [];
     orderSeq = 0;
     orderPileEl = null;
     activePopups = 0;

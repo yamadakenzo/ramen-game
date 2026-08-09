@@ -62,7 +62,7 @@ window.ScreenSetup = (function () {
         opts.onpick();
       }
     }, [
-      h("div", { className: "emoji", text: opts.emoji }),
+      h("div", { className: "emoji emoji-font", text: opts.emoji }),
       h("div", { className: "name", text: opts.name }),
       h("div", { className: "blurb", text: opts.blurb }),
       opts.locked ? h("div", { className: "locked", text: opts.locked }) : null,
@@ -86,7 +86,12 @@ window.ScreenSetup = (function () {
     var grid = h("div", { className: "choice-grid" });
     PROPERTY_DATA.funding.forEach(function (f) {
       grid.appendChild(card({
-        emoji: f.id === "family_loan" ? "👪" : (f.id === "self_only" ? "🐖" : "🏦"),
+        // v14-0: 「👪」はNoto Emojiにグリフが無く単色化できない。ZWJ結合の家族絵文字(👨‍👩‍👧等)も
+        // 構成要素(👨👩👧)は個別にあるのに結合済みリガチャがフォントに無く、結合全体がまるごと
+        // カラーへ落ちることが分かった。さらに🧒(中性の「子供」)は単体でもNoto Emoji側の色付き
+        // グリフしか無く単色化できないため避けた(👦も同様。👧は単色版がある)。
+        // 客層「家族連れ」と同じ、単色化を確認済みの🧑👧(ZWJで繋がない2文字並び)に差し替えた。
+        emoji: f.id === "family_loan" ? "🧑👧" : (f.id === "self_only" ? "🐖" : "🏦"),
         name: f.name,
         blurb: G.blurb(f.id),
         selected: state.funding === f.id,
@@ -162,12 +167,12 @@ window.ScreenSetup = (function () {
           draw();
         }
       }, [
-        h("div", { className: "emoji", text: U.bandEmoji(b.key) }),
+        h("div", { className: "emoji emoji-font", text: U.bandEmoji(b.key) }),
         h("div", { className: "name", text: b.label + "（" + U.bandTimeLabel(b) + "）" }),
         h("div", { className: "blurb", text: G.blurb(b.key) }),
         h("div", { className: "hours-seg-row" }, segs.map(function (x) {
           return h("span", {
-            className: "hours-seg-chip" + (x.weekendOnly ? " weekend" : ""),
+            className: "hours-seg-chip emoji-font" + (x.weekendOnly ? " weekend" : ""),
             title: x.seg.name + (x.weekendOnly ? "（週末のみ）" : "")
           }, [x.seg.emoji]);
         })),
@@ -296,7 +301,7 @@ window.ScreenSetup = (function () {
     var r = window.Scoring.ramenScore(ps);
     var wrap = h("div", { className: "setup-preview" }, [
       h("div", { className: "preview-head" }, [
-        h("span", { text: "🍜 いまの完成度" }),
+        h("span", { className: "emoji-font", text: "🍜 いまの完成度" }),
         window.StatusPanel.rankBadge(r.rank),
         h("span", { className: "money", text: String(r.score) }),
         h("span", { className: "dim", text: "／ 刺さる客層" })
@@ -313,7 +318,7 @@ window.ScreenSetup = (function () {
       var flow = prop && prop.segment_flow[seg.id] != null ? prop.segment_flow[seg.id] : 0.5;
       var lit = meets && sat >= 55 && flow >= 0.6;
       var chip = h("div", { className: "segment-chip" + (lit ? " lit" : "") + (!meets ? " blocked" : "") }, [
-        h("span", { text: seg.emoji }),
+        h("span", { className: "emoji-font", text: seg.emoji }),
         h("div", {}, [
           h("div", { text: seg.name }),
           h("div", { className: "bar" }, [

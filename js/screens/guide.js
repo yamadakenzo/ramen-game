@@ -10,7 +10,7 @@ window.Guide = (function () {
   function def() { return DEF; }
 
   function face(cls) {
-    return h("div", { className: "guide-face" + (cls ? " " + cls : ""), text: DEF.emoji });
+    return h("div", { className: "guide-face emoji-font" + (cls ? " " + cls : ""), text: DEF.emoji });
   }
 
   // 開業フェーズの上部バー。line は差し替えるので要素を返して呼び出し側に持たせる。

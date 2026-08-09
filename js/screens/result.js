@@ -75,7 +75,7 @@ window.ScreenResult = (function () {
       var count = totals[seg.id] || 0;
       var pct = Math.round((count / maxCount) * 100);
       chart.appendChild(h("div", { className: "bar-chart-row" }, [
-        h("div", { className: "label", text: seg.emoji + " " + seg.name }),
+        h("div", { className: "label emoji-font", text: seg.emoji + " " + seg.name }),
         h("div", { className: "track" }, [h("div", { className: "fill", style: { width: pct + "%" } })]),
         h("div", { className: "val", text: count + "人" })
       ]));
@@ -91,7 +91,7 @@ window.ScreenResult = (function () {
     state.staffHired.forEach(function (id) {
       var def = U.findById(STAFF, id);
       var s = window.EventEngine.ensureStaffState(state, id);
-      staffPanel.appendChild(h("p", {}, [
+      staffPanel.appendChild(h("p", { className: "emoji-font" }, [
         def.emoji + " " + def.name + "（" + def.role + "）　士気: " + Math.round(s.morale) + "　関係値: " + Math.round(s.rel)
       ]));
     });
@@ -104,7 +104,7 @@ window.ScreenResult = (function () {
       var rel = state.relationships[c.id] || 0;
       var unlocked = !!state.cardsUnlocked[c.id];
       cardBox.appendChild(h("div", { className: "card-item" }, [
-        h("div", { className: "emoji", text: c.emoji }),
+        h("div", { className: "emoji emoji-font", text: c.emoji }),
         h("div", { text: c.name }),
         h("div", { className: "dim", text: "関係値 " + Math.round(rel) + (unlocked ? " ・ 解放済" : "") })
       ]));

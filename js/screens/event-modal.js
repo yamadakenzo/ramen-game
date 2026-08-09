@@ -38,7 +38,7 @@ window.ScreenEventModal = (function () {
       var line = resolveText(choice.react, state, entry.ctx);
       if (line) {
         box.appendChild(h("div", { className: "react-box" }, [
-          who ? h("div", { className: "react-who", text: who }) : null,
+          who ? h("div", { className: "react-who emoji-font", text: who }) : null,
           h("div", { className: "react-line", text: line })
         ]));
       }

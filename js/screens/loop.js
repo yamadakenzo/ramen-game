@@ -592,7 +592,7 @@ window.ScreenLoop = (function () {
       item("評判", String(Math.round(state.reputation))),
       item("疲労", String(fatigue), fatigueCls)
     ]);
-    if (queued) subRow.appendChild(h("div", { className: "ti queue-mark" }, [h("span", { text: "🚶行列" })]));
+    if (queued) subRow.appendChild(h("div", { className: "ti queue-mark" }, [h("span", { className: "emoji-font", text: "🚶行列" })]));
     root.appendChild(mainRow);
     root.appendChild(subRow);
   }
@@ -699,7 +699,7 @@ window.ScreenLoop = (function () {
             refreshSheet();
           }
         }, [
-          h("div", { className: "emoji", text: item.emoji }),
+          h("div", { className: "emoji emoji-font", text: item.emoji }),
           h("div", { className: "name", text: item.name }),
           h("div", { className: "blurb", text: G.blurb(item.id) })
         ]));
@@ -758,7 +758,7 @@ window.ScreenLoop = (function () {
       }
       segSec.appendChild(h("div", { className: "staff-card" + (blocked ? "" : "") }, [
         h("div", { className: "staff-head" }, [
-          h("span", { className: "staff-emoji", text: seg.emoji }),
+          h("span", { className: "staff-emoji emoji-font", text: seg.emoji }),
           h("span", { className: "staff-name", text: seg.name }),
           h("span", { className: "dim", text: "予算 " + U.formatMoney(seg.budget) })
         ]),
@@ -791,7 +791,7 @@ window.ScreenLoop = (function () {
           refreshSheet();
         }
       }, [
-        h("div", { className: "emoji", text: eq.emoji }),
+        h("div", { className: "emoji emoji-font", text: eq.emoji }),
         h("div", { className: "name", text: eq.name + (owned ? "（導入済）" : "") }),
         h("div", { className: "cost", text: U.formatMoney(eq.cost) }),
         h("div", { className: "blurb", text: eq.effect })
@@ -808,7 +808,7 @@ window.ScreenLoop = (function () {
     var guideSec = h("div", { className: "sheet-section" }, [
       h("div", { className: "staff-card" }, [
         h("div", { className: "staff-head" }, [
-          h("span", { className: "staff-emoji", text: G.def().emoji }),
+          h("span", { className: "staff-emoji emoji-font", text: G.def().emoji }),
           h("span", { className: "staff-name", text: G.def().name }),
           h("span", { className: "dim", text: "（" + G.def().role + "）" })
         ]),
@@ -869,7 +869,7 @@ window.ScreenLoop = (function () {
             refreshSheet();
           }
         }, [
-          h("div", { className: "emoji" }, [def.emoji, " ", window.StatusPanel.rankBadge(Scoring.staffRating(def).rank)]),
+          h("div", { className: "emoji emoji-font" }, [def.emoji, " ", window.StatusPanel.rankBadge(Scoring.staffRating(def).rank)]),
           h("div", { className: "name", text: def.name + "（" + def.role + "）" }),
           h("div", { className: "cost", text: U.formatMoney(def.wage) + "/月" }),
           window.StatusPanel.staffStats(def),
@@ -898,7 +898,7 @@ window.ScreenLoop = (function () {
           refreshSheet();
         }
       }, [
-        h("div", { className: "emoji", text: c.emoji }),
+        h("div", { className: "emoji emoji-font", text: c.emoji }),
         h("div", { className: "name", text: c.name }),
         h("div", { className: "sub", text: "関係値 " + rel })
       ]));
@@ -913,7 +913,7 @@ window.ScreenLoop = (function () {
     box.appendChild(h("div", { className: "sheet-section" }, [window.StatusPanel.renderRamen(state)]));
 
     var last = state.history.length ? state.history[state.history.length - 1] : null;
-    var num = h("div", { className: "sheet-section status-card" }, [h("h3", { text: "📊 直近の週" })]);
+    var num = h("div", { className: "sheet-section status-card" }, [h("h3", { className: "emoji-font", text: "📊 直近の週" })]);
     if (!last) {
       num.appendChild(h("p", { className: "dim", text: "まだ1週目が終わっていない。" }));
     } else {
@@ -971,7 +971,7 @@ window.ScreenLoop = (function () {
           refreshSheet();
         }
       }, [
-        h("div", { className: "emoji", text: U.bandEmoji(b.key) }),
+        h("div", { className: "emoji emoji-font", text: U.bandEmoji(b.key) }),
         h("div", { className: "name", text: b.label + "（" + U.bandTimeLabel(b) + "）" }),
         onlyOne ? h("div", { className: "locked", text: "最低1つは開けておく" }) : null
       ]));
@@ -996,7 +996,7 @@ window.ScreenLoop = (function () {
         className: "fab" + (openSheetKey === f[0] ? " active" : ""),
         onclick: function () { openSheet(f[0], f[3], f[4]); }
       }, [
-        h("span", { className: "fab-icon", text: f[1] }),
+        h("span", { className: "fab-icon emoji-font", text: f[1] }),
         h("span", { className: "fab-label", text: f[2] })
       ]));
     });

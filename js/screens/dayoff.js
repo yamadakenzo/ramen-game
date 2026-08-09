@@ -41,7 +41,7 @@ window.DayOff = (function () {
           className: "choice-card" + (ok ? "" : " disabled"),
           onclick: function () { if (ok) handlePick(def); }
         }, [
-          h("div", { className: "emoji", text: def.emoji }),
+          h("div", { className: "emoji emoji-font", text: def.emoji }),
           h("div", { className: "name", text: def.name }),
           h("div", { className: "blurb", text: def.blurb }),
           !ok ? h("div", { className: "locked", text: needsStaff ? "従業員がいない" : gate.reason }) : null
@@ -80,7 +80,7 @@ window.DayOff = (function () {
           className: "choice-card",
           onclick: function () { resolve(def, { staffId: id }); }
         }, [
-          h("div", { className: "emoji", text: sd.emoji }),
+          h("div", { className: "emoji emoji-font", text: sd.emoji }),
           h("div", { className: "name", text: sd.name + "（" + sd.role + "）" })
         ]));
       });
@@ -100,7 +100,7 @@ window.DayOff = (function () {
           className: "choice-card",
           onclick: function () { resolve(def, { cardId: c.id }); }
         }, [
-          h("div", { className: "emoji", text: c.emoji }),
+          h("div", { className: "emoji emoji-font", text: c.emoji }),
           h("div", { className: "name", text: c.name }),
           h("div", { className: "sub", text: "関係値 " + rel })
         ]));

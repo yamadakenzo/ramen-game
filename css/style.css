@@ -1,19 +1,21 @@
-/* v13-4: 絵文字の見た目をOS任せにすると端末ごとに別の絵(線の太さ・彩度)が出てしまうため、
-   Noto Emoji(OFL、クレジット表記不要)を同梱して絵文字を出す要素にだけ当てる。
-   実際に使っている絵文字だけをサブセット化した約25KBのwoff2(css/fonts/、ライセンスは
-   css/fonts/OFL.txt)。本文フォント(v14で M PLUS Rounded 1c に統一。css/fonts.css参照)には触れない。 */
-@font-face {
-  font-family: "NotoEmojiGame";
-  src: url("fonts/NotoEmojiGame-subset.woff2") format("woff2");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
+/* v14-0: 絵文字フォント(NotoEmojiGame、実体はNoto Emoji)。
+   v13時点は「実際に使っている絵文字だけ」を手動でサブセット化した単一woff2(72種、約25KB)だったが、
+   その後追加された絵文字(💡等)がサブセットに無く、要素は正しく.shop-stage配下でも絵だけカラーの
+   ままになる取りこぼしが起きていた。本文フォント(M PLUS Rounded 1c)と同じ「Google Fonts CSS2 API の
+   text=パラメータでサブセットしたwoff2チャンクをまるごとローカル化」方式に統一し、js/配下から
+   実際に使っている絵文字を検出してチャンクを取得し直せば取りこぼしが起きない形にした
+   (取得手順はtools/fetch-emoji.sh、実体はcss/fonts/noto-emoji/、読み込みはcss/fonts/noto-emoji.css。
+   ライセンスはcss/fonts/noto-emoji/OFL.txt)。index.htmlでstyle.cssより先に読み込む。 */
+
+/* v14-0: 絵文字を出す要素にはこの1クラスだけを足す(要素ごとにfont-familyを書き足さない)。
+   絵文字以外の文字と混在しても、無い文字は自動でM PLUS Rounded 1c以下へ落ちるので、
+   見出しや文中に絵文字が混じっている要素にもそのまま使ってよい。
+   店の断面図(.shop-stage)だけは、暖簾の「らーめん」などの装飾文字をM PLUS Roundedに寄せたくない
+   (v13からの意図的な使い分け)ため、フォールバックを別に持つ専用の指定のままにしてある。 */
+.emoji-font {
+  font-family: "NotoEmojiGame", 'M PLUS Rounded 1c', "Hiragino Maru Gothic ProN", "Meiryo", sans-serif;
 }
-/* 絵文字を出す要素だけに当てる(本文フォントの並びはそのままフォールバックに残す。
-   絵文字以外の文字(暖簾の「らーめん」等)はサブセットに無いのでこの並びの続きへ自然に落ちる)。
-   対象: 客・店員・設備・厨房の丼(.shop-stage)/ 客層マーカー(.segment-chip, .hours-seg-chip)/
-   レシピ・設備・人物などの絵文字アイコン(.emoji, .staff-emoji)。満足度アイコンは.shop-stage内。 */
-.shop-stage, .emoji, .staff-emoji, .segment-chip, .hours-seg-chip {
+.shop-stage {
   font-family: "NotoEmojiGame", "Hiragino Maru Gothic ProN", "Meiryo", sans-serif;
 }
 

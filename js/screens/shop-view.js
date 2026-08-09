@@ -17,8 +17,8 @@ window.ShopView = (function () {
     walkY: 76,         // 床を歩いている客(足元が床の線に乗る)
     inMinX: 5, inMaxX: 71,   // 店内の可動範囲(%)
     doorX: 78,               // 出入口(%)
-    // 縦長の枠では通りの幅が狭いので、行列は間隔を広く・人数を少なくして潰れないようにする
-    queueX0: 84, queueGap: 5, queueMax: 4,
+    // v16-3: 行列は最大6人(指示書どおり)。縦長の枠で6人ぶんの間隔を確保するため、間隔をv15までより詰めた
+    queueX0: 84, queueGap: 4, queueMax: 6,
     offX: 112,               // 画面外(%)
     // 縦長では横に並べられる席数が限られる。実際の席数より多くは描かない(絵は代表表示)
     drawMaxCounter: 8, drawMaxTable: 4
@@ -37,8 +37,13 @@ window.ShopView = (function () {
   var SIT_MIN = 420 / OLD_MS_PER_MIN;                // 席に着く/席を立つ
   var LEAVE_WAIT_MIN = 460 / OLD_MS_PER_MIN;         // 席を立ってから実際に歩き出すまでの間
   var QUEUE_REFLOW_MIN = 500 / OLD_MS_PER_MIN;       // 行列の詰め直し
-  var QUEUE_PATIENCE_BASE_MIN = 4000 / OLD_MS_PER_MIN; // 行列を諦めるか判定するまでの最短
-  var QUEUE_PATIENCE_TOL_MIN = 9000 / OLD_MS_PER_MIN;  // 行列耐性ぶんの上乗せ(客層ごとに変わる)
+  // v16-2/3: 我慢の限界。「並んで待つ」「着席して丼を待つ」の両方でこの1本だけを使う
+  // (指示書3番「別々の仕組みを作らない」への対応。v15までは行列側は確率判定、着席側は決定的な
+  // タイマーと、別の仕組みが2つあった)。新しい数値は増やさず、既存の客層データ(queue_tolerance)
+  // だけで個体差を付ける。v15時点の値(48〜156分)は、通常営業(従業員2人・満席でない)でも
+  // 頻発するほど短すぎたため、v16で十分に長く取り直した(150〜300分。詳細はPROGRESS.md参照)。
+  var PATIENCE_BASE_MIN = 150;
+  var PATIENCE_TOL_MIN = 150;
   var MEAL_MIN_MIN = 2500 / OLD_MS_PER_MIN;          // 提供+食事(最短)。約30分
   var MEAL_MIN_MAX = 3500 / OLD_MS_PER_MIN;          // 提供+食事(最長)。約42分
   var RESUME_FLOOR_MIN = 200 / OLD_MS_PER_MIN;       // 一時停止/速度変更からの再開時の最短尺
@@ -80,8 +85,9 @@ window.ShopView = (function () {
   var curSpd = 1;
   // v12-3:「今週の客」カウンタ用。客が実際に入店した瞬間(enterAndSit)にloop.js側へ知らせる。
   var onEnterCb = null;
-  // v13-3: 客が退店した瞬間(finishMeal)にloop.js側へ知らせる。その客のpriceOwedを渡す。
-  var onExitCb = null;
+  // v13-3/v16-1: 丼が客の席に届いた瞬間(deliverToSeat)にloop.js側へ知らせる。その客のpriceOwedを渡す。
+  // (v15まではfinishMeal=食べ終わった瞬間だった。v16でタイミングを配膳の瞬間に変更)
+  var onServeCb = null;
   // v15-1/6: 客ごとの一生をログに残す(調査用・確認用)。新しい客数計算は一切しない、
   // 既存の状態遷移が起きた時刻を記録するだけの読み取り専用ログ。
   var lifecycleLog = [];
@@ -391,12 +397,10 @@ window.ShopView = (function () {
   // v15-2: 「待機中(丼がまだ届いていない)」の我慢の限界。v14-5にあった60分の安全弁は
   // 「強制的に食べさせる」処理だったため、丼を受け取っていない客が満足顔で帰る不具合の原因に
   // なっていた(v15指示書 0番)。ここでは「食べ始めさせる」のではなく「怒って帰らせる」に統一する。
-  // 行列の我慢(QUEUE_PATIENCE_*)と同じ形(客層のqueue_toleranceで個体差を付ける)を流用し、
-  // 新しい数値・新しいデータ項目は増やさない。従業員0人(異常系)・注文ロストのときもここで
-  // 必ず時間切れになり、無限に待ち続けることはない(v14-5にあった「0人なら即座に食べ始める」
-  // 特例は廃止した——丼が無いのに食べ始めるのは、0人でも他の異常系でも同じく誤りのため)。
-  var SEATED_PATIENCE_BASE_MIN = 4000 / OLD_MS_PER_MIN;
-  var SEATED_PATIENCE_TOL_MIN = 9000 / OLD_MS_PER_MIN;
+  // v16: 我慢の限界の実体(PATIENCE_BASE_MIN/TOL_MIN)は行列側と共有(ファイル冒頭で定義)。
+  // 従業員0人(異常系)・注文ロストのときもここで必ず時間切れになり、無限に待ち続けることはない
+  // (v14-5にあった「0人なら即座に食べ始める」特例は廃止済み——丼が無いのに食べ始めるのは、
+  // 0人でも他の異常系でも同じく誤りのため)。
 
   // v14-5: 「厨房が遅い→受け渡し口に丼が無い」「ホールが足りない→受け渡し口に丼が積み上がる」と
   // 詰まっている場所によって絵が変わるようにするため、v13で入れた「丼の山」はホール側の詰まり
@@ -466,10 +470,15 @@ window.ShopView = (function () {
   // 客がまだその席で待っているときだけ、実際に食べ始めさせる(丼が届くまで食べない)。
   // 客が先に帰っていた(seat.occupantが入れ替わっている/空いている)場合は、その丼は
   // 静かに廃棄する(v15-3。作り直しのループは作らない——ここでは何もしないだけ)。
+  // v16-1: 所持金・売上は「丼が客の席に置かれた瞬間」であるここで加算する(以前はfinishMeal、
+  // つまり食べ終わった瞬間だった。待ちきれず帰った客は元々ここへ来ないので二重取りではないが、
+  // 「食べ終わるまでの30〜40分ぶん、実際の受け渡しと所持金の増加がずれて見える」ことが
+  // 「怒って帰った客の分も売上に乗っているように見える」という体感の原因になっていた)。
   function deliverToSeat(order) {
     var seat = order.seat, a = order.actor;
     if (!a || a.gone || seat.occupant !== a) return;
     a.deliveredAt = nowLabel();
+    if (onServeCb) onServeCb(a.segId, a.priceOwed);
     startEating(a);
   }
 
@@ -564,6 +573,15 @@ window.ShopView = (function () {
 
   // ---------- 客 ----------
   function segDef(id) { return U.findById(SEGMENTS, id); }
+
+  // v16-2/3: 我慢の限界(ゲーム内分→1x基準ms)。行列(joinQueue)・着席後の待機(enterAndSit)の
+  // どちらもこの1つだけを使う。客層ごとの行列耐性(queue_tolerance)だけで個体差を付け、
+  // 新しいデータ項目は増やさない。
+  function patienceMs(segId) {
+    var def = segDef(segId);
+    var tol = def ? def.weights.queue_tolerance : 0.5;
+    return gm(PATIENCE_BASE_MIN + tol * PATIENCE_TOL_MIN);
+  }
 
   function faceFor(segId) {
     var sat = traffic.satBySeg[segId];
@@ -683,35 +701,31 @@ window.ShopView = (function () {
 
   // v10-3: 実数だけ湧かせるようになったので、「席が空いていても行列を作る」演出上の水増しは廃止。
   // 満席なら並ぶ・空いていれば座る、という素直な判定にした。行列は実際の混雑から自然に生まれる。
+  // v16-3: 行列がGEO.queueMax(6人)に達していたら、並ばずにその場で諦めて去る。
   function arriveDoor(a) {
     if (a.gone) return;
     var seat = freeSeat();
     if (seat) { enterAndSit(a, seat); return; }
+    if (queue.length >= GEO.queueMax) { turnAwayFull(a); return; }
     joinQueue(a);
   }
 
   function queueSlot(i) { return GEO.queueX0 + i * GEO.queueGap; }
 
-  // 縦長の枠では表示できる行列の人数に限りがある(GEO.queueMax)。それを超えるぶんは
-  // 最後の見える位置に重ねておく(データ上は全員実在し、席が空けば順番に呼ばれる)。
   function layoutQueue() {
-    queue.forEach(function (a, i) {
-      var slot = Math.min(i, GEO.queueMax - 1);
-      move(a, queueSlot(slot), GEO.walkY, gm(QUEUE_REFLOW_MIN));
-    });
+    queue.forEach(function (a, i) { move(a, queueSlot(i), GEO.walkY, gm(QUEUE_REFLOW_MIN)); });
   }
 
+  // v16-3: 行列に並ぶ判断も、着席後に丼を待つ判断も、同じ我慢の限界(patienceMs)を使う
+  // (指示書「別々の仕組みを作らない」への対応。v15までは行列側だけ確率判定だった)。
   function joinQueue(a) {
     a.queued = true;
     queue.push(a);
     layoutQueue();
-    // 行列耐性が低い客ほど早く諦める
-    var def = segDef(a.segId);
-    var tol = def ? def.weights.queue_tolerance : 0.5;
     later(function () {
       if (a.gone || !a.queued) return;
-      if (Math.random() > tol * 0.9 + 0.05) leaveQueue(a);
-    }, gm(QUEUE_PATIENCE_BASE_MIN + tol * QUEUE_PATIENCE_TOL_MIN));
+      leaveQueue(a);
+    }, patienceMs(a.segId));
   }
 
   function leaveQueue(a) {
@@ -726,6 +740,20 @@ window.ShopView = (function () {
     a.bubble.className = "sv-bubble mood-bad";
     a.el.classList.add("show-bubble");
     var ms = walkMs(queueSlot(i < 0 ? 0 : i), GEO.offX);
+    move(a, GEO.offX, GEO.walkY, ms);
+    later(function () { removeActor(a); }, ms);
+  }
+
+  // v16-3: 行列が満杯(6人)のときに来た客は、並ばずにその場(店の前)で諦めて去る。
+  // 満足度・評判には触れない(既存のleaveQueueと同じく書き戻しなし)。
+  function turnAwayFull(a) {
+    a.exitAt = nowLabel();
+    a.exitReason = "待ちきれず(満列で入れず)";
+    logLifecycle(a);
+    a.bubble.textContent = "😠";
+    a.bubble.className = "sv-bubble mood-bad";
+    a.el.classList.add("show-bubble");
+    var ms = walkMs(GEO.doorX, GEO.offX);
     move(a, GEO.offX, GEO.walkY, ms);
     later(function () { removeActor(a); }, ms);
   }
@@ -761,12 +789,11 @@ window.ShopView = (function () {
         a.bubble.className = "sv-bubble mood-neutral";
         a.el.classList.add("show-bubble");
         a.waiting = true;
-        // v15-2: 丼が届くまで待つ。我慢の限界を超えたら怒って帰る(leaveSeatImpatient)。
-        // 従業員0人・注文ロストといった異常系でも、この一本だけで必ず時間切れになる
-        // (v14-5にあった「0人なら即座に食べ始める」特例は廃止——丼が無いのに食べ始めないため)。
-        var def = segDef(a.segId);
-        var tol = def ? def.weights.queue_tolerance : 0.5;
-        later(function () { leaveSeatImpatient(a); }, gm(SEATED_PATIENCE_BASE_MIN + tol * SEATED_PATIENCE_TOL_MIN));
+        // v15-2/v16-2: 丼が届くまで待つ。我慢の限界(patienceMs、行列と共通)を超えたら怒って帰る
+        // (leaveSeatImpatient)。従業員0人・注文ロストといった異常系でも、この一本だけで必ず
+        // 時間切れになる(v14-5にあった「0人なら即座に食べ始める」特例は廃止——丼が無いのに
+        // 食べ始めないため)。
+        later(function () { leaveSeatImpatient(a); }, patienceMs(a.segId));
       }, gm(SIT_MIN));
     }, ms);
   }
@@ -820,7 +847,7 @@ window.ShopView = (function () {
     a.bubble.className = "sv-bubble " + moodClassFor(a.segId);
     a.el.classList.add("show-bubble");
     showExitPopup(a); // v13-2: 退店の動きが始まった瞬間、表情の下に「評判 ±1」を出す(変化があるときだけ)
-    if (onExitCb) onExitCb(a.segId, a.priceOwed); // v13-3: 退店の瞬間、その1杯の売価を所持金へ
+    // v16-1: 所持金への加算はdeliverToSeat()へ移した(丼が届いた瞬間)。ここでは行わない。
     var seat = a.seat;
     move(a, seat.x, GEO.walkY, gm(SIT_MIN));        // 席を立つ
     later(function () {
@@ -855,19 +882,20 @@ window.ShopView = (function () {
     });
   }
 
-  // v15-5: 帯が終わる瞬間(閉店)。「パッと全員消す」のをやめ、状態ごとに正しい形で退かせる。
-  // - 外に並んでいる客: 諦めて帰る(既存のleaveQueueをそのまま使う。「待ちきれず」と同じ形)
-  // - 丼がまだ届いていない客(着席済み・待機中): leaveSeatImpatientと同じ形で帰す。注文は
-  //   キャンセルされ、厨房は作り続けない
-  // - 食事中の客: ここでは何もしない。既存の仕組み(finishMeal)で食べ終わるまで見せてから退店させる
-  // どちらも「経過時間だけで退店してよい2つの理由(食べ終わった/待ちきれなかった)」の
-  // 後者を、閉店というタイミングで前倒しに発火させているだけで、新しい退店理由は作っていない。
+  // v15-5/v16-2: 帯が終わる瞬間(閉店)。「パッと全員消す」のをやめ、状態ごとに正しい形で退かせる。
+  // - 外に並んでいる客: 諦めて帰る(既存のleaveQueueをそのまま使う。「待ちきれず」と同じ形。
+  //   満席が続いていた=詰まっていた状況なので、指示書2番の「満席でない状態」には当たらない)
+  // - 着席済み・待機中の客: v15では閉店時に強制的に「待ちきれず」扱いで退店させていたが、
+  //   v16の確認プレイで、これが「従業員2人・満席でない状態でも、帯が終わる瞬間に丼が
+  //   まだ届いていない客が機械的に切り捨てられる」原因になっていることが分かった
+  //   (通常営業でも普通に起きてしまい、指示書2番の「満席でない状態では0人」を満たせなかった)。
+  //   実店舗でも「すでに座って注文している客を、営業時間が終わったからと追い出す」ことは
+  //   しない(新規の呼び込みだけ止める)のが自然なため、v16では着席済みの客には触れないよう
+  //   変更した。厨房・ホールは帯の状態を見ずに動き続けるので(dispatchOrders)、残っていた
+  //   注文はそのまま作られ続け、客は通常どおり自分の我慢の限界(patienceMs)か配膳で決着する。
+  // - 食事中の客: 引き続き何もしない。既存の仕組み(finishMeal)で食べ終わるまで見せてから退店させる
   function closeBand(bandKey) {
     queue.slice().forEach(function (a) { leaveQueue(a); });
-    actors.slice().forEach(function (a) {
-      if (!a.waiting) return; // 食事中・移動中(まだ待機タイマーが立っていない)は対象外
-      leaveSeatImpatient(a);
-    });
   }
 
   // v13-1: 店員の往復は(客と同じく)move()/later()で駆動するようになったため、CSSキーフレーム用の
@@ -878,12 +906,12 @@ window.ShopView = (function () {
   }
 
   // ---------- 外部API ----------
-  // callbacks: { onEnter(segId) v12-3(客が入店した瞬間), onExit(segId, price) v13-3(客が退店した瞬間。
-  // その客ぶんの売価=priceOwedを渡す) }
+  // callbacks: { onEnter(segId) v12-3(客が入店した瞬間), onServe(segId, price) v13-3/v16-1(丼が
+  // 客の席に届いた瞬間。その客ぶんの売価=priceOwedを渡す) }
   function mount(container, gameState, callbacks) {
     state = gameState;
     onEnterCb = (callbacks && callbacks.onEnter) || null;
-    onExitCb = (callbacks && callbacks.onExit) || null;
+    onServeCb = (callbacks && callbacks.onServe) || null;
     clearTimers();
     stage = h("div", { className: "shop-stage" });
     container.appendChild(stage);
@@ -943,7 +971,7 @@ window.ShopView = (function () {
     builtSig = "";
     frozen = false;
     onEnterCb = null;
-    onExitCb = null;
+    onServeCb = null;
     traffic = { schedule: null, queueLevel: 0, satBySeg: {}, pricePerCustomer: 0 };
   }
 

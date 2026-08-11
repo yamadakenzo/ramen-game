@@ -1,4 +1,10 @@
 // v01_データ_客層.json を埋め込み(file://でも読めるようfetchせず<script>で読み込む)
+//
+// STEP4(docs/新設計/04_STEP4_ラーメン新パラメータとレシピ計算_修正版.md §2〜3): tasteの軸を
+// 「richness・oiliness・volume」から「richness(新・濃さ)・volume・uniqueness(新・個性)」へ変更。
+// richnessは指示書§2の表の値をそのまま採用(旧richness・oilinessの平均)。oilinessは削除した。
+// uniquenessは指示書§3の表の値をそのまま採用(観光客だけ突出して高いのは意図どおり)。
+// volume/tolerance/weights/budget/peak_hours等は変更していない。
 window.DATA = window.DATA || {};
 window.DATA.segments = {
   "segments": [
@@ -8,7 +14,7 @@ window.DATA.segments = {
       "name_en": "Office Worker (F)",
       "emoji": "👩‍💼",
       "desc": "昼休みの1時間で来る。並ぶのは嫌。匂いが服につくのを警戒する。",
-      "taste": { "richness": 30, "oiliness": 20, "volume": 35 },
+      "taste": { "richness": 25, "volume": 35, "uniqueness": 40 },
       "tolerance": 18,
       "weights": {
         "speed": 0.8,
@@ -29,7 +35,7 @@ window.DATA.segments = {
       "name_en": "Salaryman",
       "emoji": "🧑‍💼",
       "desc": "早く、多く、濃く。券売機を好む。並ぶことは苦にしない。",
-      "taste": { "richness": 75, "oiliness": 70, "volume": 80 },
+      "taste": { "richness": 73, "volume": 80, "uniqueness": 45 },
       "tolerance": 25,
       "weights": {
         "speed": 1.0,
@@ -50,7 +56,7 @@ window.DATA.segments = {
       "name_en": "Student",
       "emoji": "🎓",
       "desc": "安く、多く。味の細かい違いには鈍い。SNSでよく喋る。",
-      "taste": { "richness": 60, "oiliness": 65, "volume": 95 },
+      "taste": { "richness": 63, "volume": 95, "uniqueness": 45 },
       "tolerance": 35,
       "weights": {
         "speed": 0.4,
@@ -71,7 +77,7 @@ window.DATA.segments = {
       "name_en": "Family",
       "emoji": "🧑👧",
       "desc": "週末に来る。テーブル席がないと入れない。一度に人数が入る。",
-      "taste": { "richness": 45, "oiliness": 40, "volume": 55 },
+      "taste": { "richness": 43, "volume": 55, "uniqueness": 35 },
       "tolerance": 30,
       "weights": {
         "speed": 0.5,
@@ -93,7 +99,7 @@ window.DATA.segments = {
       "name_en": "Tourist",
       "emoji": "🧳",
       "desc": "写真を撮る。分かりやすさを求める。二度と来ない。",
-      "taste": { "richness": 65, "oiliness": 55, "volume": 60 },
+      "taste": { "richness": 60, "volume": 60, "uniqueness": 80 },
       "tolerance": 40,
       "weights": {
         "speed": 0.3,
@@ -116,7 +122,7 @@ window.DATA.segments = {
       "name_en": "Regular",
       "emoji": "🧓",
       "desc": "毎日同じ席に座る。味を変えると気づく。値上げに敏感。",
-      "taste": { "richness": 55, "oiliness": 50, "volume": 60 },
+      "taste": { "richness": 53, "volume": 60, "uniqueness": 50 },
       "tolerance": 12,
       "weights": {
         "speed": 0.2,

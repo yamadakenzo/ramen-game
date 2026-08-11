@@ -9,6 +9,16 @@ window.DAYS_PER_RUN = window.WEEKS_PER_RUN * 7;
 // (実秒の直値をコードの他の場所に書かないための唯一の物差し)。
 window.BASE_HOUR_MS = 1700; // ×1 = 1時間1.7秒
 
+// STEP1(docs/新設計/01_STEP1_新システム用データ基盤_修正版.md §2-5): scoring.js内に直接
+// 書かれていたバランス定数を、既存のBASE_HOUR_MS/WEEKS_PER_RUNと同じ場所(このファイル)へ集約した。
+// 値は変えていない(置き場所を変えただけ)。
+// 週あたりの理論最大客数の目安(1客層1週間の潜在客数)。噛み合えば繁盛、外せば閑古鳥になるよう調整。
+window.BASE_CUSTOMERS = 24;
+// 席1つが1週間に捌ける杯数の目安(1日6〜7杯転回 x 7日)
+window.SEATS_TO_WEEKLY_CAPACITY = 45;
+// 麺量アップ(茹で麺器の増設)はレシピではなく設備なので、state を渡された時だけ上乗せする
+window.EXTRA_BOILER_VOLUME = 15;
+
 window.Utils = (function () {
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
   function findById(list, id) { return list.find(function (x) { return x.id === id; }); }

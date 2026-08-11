@@ -56,7 +56,34 @@
     window.UI.showScreen("opening");
   }
 
+  // STEP1(docs/新設計/01_STEP1_新システム用データ基盤_修正版.md §1-2): セーブはあるが
+  // バージョンが合わない場合、無言で破棄せず一言知らせてから始める。showResumeChoice()と
+  // 同じ作り(opening-box/opening-actions)を流用し、confirm()等のネイティブダイアログは使わない。
+  function showVersionMismatchNotice() {
+    var h = window.UI.h;
+    var root = document.getElementById("screen-opening");
+    window.UI.clear(root);
+    root.appendChild(h("div", { className: "opening-box" }, [
+      h("p", { text: "セーブデータの形式が変わったため、最初から始まります。" }),
+      h("div", { className: "opening-actions" }, [
+        h("button", {
+          className: "btn primary", text: "はじめる",
+          onclick: function () {
+            window.GameState.clearSave();
+            window.GameState.reset();
+            goToPhase("opening");
+          }
+        })
+      ])
+    ]));
+    window.UI.showScreen("opening");
+  }
+
   function init() {
+    if (window.GameState.hasIncompatibleSave()) {
+      showVersionMismatchNotice();
+      return;
+    }
     if (window.GameState.hasSave()) {
       showResumeChoice();
       return;

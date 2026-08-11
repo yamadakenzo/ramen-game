@@ -4,7 +4,14 @@ window.GameState = (function () {
   // 営業時間の設定(businessHours)がstateに増えたため、旧セーブは読ませない。
   // キーごと変えているので、旧キーのデータが残っていても「続きから」に出てこない。
   var SAVE_KEY = "ramen_v10_save";
-  var SAVE_VERSION = 5;
+  // STEP1(docs/新設計/01_STEP1_新システム用データ基盤_修正版.md §1-2): 新システム用の器を
+  // stateに追加したためバージョンを上げ、旧セーブは読ませない(移行処理は作らない・開発中のため)。
+  // ただし今回から「バージョン不一致は無言で破棄しない」。main.jsのinit()がhasIncompatibleSave()で
+  // 検出し、画面上で一言知らせてから始まる(このファイルのload()自体は今まで通り黙って失敗を返す)。
+  // STEP4(docs/新設計/04_STEP4_ラーメン新パラメータとレシピ計算_修正版.md §9): レシピ素材の
+  // 持ち方(oiliness廃止、quality/uniqueness/workload追加)が変わったため6→7に上げた。
+  // 警告の仕組み自体はSTEP1で作り切っているので、ここでは変更しない。
+  var SAVE_VERSION = 7;
 
   function freshState() {
     return {
@@ -15,6 +22,12 @@ window.GameState = (function () {
       funding: null,
       property: null,
       recipe: { soup: null, tare: null, noodle: null, topping: null },
+      // STEP1で新設した器(品質/濃さ/量/個性/原価/提供負荷)。STEP4(docs/新設計/
+      // 04_STEP4_ラーメン新パラメータとレシピ計算_修正版.md)で計算式(js/scoring.jsの
+      // recipeAggregate)側がこれと同じ基礎値(20/10/20/10/0/0)から実際に計算するようになった。
+      // ただしこのフィールド自体(state.ramenStats)へ計算結果を書き戻す配線はまだ無く、
+      // 今も値は既定値のまま動かない(recipeAggregate()はstateを介さず毎回その場で計算して返す)。
+      ramenStats: { quality: 20, richness: 10, volume: 20, uniqueness: 10, cost: 0, workload: 0 },
       equipment: [],
       staffHired: [], // staff id 配列
       price: 850,
@@ -25,6 +38,9 @@ window.GameState = (function () {
       businessHours: ["lunch", "night"], // v10-2: 選んでいる営業時間帯(次の週から反映)。初期値は昼+夜
       businessHoursActive: ["lunch", "night"], // 今週すでに反映されている帯(週の頭でbusinessHoursから複製)
       reputation: 50,
+      // STEP1: 認知度の器(新規)。評判(reputation、上の行)とは別物として持つが、今回は値が動かず
+      // どこからも参照されない(docs/新設計/01_STEP1_新システム用データ基盤_修正版.md §2-3)。
+      awareness: 30,
       relationships: { menya: 0, reporter: 0, landlord: 0, oldman: 0, lender: 0 },
       staffState: {}, // id -> {morale, rel, lowMoraleWeeks, statBonus}
       cardsUnlocked: {}, // card id -> true (関係値要求を満たしイベント発生済み)
@@ -86,6 +102,20 @@ window.GameState = (function () {
     }
   }
 
+  // STEP1: 「セーブはあるがバージョンが合わない(=読めば破棄される)」ことを、実際にload()して
+  // stateを壊す前に判定するための関数。main.jsのinit()がこれで判定し、無言で消す前に
+  // 画面上で一言警告を出す(docs/新設計/01_STEP1_新システム用データ基盤_修正版.md §1-2)。
+  function hasIncompatibleSave() {
+    try {
+      var raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return false;
+      var loaded = JSON.parse(raw);
+      return !loaded || loaded.version !== SAVE_VERSION;
+    } catch (e) {
+      return true; // 壊れているデータも「今の形式と互換ではない」扱いにする
+    }
+  }
+
   function clearSave() {
     try {
       localStorage.removeItem(SAVE_KEY);
@@ -101,6 +131,7 @@ window.GameState = (function () {
     save: save,
     load: load,
     hasSave: hasSave,
+    hasIncompatibleSave: hasIncompatibleSave,
     clearSave: clearSave,
     reset: reset
   };

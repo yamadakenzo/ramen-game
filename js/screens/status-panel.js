@@ -1,4 +1,4 @@
-// 常時表示のステータスパネル: ラーメンの完成度(味3軸+総合) と 従業員の能力
+// 常時表示のステータスパネル: ラーメンの完成度(味4軸+総合) と 従業員の能力
 window.StatusPanel = (function () {
   var h = window.UI.h;
   var U = window.Utils;
@@ -6,10 +6,14 @@ window.StatusPanel = (function () {
   var RECIPES = window.DATA.recipes;
   var STAFF = window.DATA.characters.staff;
 
+  // STEP4(docs/新設計/04_STEP4_ラーメン新パラメータとレシピ計算_修正版.md §6): 3軸(コク・脂・量)を
+  // 4軸(品質・濃さ・量・個性)に差し替えた。品質は客層ごとの理想値が無いため、noMarker:trueにして
+  // axisRow側でマーカー(客層の顔)を置かないようにする。
   var AXES = [
-    { key: "richness", label: "コク" },
-    { key: "oiliness", label: "脂" },
-    { key: "volume", label: "量" }
+    { key: "quality", label: "品質", noMarker: true },
+    { key: "richness", label: "濃さ" },
+    { key: "volume", label: "量" },
+    { key: "uniqueness", label: "個性" }
   ];
 
   function rankBadge(rank) {
@@ -24,22 +28,25 @@ window.StatusPanel = (function () {
   }
 
   // 味の1軸。バーの上に各客層の理想位置を重ねるのがこの表示の要点。
+  // STEP4: 品質(axis.noMarker)は客層ごとの理想値を持たないため、マーカーを一切置かない。
   function axisRow(state, axis, value) {
     var marks = [];
-    SEGMENTS.forEach(function (seg) {
-      marks.push({
-        seg: seg,
-        x: U.clamp(seg.taste[axis.key], 0, 100),
-        blocked: !window.Scoring.meetsRequires(seg, state)
+    if (!axis.noMarker) {
+      SEGMENTS.forEach(function (seg) {
+        marks.push({
+          seg: seg,
+          x: U.clamp(seg.taste[axis.key], 0, 100),
+          blocked: !window.Scoring.meetsRequires(seg, state)
+        });
       });
-    });
-    marks.sort(function (a, b) { return a.x - b.x; });
-    // 近接したマーカーは2段に振り分けて潰れないようにする
-    var lastX = -99, lastRow = 0;
-    marks.forEach(function (m) {
-      m.row = (m.x - lastX < 7 && lastRow === 0) ? 1 : 0;
-      lastX = m.x; lastRow = m.row;
-    });
+      marks.sort(function (a, b) { return a.x - b.x; });
+      // 近接したマーカーは2段に振り分けて潰れないようにする
+      var lastX = -99, lastRow = 0;
+      marks.forEach(function (m) {
+        m.row = (m.x - lastX < 7 && lastRow === 0) ? 1 : 0;
+        lastX = m.x; lastRow = m.row;
+      });
+    }
 
     var track = h("div", { className: "axis-track" }, [
       h("div", { className: "axis-fill", style: { width: U.clamp(value, 0, 100) + "%" } })

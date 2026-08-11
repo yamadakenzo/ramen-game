@@ -191,8 +191,10 @@ window.ScreenSetup = (function () {
         name: item.name,
         blurb: G.blurb(item.id),
         selected: state.recipe[cat] === item.id,
+        // STEP4(docs/新設計/04_STEP4_ラーメン新パラメータとレシピ計算_修正版.md §6): 「コク・脂・量」の
+        // 3項表示を「品質・濃さ・量・個性」の4項表示に差し替えた。
         detail: detailLines([
-          "コク " + signed(item.richness) + " ・ 脂 " + signed(item.oiliness) + " ・ 量 " + signed(item.volume),
+          "品質 " + signed(item.quality) + " ・ 濃さ " + signed(item.richness) + " ・ 量 " + signed(item.volume) + " ・ 個性 " + signed(item.uniqueness),
           "原価 " + item.cost + "円",
           item.smell != null ? "匂い " + item.smell : null
         ]),

@@ -1,17 +1,20 @@
-// 満足度・客数・匂い・行列の計算。v01_ラーメン屋_実装指示書.md の式をそのまま実装する。
+// 満足度・客数・匂い・行列の計算。docs/過去/v01_ラーメン屋_実装指示書.md の式をそのまま実装する。
 window.Scoring = (function () {
   var U = window.Utils;
   var SEGMENTS = window.DATA.segments.segments;
   var RECIPES = window.DATA.recipes;
   var PROPERTIES = window.DATA.property.properties;
 
-  // 週あたりの理論最大客数の目安(1客層1週間の潜在客数)。噛み合えば繁盛、外せば閑古鳥になるよう調整。
-  var BASE_CUSTOMERS = 24;
-  // 席1つが1週間に捌ける杯数の目安(1日6〜7杯転回 x 7日)
-  var SEATS_TO_WEEKLY_CAPACITY = 45;
+  // STEP1: BASE_CUSTOMERS / SEATS_TO_WEEKLY_CAPACITY / EXTRA_BOILER_VOLUME は
+  // js/utils.js の window.* へ値そのまま移した(docs/新設計/01_STEP1_新システム用データ基盤_修正版.md §2-5)。
+  var BASE_CUSTOMERS = window.BASE_CUSTOMERS;
+  var SEATS_TO_WEEKLY_CAPACITY = window.SEATS_TO_WEEKLY_CAPACITY;
+  var EXTRA_BOILER_VOLUME = window.EXTRA_BOILER_VOLUME;
 
-  // 麺量アップ(茹で麺器の増設)はレシピではなく設備なので、state を渡された時だけ上乗せする
-  var EXTRA_BOILER_VOLUME = 15;
+  // STEP4(docs/新設計/04_STEP4_ラーメン新パラメータとレシピ計算_修正版.md §4): 品質・濃さ・量・
+  // 個性の基礎値。STEP1でstate.ramenStatsに仮置きした既定値と同じ(この4値+cost0+workload0から
+  // 素材の値を加算していく、という指示どおりの構成)。
+  var RAMEN_BASE = { quality: 20, richness: 10, volume: 20, uniqueness: 10, cost: 0, workload: 0 };
 
   function recipeAggregate(recipe, state) {
     var soup = U.findById(RECIPES.soup, recipe.soup);
@@ -19,7 +22,10 @@ window.Scoring = (function () {
     var noodle = U.findById(RECIPES.noodle, recipe.noodle);
     var topping = U.findById(RECIPES.topping, recipe.topping);
     if (!soup || !tare || !noodle || !topping) {
-      return { richness: 0, oiliness: 0, volume: 0, cost: 0, smell: 0 };
+      return {
+        quality: RAMEN_BASE.quality, richness: RAMEN_BASE.richness, volume: RAMEN_BASE.volume,
+        uniqueness: RAMEN_BASE.uniqueness, cost: RAMEN_BASE.cost, workload: RAMEN_BASE.workload, smell: 0
+      };
     }
     var volumeBonus = (state && state.equipment && state.equipment.indexOf("extra_boiler") >= 0)
       ? EXTRA_BOILER_VOLUME : 0;
@@ -28,10 +34,15 @@ window.Scoring = (function () {
     var discountPct = (state && state.flags && state.flags.costDiscountPct) || 0;
     var cost = rawCost * (1 - discountPct / 100);
     return {
-      richness: soup.richness + tare.richness + noodle.richness + topping.richness,
-      oiliness: soup.oiliness + tare.oiliness + noodle.oiliness + topping.oiliness,
-      volume: soup.volume + tare.volume + noodle.volume + topping.volume + volumeBonus,
-      cost: Math.round(cost),
+      quality: RAMEN_BASE.quality + soup.quality + tare.quality + noodle.quality + topping.quality,
+      // STEP4 §2: 旧richness・旧oilinessは素材データ側で(richness+oiliness)/2に統合済み(js/data/recipes.js)。
+      // ここでは統合済みのrichnessを合計するだけでよい(「合計してから平均」と数学的に同じ結果になる)。
+      richness: RAMEN_BASE.richness + soup.richness + tare.richness + noodle.richness + topping.richness,
+      volume: RAMEN_BASE.volume + soup.volume + tare.volume + noodle.volume + topping.volume + volumeBonus,
+      uniqueness: RAMEN_BASE.uniqueness + soup.uniqueness + tare.uniqueness + noodle.uniqueness + topping.uniqueness,
+      cost: Math.round(RAMEN_BASE.cost + cost),
+      // STEP4 §5: 器に入れるだけ。どの計算からも参照しない(処理できる人数の仕組みができるSTEP5以降で使う)。
+      workload: RAMEN_BASE.workload + soup.workload + tare.workload + noodle.workload + topping.workload,
       smell: soup.smell + tare.smell
     };
   }
@@ -74,13 +85,24 @@ window.Scoring = (function () {
     return true;
   }
 
+  // STEP4(§4): 品質は客層ごとの理想値を持たない。「高いほど素直に加点される」係数。
+  // taste_scoreのうち20%を品質、残り80%を(濃さ・量・個性の)相性が占める配分にした。
+  // 満足度全体(taste_score*0.6)の中では品質の寄与は0.6*0.2=12%相当になり、既存の匂い
+  // ペナルティ・価格ペナルティ(どちらも重み次第で仕上がり数%〜十数%)と釣り合う大きさに
+  // 収めた。新しいペナルティは作らず、常に0以上のボーナスとしてのみ効かせる(§1)。
+  var QUALITY_WEIGHT = 0.2;
+
   // satisfaction = taste_score*0.6 + shop_score*0.4 - price_penalty
   function computeSatisfaction(seg, state) {
     var agg = recipeAggregate(state.recipe, state);
+    // STEP4(§2〜3): 「コク・脂・量」だった3軸を「濃さ(統合済み)・量・個性」に差し替えた。
+    // 個性(uniqueness)にも客層ごとの理想値があるため、diffの数式自体は3項のまま維持できる。
     var diff = Math.abs(agg.richness - seg.taste.richness) +
-      Math.abs(agg.oiliness - seg.taste.oiliness) +
-      Math.abs(agg.volume - seg.taste.volume);
-    var taste_score = 100 - (diff / 3) * (30 / seg.tolerance);
+      Math.abs(agg.volume - seg.taste.volume) +
+      Math.abs(agg.uniqueness - seg.taste.uniqueness);
+    var fitScore = 100 - (diff / 3) * (30 / seg.tolerance);
+    var qualityScore = U.clamp(agg.quality, 0, 100);
+    var taste_score = fitScore * (1 - QUALITY_WEIGHT) + qualityScore * QUALITY_WEIGHT;
 
     var shop = computeShopStats(state);
     var w = seg.weights;
@@ -319,7 +341,7 @@ window.Scoring = (function () {
     var material = materialScore(state);
     var score = U.clamp(fit * 0.6 + material * 0.4, 0, 100);
     return {
-      axes: { richness: agg.richness, oiliness: agg.oiliness, volume: agg.volume },
+      axes: { quality: agg.quality, richness: agg.richness, volume: agg.volume, uniqueness: agg.uniqueness },
       cost: agg.cost,
       fit: Math.round(fit),
       material: Math.round(material),

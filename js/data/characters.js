@@ -101,3 +101,18 @@ window.DATA.characters = {
     }
   ]
 };
+
+// STEP1(docs/新設計/01_STEP1_新システム用データ基盤_修正版.md §2-2): 従業員の新能力の型だけを
+// 宣言する。既存5人(ユウタ・ミサキ・ゴンゾウ・リン・テツ)にはまだ値を割り当てない
+// (割り当ての判断はSTEP5で行う。このSTEPでは器を空のまま置くだけ)。
+// 既存の5能力(noodle/prep/service/numbers/teach)・士気・関係値・ルート分岐は上のstaffのまま
+// 一切変更していない。
+window.DATA.newStaffStatShape = {
+  cooking: null,     // 調理 1〜10
+  speed: null,       // 速度 1〜10
+  service: null,     // 接客 1〜10
+  development: null, // 開発 1〜10
+  level: null,        // 現在Lv 1〜
+  maxLevel: null,      // 最大Lv(ポテンシャル) 1〜
+  wage: null           // 給料(円)
+};

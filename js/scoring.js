@@ -125,14 +125,21 @@ window.Scoring = (function () {
     if (dev >= UNLOCK.side2) n++;
     return n;
   }
+  // STEP9(docs/新設計/09_STEP9_客層相性_注文_満足度_修正版.md §1): 実際に置いてあるラーメンの
+  // 一覧(recipeオブジェクトの配列)。先頭は必ずラーメン1品目(state.recipe)。「品」として数える
+  // 条件はactiveRamenCountと同じ(枠が解放済み、かつ4カテゴリ全部が埋まっている)。
+  function availableRamens(state) {
+    var slots = unlockedRamenSlots(state);
+    var list = [state.recipe];
+    (state.extraRamens || []).slice(0, slots - 1).forEach(function (r) {
+      if (r && r.soup && r.tare && r.noodle && r.topping) list.push(r);
+    });
+    return list;
+  }
   // 「品」として数えるのは、枠が解放されていて、かつ実際にsoup/tare/noodle/toppingが
   // 全部埋まっているラーメンだけ(未設定の解放枠はメニュー係数に影響しない)。
   function activeRamenCount(state) {
-    var slots = unlockedRamenSlots(state);
-    var extra = (state.extraRamens || []).slice(0, slots - 1).filter(function (r) {
-      return r && r.soup && r.tare && r.noodle && r.topping;
-    }).length;
-    return 1 + extra;
+    return availableRamens(state).length;
   }
   function activeSideCount(state) {
     var slots = unlockedSideSlots(state);
@@ -265,9 +272,26 @@ window.Scoring = (function () {
   // 収めた。新しいペナルティは作らず、常に0以上のボーナスとしてのみ効かせる(§1)。
   var QUALITY_WEIGHT = 0.2;
 
-  // satisfaction = taste_score*0.6 + shop_score*0.4 - price_penalty
-  function computeSatisfaction(seg, state) {
-    var agg = recipeAggregate(state.recipe, state);
+  // STEP9(docs/新設計/09_STEP9_客層相性_注文_満足度_修正版.md §3): 「客層が好むサイドが
+  // 置いてあれば+3〜5点程度」。指示書の目安の中央値である+4点にした(サイドを置くだけで満足度が
+  // 跳ね上がるとSTEP8の歯止めが無意味になるため、上げすぎない)。「好む」の判定は
+  // js/data/sides.js の各サイドが持つ「よく頼む客層」(segments)をそのまま使う(新しいデータを
+  // 増やさない)。どのラーメンを選んだかとは無関係に、店に置いてあるかどうかだけで決まる。
+  var SIDE_SATISFACTION_BONUS = 4;
+  function sideSatisfactionBonus(seg, state) {
+    var sides = window.DATA.sides.items;
+    var hasLikedSide = (state.sideMenu || []).some(function (sideId) {
+      var side = U.findById(sides, sideId);
+      return side && side.segments.indexOf(seg.id) >= 0;
+    });
+    return hasLikedSide ? SIDE_SATISFACTION_BONUS : 0;
+  }
+
+  // satisfaction = taste_score*0.6 + shop_score*0.4 - price_penalty + サイド補正
+  // STEP9(§1): recipeOverrideを渡すと、そのラーメン(2・3品目候補を含む)で評価する。省略時は
+  // 従来どおりstate.recipe(1品目)で評価する(既存の呼び出し元は挙動を変えていない)。
+  function computeSatisfaction(seg, state, recipeOverride) {
+    var agg = recipeAggregate(recipeOverride || state.recipe, state);
     // STEP4(§2〜3): 「コク・脂・量」だった3軸を「濃さ(統合済み)・量・個性」に差し替えた。
     // 個性(uniqueness)にも客層ごとの理想値があるため、diffの数式自体は3項のまま維持できる。
     var diff = Math.abs(agg.richness - seg.taste.richness) +
@@ -292,8 +316,9 @@ window.Scoring = (function () {
     if (state.flags && state.flags.fatigue) shop_score -= state.flags.fatigue * 0.15;
 
     var price_penalty = Math.max(0, (state.price - seg.budget) / seg.budget * 100 * w.price_sensitivity);
-    var satisfaction = taste_score * 0.6 + shop_score * 0.4 - price_penalty;
-    return { value: satisfaction, taste_score: taste_score, shop_score: shop_score, price_penalty: price_penalty };
+    var sideBonus = sideSatisfactionBonus(seg, state);
+    var satisfaction = taste_score * 0.6 + shop_score * 0.4 - price_penalty + sideBonus;
+    return { value: satisfaction, taste_score: taste_score, shop_score: shop_score, price_penalty: price_penalty, sideBonus: sideBonus };
   }
 
   // v09-3: 季節の判定は「表示上の月」(実カレンダー月)で行う。以前は週→月の近似(4.333週/月)から
@@ -335,12 +360,29 @@ window.Scoring = (function () {
     return bands.length / 2;
   }
 
+  // STEP9(docs/新設計/09_STEP9_客層相性_注文_満足度_修正版.md §1): 客はメニューを確率で選ぶ。
+  // 一番満足するものを必ず選ぶ形にはしない(それだと3品置く意味が消える、指示書§1)。
+  // ソフトマックス(温度T)を使う: 確率_i ∝ exp(満足度_i / T)。満足度差20点でおよそ何倍選ばれ
+  // やすくなるかはTで決まる。T=15を選んだ根拠: exp(20/15)≈3.79倍。指示書の要件「差20点で
+  // およそ3:1以上」を余裕を持って満たす(詳細と実測値はdocs/設計判断記録.md参照)。
+  // 満足度が同じなら確率も同じ(ソフトマックスの性質上、自動的に成り立つ)。
+  var RAMEN_CHOICE_TEMPERATURE = 15;
+  function ramenChoiceProbabilities(seg, state, ramens) {
+    var scores = ramens.map(function (r) { return U.clamp(computeSatisfaction(seg, state, r).value, 0, 100); });
+    var maxScore = Math.max.apply(null, scores); // 数値安定化のため最大値を引いてからexp(確率自体は変わらない)
+    var weights = scores.map(function (s) { return Math.exp((s - maxScore) / RAMEN_CHOICE_TEMPERATURE); });
+    var sum = weights.reduce(function (a, b) { return a + b; }, 0);
+    return { probs: weights.map(function (w) { return w / sum; }), scores: scores };
+  }
+
   // 週の客数(客層別) = segment_flow × 基礎客数 × 評判係数 × リピート率 × 季節係数 × 営業時間係数、行列で常連系を排除
   function computeWeeklyCustomers(state) {
     var property = getProperty(state);
     var results = {};
     var totalDemand = 0;
     var activeBands = (state.businessHoursActive && state.businessHoursActive.length) ? state.businessHoursActive : (window.BASE_HOUR_BANDS || ["lunch", "night"]);
+    // STEP9(§1): 置いてある全ラーメンを1回だけ確定する(客層に依存しない一覧なのでループの外)。
+    var ramens = availableRamens(state);
 
     // v05: 向かいにライバル店ができた後は客足が落ちる。挨拶に行っていれば落ち方が軽い。
     var rivalMult = 1;
@@ -351,15 +393,22 @@ window.Scoring = (function () {
         results[seg.id] = { count: 0, satisfaction: null, blocked: true };
         return;
       }
-      var sat = computeSatisfaction(seg, state);
+      // STEP9(§1): 客層ごとに、置いてある全ラーメンの満足度から選択確率を求め、期待値
+      // (確率で重み付けた平均)を「この客層の満足度」として使う(リピート率などは今まで通り
+      // この1つの値から決まる)。
+      var choice = ramenChoiceProbabilities(seg, state, ramens);
+      var expectedSat = 0;
+      for (var i = 0; i < ramens.length; i++) expectedSat += choice.probs[i] * choice.scores[i];
       var flow = property.segment_flow[seg.id] != null ? property.segment_flow[seg.id] : 0.1;
       var repMult = U.clamp(state.reputation / 50, 0.4, 2.2);
       var seasonMult = seasonalFactor(property, seg, state.day);
-      var repeatMult = U.clamp(sat.value / 65, 0.15, 1.7);
+      var repeatMult = U.clamp(expectedSat / 65, 0.15, 1.7);
       var boost = state.tempBoosts && state.tempBoosts[seg.id] ? state.tempBoosts[seg.id].mult : 1;
       var hoursMult = hourCoverageMultiplier(seg, activeBands);
       var potential = Math.max(0, flow * BASE_CUSTOMERS * repMult * seasonMult * repeatMult * boost * rivalMult * hoursMult);
-      results[seg.id] = { count: potential, satisfaction: sat.value, blocked: false };
+      // ramenProbsは「今週の客数がどれだけ増減したか」の影響を受けない比率のまま持つ(§で人数の
+      // 変動と選択比率は独立)。computeWeeklyFinance側でcount×確率として使う。
+      results[seg.id] = { count: potential, satisfaction: expectedSat, blocked: false, ramenProbs: choice.probs };
       totalDemand += potential;
     });
 
@@ -403,26 +452,40 @@ window.Scoring = (function () {
 
     Object.keys(results).forEach(function (id) { results[id].count = Math.max(0, Math.round(results[id].count)); });
 
-    return { results: results, totalDemand: totalDemand, weeklyCapacity: weeklyCapacity, queueLevel: queueLevel, staffCapacity: staffCapacity };
+    // STEP9: ramensをそのまま返す。computeWeeklyFinance側がresults[id].ramenProbsと組み合わせて
+    // 「客層ごとにどのラーメンが何人ぶん売れたか」を復元する(availableRamens()を呼び直さない
+    // ことで、万一この間にstateが変わっても計算に使った一覧とズレない)。
+    return { results: results, totalDemand: totalDemand, weeklyCapacity: weeklyCapacity, queueLevel: queueLevel, staffCapacity: staffCapacity, ramens: ramens };
   }
 
+  // STEP9(§1): 原価は「客がどのラーメンを選んだか」で決まる(値段は今もラーメンによらず
+  // state.price 1つだけなので、売上側の計算は変えていない)。ramensとramenProbsが無い
+  // (STEP9より前のcustomersResultなど)場合はstate.recipe1本のときと同じ結果になるよう保険をかける。
   function computeWeeklyFinance(state, customersResult) {
-    var agg = recipeAggregate(state.recipe, state);
+    var ramens = customersResult.ramens || [state.recipe];
+    var ramenCosts = ramens.map(function (r) { return recipeAggregate(r, state).cost; });
     var property = getProperty(state);
     var revenue = 0, foodCost = 0, totalCustomers = 0;
     var bySegment = {};
+    var byRamen = ramens.map(function () { return 0; }); // STEP9: ラーメンごとの週間杯数(索引はramensと対応)
     var revenueMult = state.flags.weekRevenueMult != null ? state.flags.weekRevenueMult : 1;
     // v10-2-4: 開けている帯が多いほど、仕込み・仕入れの効率が落ちる分を原価に乗せる(2帯基準=1.0)。
     // 客数自体は既にcomputeWeeklyCustomers側の営業時間係数で増減しているので、これは客数とは別枠の上乗せ。
     var costMult = hoursCostMultiplier(state);
     Object.keys(customersResult.results).forEach(function (id) {
-      var c = customersResult.results[id].count;
+      var r = customersResult.results[id];
+      var c = r.count;
+      var probs = r.ramenProbs || [1]; // 未解放時などramenProbsが無ければ全量を1品目に割り振る
       revenue += c * state.price * revenueMult;
-      foodCost += c * agg.cost * costMult;
+      for (var i = 0; i < ramens.length; i++) {
+        var portion = c * (probs[i] || 0);
+        foodCost += portion * ramenCosts[i] * costMult;
+        byRamen[i] += portion;
+      }
       totalCustomers += c;
       bySegment[id] = c;
     });
-    return { revenue: revenue, foodCost: foodCost, totalCustomers: totalCustomers, bySegment: bySegment, property: property };
+    return { revenue: revenue, foodCost: foodCost, totalCustomers: totalCustomers, bySegment: bySegment, byRamen: byRamen, property: property };
   }
 
   // v10-3: 週の客数(客層別、計算済みのcustomersResult)を、実際に絵の上へ湧かせるための
@@ -600,6 +663,9 @@ window.Scoring = (function () {
     activeSideCount: activeSideCount,
     menuCoefficient: menuCoefficient,
     computeSideSales: computeSideSales,
+    availableRamens: availableRamens,
+    ramenChoiceProbabilities: ramenChoiceProbabilities,
+    sideSatisfactionBonus: sideSatisfactionBonus,
     BASE_CUSTOMERS: BASE_CUSTOMERS
   };
 })();

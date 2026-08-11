@@ -22,7 +22,9 @@ window.GameState = (function () {
   // 変わったため10→11に上げた。
   // STEP8(docs/新設計/08_STEP8_複数ラーメンとサイドメニュー_修正版.md §7): ラーメン2・3品目
   // (extraRamens)とサイドメニュー(sideMenu)を持つようになったため11→12に上げた。
-  var SAVE_VERSION = 12;
+  // STEP9(docs/新設計/09_STEP9_客層相性_注文_満足度_修正版.md §9): state自体の形は変えていないが、
+  // 満足度・客数・売上の計算式(客がどのラーメンを選ぶか)が大きく変わったため12→13に上げた。
+  var SAVE_VERSION = 13;
 
   function freshState() {
     return {

@@ -15,6 +15,7 @@ window.ScreenLoop = (function () {
   var PROPERTY_DATA = window.DATA.property;
   var STAFF = window.DATA.characters.staff;
   var CARDS = window.DATA.characters.cards;
+  var SIDES = window.DATA.sides.items; // STEP8: サイドメニュー5種
   var WEEKS_PER_RUN = window.WEEKS_PER_RUN;
   var DAYS_PER_WEEK = 7;
   var TICK_MIN = 15; // 時計を進める最小刻み(分)。表示は15分単位
@@ -246,7 +247,13 @@ window.ScreenLoop = (function () {
     // 一切触れていない。
     var equipUpkeep = Scoring.weeklyEquipUpkeep(state);
     state.money -= equipUpkeep;
-    var profit = finance.revenue - finance.foodCost - monthlyCosts - equipUpkeep;
+    // STEP8(docs/新設計/08_STEP8_複数ラーメンとサイドメニュー_修正版.md §2): サイドメニューの
+    // 売上・原価。ラーメンと違って丼を席へ運ぶ絵の演出が無いため、onCustomerServed()を経由せず
+    // ここで直接まとめて加減する(既存の「丼が届いた瞬間に加算」とは別枠。二重計上にはならない)。
+    var sideSales = Scoring.computeSideSales(state, customers);
+    state.money += sideSales.revenue;
+    state.money -= sideSales.cost;
+    var profit = finance.revenue - finance.foodCost - monthlyCosts - equipUpkeep + sideSales.revenue - sideSales.cost;
 
     state.reputation = U.clamp(state.reputation + (avgSat - 50) * 0.04, 0, 100);
     EE.tickTempBoosts(state);
@@ -267,6 +274,7 @@ window.ScreenLoop = (function () {
       totalCustomers: finance.totalCustomers, revenue: Math.round(finance.revenue), foodCost: Math.round(finance.foodCost),
       monthlyCosts: monthlyCosts, rentCost: chargedBreakdown.rent, wageCost: chargedBreakdown.wages, loanCost: chargedBreakdown.loanPay,
       equipUpkeep: equipUpkeep, // STEP7: 設備の週維持費(月次まとめとは別枠)
+      sideRevenue: sideSales.revenue, sideCost: sideSales.cost, // STEP8: サイドメニューの売上・原価
       profit: Math.round(profit), money: Math.round(state.money),
       avgSatisfaction: Math.round(avgSat), queueLevel: customers.queueLevel
     });
@@ -290,7 +298,7 @@ window.ScreenLoop = (function () {
     // 1. 今週の収支 → 2. イベント(あれば) → 3. 月次まとめ(あれば) → 4. 定休日のアクション、の順で必ず止めて見せる。
     // どの段階も「次へ」を押すまで進まない。state.dayはこの間ずっと今週の最終日のまま動かさない
     // (advanceWeekで初めて次の週の頭に進める)。
-    showWeeklyBalance(finance, customers, chargedBreakdown, monthCharged, equipUpkeep, function () {
+    showWeeklyBalance(finance, customers, chargedBreakdown, monthCharged, equipUpkeep, sideSales, function () {
       proceedToEvents(finishedWeek, weekStats);
     });
   }
@@ -353,12 +361,13 @@ window.ScreenLoop = (function () {
 
   // ---------- 2-2: 月末にまとめを出す ----------
   function monthAggregate(monthNum) {
-    var agg = { revenue: 0, foodCost: 0, rent: 0, wages: 0, loan: 0, equipUpkeep: 0, profit: 0, customers: 0 };
+    var agg = { revenue: 0, foodCost: 0, rent: 0, wages: 0, loan: 0, equipUpkeep: 0, sideRevenue: 0, sideCost: 0, profit: 0, customers: 0 };
     state.history.forEach(function (rec) {
       if (rec.month !== monthNum) return;
       agg.revenue += rec.revenue; agg.foodCost += rec.foodCost;
       agg.rent += rec.rentCost || 0; agg.wages += rec.wageCost || 0; agg.loan += rec.loanCost || 0;
       agg.equipUpkeep += rec.equipUpkeep || 0; // STEP7: 週次で引かれた設備維持費を月内ぶん合算(内訳表示用)
+      agg.sideRevenue += rec.sideRevenue || 0; agg.sideCost += rec.sideCost || 0; // STEP8: サイドの月内合算
       agg.profit += rec.profit; agg.customers += rec.totalCustomers;
     });
     return agg;
@@ -394,6 +403,8 @@ window.ScreenLoop = (function () {
       recapRow("客数", fmtCount(cur.customers), prev ? cur.customers - prev.customers : null, fmtCount),
       recapRow("売上", U.formatMoney(cur.revenue), prev ? cur.revenue - prev.revenue : null, U.formatMoney),
       recapRow("仕入", "−" + U.formatMoney(cur.foodCost), prev ? -(cur.foodCost - prev.foodCost) : null, U.formatMoney),
+      recapRow("サイド売上", U.formatMoney(cur.sideRevenue), prev ? cur.sideRevenue - prev.sideRevenue : null, U.formatMoney),
+      recapRow("サイド原価", "−" + U.formatMoney(cur.sideCost), prev ? -(cur.sideCost - prev.sideCost) : null, U.formatMoney),
       recapRow("設備維持費", "−" + U.formatMoney(cur.equipUpkeep), prev ? -(cur.equipUpkeep - prev.equipUpkeep) : null, U.formatMoney),
       recapRow("人件費", "−" + U.formatMoney(cur.wages), prev ? -(cur.wages - prev.wages) : null, U.formatMoney),
       recapRow("家賃", "−" + U.formatMoney(cur.rent), prev ? -(cur.rent - prev.rent) : null, U.formatMoney),
@@ -457,11 +468,12 @@ window.ScreenLoop = (function () {
   // v14-3: 月額費用(家賃・人件費・返済)は「週割りの概算」ではなく、runWeeklyCalcが実際に
   // 所持金から引いた額(chargedBreakdown)をそのまま使う。月初でない週はここが全て0になるので、
   // その週は表示側でも「発生しない」として出す(推測で埋め直さない=逆算しない)。
-  function buildFlashData(finance, customers, chargedBreakdown, monthCharged, equipUpkeep) {
+  function buildFlashData(finance, customers, chargedBreakdown, monthCharged, equipUpkeep, sideSales) {
     var s = satSplit(finance, customers);
     var cb = chargedBreakdown || { rent: 0, wages: 0, loanPay: 0 };
     var revenue = finance.revenue;
     var upkeep = equipUpkeep || 0;
+    var side = sideSales || { revenue: 0, cost: 0 };
     return {
       week: U.weekOfRun(state.day),
       totalCustomers: finance.totalCustomers,
@@ -472,14 +484,16 @@ window.ScreenLoop = (function () {
       wages: cb.wages, rent: cb.rent, loanPay: cb.loanPay,
       // STEP7(§2): 設備維持費は月初かどうかに関係なく毎週発生するので、月次費用とは別の行として持つ。
       equipUpkeep: upkeep,
-      net: revenue - finance.foodCost - cb.rent - cb.wages - cb.loanPay - upkeep
+      // STEP8(§2): サイドメニューの売上・原価。ラーメンの売上とは別の行として持つ。
+      sideRevenue: side.revenue, sideCost: side.cost,
+      net: revenue - finance.foodCost - cb.rent - cb.wages - cb.loanPay - upkeep + side.revenue - side.cost
     };
   }
 
   // 週末停止の第1段階。読んでいる間に裏で時間が進むことは絶対にない(タイマーを一切使わない)。
   // 「次へ」を押すまでここで止まる。
-  function showWeeklyBalance(finance, customers, chargedBreakdown, monthCharged, equipUpkeep, onDone) {
-    lastFlashData = buildFlashData(finance, customers, chargedBreakdown, monthCharged, equipUpkeep);
+  function showWeeklyBalance(finance, customers, chargedBreakdown, monthCharged, equipUpkeep, sideSales, onDone) {
+    lastFlashData = buildFlashData(finance, customers, chargedBreakdown, monthCharged, equipUpkeep, sideSales);
     renderWeeklyBalanceModal(onDone);
   }
 
@@ -510,6 +524,9 @@ window.ScreenLoop = (function () {
         moneyRow("売上", d.revenue),
         moneyRow("仕入", -d.foodCost, { tone: "bad", suffix: "（原価率 " + d.foodCostPct + "%）" })
       ];
+      // STEP8(§2): サイドメニューの売上・原価。ラーメンとは別の行にする(0円の週は出さない)。
+      if (d.sideRevenue) rows.push(moneyRow("サイド売上", d.sideRevenue));
+      if (d.sideCost) rows.push(moneyRow("サイド原価", -d.sideCost, { tone: "bad" }));
       // STEP7(§2): 設備維持費は月初かどうかに関係なく毎週発生する固定費。家賃・人件費・返済の
       // 判定(d.monthCharged)とは別に、毎週この行を出す(0円の週は出さない)。
       if (d.equipUpkeep) rows.push(moneyRow("設備維持費", -d.equipUpkeep, { tone: "bad" }));
@@ -691,11 +708,128 @@ window.ScreenLoop = (function () {
   }
 
   // ---------- パネルの中身 ----------
+  // STEP8(docs/新設計/08_STEP8_複数ラーメンとサイドメニュー_修正版.md §1・§3): 今の構成(ラーメン
+  // 品数・サイド品数)と、それによって決まる週の処理可能人数を表示する。「見えないと選択にならない」
+  // (§3)ため、メニューを増やすとこの数字が減ることが見える必要がある。
+  function menuOverviewSection() {
+    var dev = Scoring.staffDevelopmentSum(state);
+    var activeRamen = Scoring.activeRamenCount(state);
+    var activeSide = Scoring.activeSideCount(state);
+    var coef = Scoring.menuCoefficient(state);
+    var cap = Math.round(Scoring.staffProcessingCapacity(state));
+    return h("div", { className: "sheet-section status-card" }, [
+      h("h3", { className: "emoji-font", text: "📋 メニュー構成" }),
+      h("div", { className: "dim", text: "開発の合計 " + Math.round(dev) + "(厨房にいる従業員全員ぶん。枠の解放に使う)" }),
+      h("div", {}, [
+        "今の構成：ラーメン" + activeRamen + "品・サイド" + activeSide + "品　→　週の処理可能人数 ",
+        h("span", { className: "money", text: cap + "人" }),
+        h("span", { className: "dim", text: "（メニュー係数 ×" + coef.toFixed(2) + "）" })
+      ])
+    ]);
+  }
+
+  // STEP8(§1): ラーメン2・3品目。開発の合計が閾値(2品目=8、3品目=16)を超えると解放され、
+  // 解放後はslot1と同じ4カテゴリの選択UIを出す(§4: 素材カードの所持状況にも同じく従う)。
+  // 未解放の間は必要な数値を隠さず見せる(§1「隠さない」)。
+  function extraRamenSection(slotIndex) {
+    var slotNumber = slotIndex + 2; // slotIndex 0→2品目, 1→3品目
+    var required = slotNumber === 2 ? 8 : 16;
+    var dev = Scoring.staffDevelopmentSum(state);
+    var unlocked = Scoring.unlockedRamenSlots(state) >= slotNumber;
+    if (!unlocked) {
+      return h("div", { className: "sheet-section" }, [
+        h("h3", { text: "ラーメン" + slotNumber + "品目（未解放）" }),
+        h("div", { className: "dim", text: "開発の合計 " + Math.round(dev) + " / 必要 " + required })
+      ]);
+    }
+    if (!state.extraRamens[slotIndex]) state.extraRamens[slotIndex] = { soup: null, tare: null, noodle: null, topping: null };
+    var r = state.extraRamens[slotIndex];
+    var configured = !!(r.soup && r.tare && r.noodle && r.topping);
+    var sec = h("div", { className: "sheet-section" }, [
+      h("h3", { text: "ラーメン" + slotNumber + "品目" + (configured ? "" : "（未設定）") })
+    ]);
+    if (configured) {
+      sec.appendChild(h("button", {
+        className: "btn small", text: "この品を外す",
+        onclick: function () { state.extraRamens[slotIndex] = null; refreshSheet(); }
+      }));
+    }
+    var cats = [["soup", "スープ"], ["tare", "タレ"], ["noodle", "麺"], ["topping", "トッピング"]];
+    cats.forEach(function (c) {
+      var key = c[0];
+      sec.appendChild(h("div", { className: "setup-hint", text: c[1] }));
+      var grid = h("div", { className: "choice-grid" });
+      RECIPES[key].filter(function (item) {
+        if (item.unlock === "start") return true;
+        if (item.unlock === "card_menya") return !!state.cardsUnlocked.menya;
+        if (item.unlock === "event") return !!state.flags.eventRecipesUnlocked;
+        return false;
+      }).forEach(function (item) {
+        var selected = r[key] === item.id;
+        var unowned = item.unlock === "start" && item.id !== "none" && !window.Scoring.isMaterialOwned(state, key, item.id);
+        grid.appendChild(h("div", {
+          className: "choice-card" + (selected ? " selected" : "") + (unowned ? " disabled" : ""),
+          onclick: function () {
+            if (unowned) return;
+            r[key] = item.id;
+            window.UI.toast(c[1] + "を" + item.name + "に変更した");
+            refreshSheet();
+          }
+        }, [
+          h("div", { className: "emoji emoji-font", text: item.emoji }),
+          h("div", { className: "name", text: item.name }),
+          unowned ? h("div", { className: "locked", text: "未所持" }) : null
+        ]));
+      });
+      sec.appendChild(grid);
+    });
+    return sec;
+  }
+
+  // STEP8(§1・§2): サイドメニューの選択。開発の合計が閾値(1品目=5、2品目=12)を超えると解放される。
+  // §4「サイドの説明文を書かない。数値の表だけ」に従い、単価・原価・提供負荷の数値だけを出す。
+  function sideMenuSection() {
+    var dev = Scoring.staffDevelopmentSum(state);
+    var slots = Scoring.unlockedSideSlots(state);
+    var sec = h("div", { className: "sheet-section" }, [h("h3", { text: "サイドメニュー" })]);
+    if (slots === 0) {
+      sec.appendChild(h("div", { className: "dim", text: "未解放(開発の合計 " + Math.round(dev) + " / 必要 5)" }));
+      return sec;
+    }
+    sec.appendChild(h("div", { className: "dim", text: "最大" + slots + "品まで選べる(開発の合計 " + Math.round(dev) + ")" }));
+    var grid = h("div", { className: "choice-grid" });
+    SIDES.forEach(function (side) {
+      var selected = state.sideMenu.indexOf(side.id) >= 0;
+      var full = state.sideMenu.length >= slots && !selected;
+      grid.appendChild(h("div", {
+        className: "choice-card" + (selected ? " selected" : "") + (full ? " disabled" : ""),
+        onclick: function () {
+          if (selected) {
+            state.sideMenu = state.sideMenu.filter(function (id) { return id !== side.id; });
+          } else {
+            if (full) return;
+            state.sideMenu.push(side.id);
+          }
+          refreshSheet();
+        }
+      }, [
+        h("div", { className: "emoji emoji-font", text: side.emoji }),
+        h("div", { className: "name", text: side.name }),
+        h("div", { className: "blurb", text: "単価" + side.price + "円 ・ 原価" + side.cost + "円 ・ 提供負荷" + side.workload }),
+        full ? h("div", { className: "locked", text: "これ以上は選べません" }) : null
+      ]));
+    });
+    sec.appendChild(grid);
+    return sec;
+  }
+
   function panelRecipe() {
     var box = h("div", {});
+    box.appendChild(menuOverviewSection());
     if (state.flags.recipeLockWeeksLeft > 0) {
       box.appendChild(h("p", { className: "bad", text: "ゴンゾウとの約束で、あと" + state.flags.recipeLockWeeksLeft + "週はレシピを変更できない。" }));
     }
+    box.appendChild(h("div", { className: "sheet-section" }, [h("h3", { text: "ラーメン1品目" })]));
     var cats = [["soup", "スープ"], ["tare", "タレ"], ["noodle", "麺"], ["topping", "トッピング"]];
     cats.forEach(function (c) {
       var key = c[0];
@@ -732,6 +866,9 @@ window.ScreenLoop = (function () {
       sec.appendChild(grid);
       box.appendChild(sec);
     });
+    box.appendChild(extraRamenSection(0)); // ラーメン2品目
+    box.appendChild(extraRamenSection(1)); // ラーメン3品目
+    box.appendChild(sideMenuSection());
     box.appendChild(materialCardsSection());
     return box;
   }

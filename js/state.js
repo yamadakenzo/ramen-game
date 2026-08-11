@@ -20,7 +20,9 @@ window.GameState = (function () {
   // STEP7(docs/新設計/07_STEP7_設備_修正版.md §8): 設備の週維持費・処理可能人数への読み替えで
   // 週の収支の内訳(stateの形自体は変わっていないが、historyに積む内容とお金の計算が変わった)が
   // 変わったため10→11に上げた。
-  var SAVE_VERSION = 11;
+  // STEP8(docs/新設計/08_STEP8_複数ラーメンとサイドメニュー_修正版.md §7): ラーメン2・3品目
+  // (extraRamens)とサイドメニュー(sideMenu)を持つようになったため11→12に上げた。
+  var SAVE_VERSION = 12;
 
   function freshState() {
     return {
@@ -30,7 +32,13 @@ window.GameState = (function () {
       setupStep: 0, // 0 資金,1 物件,2 スープ,3 タレ,4 麺,5 具,6 設備,7 従業員
       funding: null,
       property: null,
-      recipe: { soup: null, tare: null, noodle: null, topping: null },
+      recipe: { soup: null, tare: null, noodle: null, topping: null }, // ラーメン1品目(既存のまま)
+      // STEP8(docs/新設計/08_STEP8_複数ラーメンとサイドメニュー_修正版.md §1): ラーメン2・3品目。
+      // 開発の合計が閾値を超えると解放され(枠自体は常に見える)、解放後にプレイヤーが
+      // soup/tare/noodle/toppingを全部選ぶと「品」として数えられる(未設定の間はnull)。
+      extraRamens: [null, null],
+      // STEP8(§1): サイドメニューの選択中id配列(最大2)。開発の合計が閾値を超えると枠が解放される。
+      sideMenu: [],
       // STEP2(docs/新設計/02_STEP2_素材カード基本システム_修正版.md §1): 開業時点で持っている
       // 素材カード(カテゴリごとの id 配列)。各カテゴリ性格が反対のもの2枚ずつ、計8枚が初期所持。
       // トッピングの「なし」(none)はカードとして扱わない(常に選択可能。ここには含めない)。

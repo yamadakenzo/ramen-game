@@ -81,6 +81,13 @@ window.Scoring = (function () {
       .filter(function (v) { return v != null; });
     return vals.reduce(function (a, b) { return a + b; }, 0);
   }
+  // STEP8(docs/新設計/08_STEP8_複数ラーメンとサイドメニュー_修正版.md §1): 開発の合計
+  // (厨房にいる=雇っている従業員全員ぶん)。メニュー枠の解放判定に使う。誰もいなければ0。
+  function staffDevelopmentSum(state) {
+    var vals = (state.staffHired || []).map(function (id) { return effectiveNewStat(id, "development", state); })
+      .filter(function (v) { return v != null; });
+    return vals.reduce(function (a, b) { return a + b; }, 0);
+  }
   // §2-1: 最終品質 = レシピの品質 + (調理の平均-5)×3 + 設備補正。設備補正に該当する設備はまだ
   // 無いため(STEP7で追加予定)、現時点は常に0。新しいペナルティ機構は作らず、既存のagg.qualityに
   // 加算するだけ(素材品質と同じ0〜100前後のスケールにそのまま足し込む)。
@@ -100,9 +107,73 @@ window.Scoring = (function () {
     if (state.equipment.indexOf("big_pot") >= 0) bonus += 50;
     return bonus;
   }
-  // §2-2: 週の処理可能人数(客数の上限キャップ)。120 + 速度の合計×30 + 設備補正。
+  // ---------- STEP8(docs/新設計/08_STEP8_複数ラーメンとサイドメニュー_修正版.md): メニュー枠 ----------
+  // §1: 枠は開発の合計(厨房にいる従業員全員ぶん)で解放する。閾値は累積(ラーメン3品目の16は
+  // 2品目の8を自動的に満たす)ので、各枠を独立に判定するだけでよい。
+  var UNLOCK = { ramen2: 8, side1: 5, side2: 12, ramen3: 16 };
+  function unlockedRamenSlots(state) {
+    var dev = staffDevelopmentSum(state);
+    var n = 1;
+    if (dev >= UNLOCK.ramen2) n++;
+    if (dev >= UNLOCK.ramen3) n++;
+    return n;
+  }
+  function unlockedSideSlots(state) {
+    var dev = staffDevelopmentSum(state);
+    var n = 0;
+    if (dev >= UNLOCK.side1) n++;
+    if (dev >= UNLOCK.side2) n++;
+    return n;
+  }
+  // 「品」として数えるのは、枠が解放されていて、かつ実際にsoup/tare/noodle/toppingが
+  // 全部埋まっているラーメンだけ(未設定の解放枠はメニュー係数に影響しない)。
+  function activeRamenCount(state) {
+    var slots = unlockedRamenSlots(state);
+    var extra = (state.extraRamens || []).slice(0, slots - 1).filter(function (r) {
+      return r && r.soup && r.tare && r.noodle && r.topping;
+    }).length;
+    return 1 + extra;
+  }
+  function activeSideCount(state) {
+    var slots = unlockedSideSlots(state);
+    return U.clamp((state.sideMenu || []).length, 0, slots);
+  }
+  // §3: メニュー係数 = 1 − (ラーメンの品数−1)×0.12 − サイドの品数×0.06
+  function menuCoefficient(state) {
+    return 1 - (activeRamenCount(state) - 1) * 0.12 - activeSideCount(state) * 0.06;
+  }
+
+  // §2-2: 週の処理可能人数(客数の上限キャップ)。120 + 速度の合計×30 + 設備補正、に
+  // STEP8(§3)のメニュー係数を掛ける。
   function staffProcessingCapacity(state) {
-    return 120 + staffSpeedSum(state) * 30 + equipmentProcessingBonus(state);
+    return (120 + staffSpeedSum(state) * 30 + equipmentProcessingBonus(state)) * menuCoefficient(state);
+  }
+
+  // STEP8(§2): サイドメニューの週間販売。客がどのラーメンを選ぶかの判定(STEP9)とは独立に、
+  // 「よく頼む客層は高い確率、それ以外は低い確率」で単純に注文する(指示書§2「今回は単純でよい」)。
+  // 確率は実装側で決めた値(PRIMARY_PROB/OTHER_PROB。根拠はdocs/設計判断記録.md参照)。
+  // customersResultはcomputeWeeklyCustomers()の返り値(客層別の週客数)をそのまま渡す。
+  var SIDE_PRIMARY_PROB = 0.35; // 「よく頼む客層」が1人あたり注文する確率(期待値としてそのまま掛ける)
+  var SIDE_OTHER_PROB = 0.08;   // それ以外の客層
+  function computeSideSales(state, customersResult) {
+    var SIDES = window.DATA.sides.items;
+    var revenue = 0, cost = 0;
+    var bySide = {};
+    (state.sideMenu || []).forEach(function (sideId) {
+      var side = U.findById(SIDES, sideId);
+      if (!side) return;
+      var orders = 0;
+      Object.keys(customersResult.results || {}).forEach(function (segId) {
+        var count = customersResult.results[segId].count || 0;
+        var prob = side.segments.indexOf(segId) >= 0 ? SIDE_PRIMARY_PROB : SIDE_OTHER_PROB;
+        orders += count * prob;
+      });
+      orders = Math.round(orders);
+      bySide[sideId] = orders;
+      revenue += orders * side.price;
+      cost += orders * side.cost;
+    });
+    return { revenue: revenue, cost: cost, bySide: bySide };
   }
 
   function recipeAggregate(recipe, state) {
@@ -518,10 +589,17 @@ window.Scoring = (function () {
     staffCookingAvg: staffCookingAvg,
     staffServiceAvg: staffServiceAvg,
     staffSpeedSum: staffSpeedSum,
+    staffDevelopmentSum: staffDevelopmentSum,
     cookingQualityBonus: cookingQualityBonus,
     staffProcessingCapacity: staffProcessingCapacity,
     equipmentProcessingBonus: equipmentProcessingBonus,
     weeklyEquipUpkeep: weeklyEquipUpkeep,
+    unlockedRamenSlots: unlockedRamenSlots,
+    unlockedSideSlots: unlockedSideSlots,
+    activeRamenCount: activeRamenCount,
+    activeSideCount: activeSideCount,
+    menuCoefficient: menuCoefficient,
+    computeSideSales: computeSideSales,
     BASE_CUSTOMERS: BASE_CUSTOMERS
   };
 })();

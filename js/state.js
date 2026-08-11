@@ -17,7 +17,10 @@ window.GameState = (function () {
   // newStatBonusが増えたため8→9に上げた。
   // STEP6(docs/新設計/06_STEP6_従業員スカウト_修正版.md §9): スカウトで雇った従業員の定義
   // (scoutedStaff)を持つようになったため9→10に上げた。
-  var SAVE_VERSION = 10;
+  // STEP7(docs/新設計/07_STEP7_設備_修正版.md §8): 設備の週維持費・処理可能人数への読み替えで
+  // 週の収支の内訳(stateの形自体は変わっていないが、historyに積む内容とお金の計算が変わった)が
+  // 変わったため10→11に上げた。
+  var SAVE_VERSION = 11;
 
   function freshState() {
     return {

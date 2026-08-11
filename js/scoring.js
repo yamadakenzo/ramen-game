@@ -4,6 +4,7 @@ window.Scoring = (function () {
   var SEGMENTS = window.DATA.segments.segments;
   var RECIPES = window.DATA.recipes;
   var PROPERTIES = window.DATA.property.properties;
+  var EQUIPMENT = window.DATA.property.equipment; // STEP7: 週維持費(weekly_upkeep)の参照に使う
   var STAFF = window.DATA.characters.staff; // STEP5: 従業員の新4能力(newStats/maxLevel)の参照に使う
 
   // STEP1: BASE_CUSTOMERS / SEATS_TO_WEEKLY_CAPACITY / EXTRA_BOILER_VOLUME は
@@ -86,9 +87,22 @@ window.Scoring = (function () {
   function cookingQualityBonus(state) {
     return (staffCookingAvg(state) - 5) * 3;
   }
-  // §2-2: 週の処理可能人数(客数の上限キャップ)。120 + 速度の合計×30。
+  // STEP7(docs/新設計/07_STEP7_設備_修正版.md §3): 高性能茹で麺器・大型寸胴・券売機の効果を
+  // ここへ読み替えた(旧: 茹で麺器と券売機は店の"speed"スタット、茹で麺器と大型寸胴は座席キャパの
+  // 倍率だった)。加算量は実装側で決めた値(コストと旧効果の大きさに応じて配分。詳細はdocs/
+  // 設計判断記録.md参照): 茹で麺器+80(旧効果が2つ分あり最大)、券売機+60(最も高価、デメリットは
+  // 維持)、大型寸胴+50(最も安価)。券売機の家族連れ・観光客ペナルティ(computeSatisfaction内)は
+  // 変更していない。
+  function equipmentProcessingBonus(state) {
+    var bonus = 0;
+    if (state.equipment.indexOf("noodle_boiler") >= 0) bonus += 80;
+    if (state.equipment.indexOf("ticket_machine") >= 0) bonus += 60;
+    if (state.equipment.indexOf("big_pot") >= 0) bonus += 50;
+    return bonus;
+  }
+  // §2-2: 週の処理可能人数(客数の上限キャップ)。120 + 速度の合計×30 + 設備補正。
   function staffProcessingCapacity(state) {
-    return 120 + staffSpeedSum(state) * 30;
+    return 120 + staffSpeedSum(state) * 30 + equipmentProcessingBonus(state);
   }
 
   function recipeAggregate(recipe, state) {
@@ -131,10 +145,23 @@ window.Scoring = (function () {
     return p.seats_counter + p.seats_table + tableBonus;
   }
 
+  // STEP7(docs/新設計/07_STEP7_設備_修正版.md §1〜2): 所持している設備の週維持費の合計。
+  // weekly_upkeepを持たない設備(麺量アップ)は0として扱う(指示書の対象8種に含まれないため)。
+  // 週ごとにこの額を引く(月初にまとめない)。
+  function weeklyEquipUpkeep(state) {
+    var total = 0;
+    (state.equipment || []).forEach(function (id) {
+      var eq = U.findById(EQUIPMENT, id);
+      if (eq && eq.weekly_upkeep) total += eq.weekly_upkeep;
+    });
+    return total;
+  }
+
   function computeShopStats(state) {
     var speed = 40, cleanliness = 55, brightness = 35;
-    if (state.equipment.indexOf("ticket_machine") >= 0) speed += 15;
-    if (state.equipment.indexOf("noodle_boiler") >= 0) speed += 20;
+    // STEP7(docs/新設計/07_STEP7_設備_修正版.md §3): ticket_machine/noodle_boilerの速度加算は
+    // ここから撤去し、staffProcessingCapacity()(週の処理可能人数)へ読み替えた。ticket_machineの
+    // デメリット(家族連れ・観光客-10、下のcomputeSatisfaction内)はそのまま残す。
     if (state.equipment.indexOf("bright_light") >= 0) brightness += 30;
     if (state.staffHired.indexOf("misaki") >= 0) { cleanliness += 15; brightness += 5; }
     if (state.staffHired.indexOf("tetsu") >= 0) { cleanliness += 5; }
@@ -266,10 +293,10 @@ window.Scoring = (function () {
     });
 
     var seats = totalSeats(state);
-    var capMult = 1;
-    if (state.equipment.indexOf("big_pot") >= 0) capMult += 0.15;
-    if (state.equipment.indexOf("noodle_boiler") >= 0) capMult += 0.10;
-    var weeklyCapacity = seats * SEATS_TO_WEEKLY_CAPACITY * capMult;
+    // STEP7(§3): big_pot/noodle_boilerの座席キャパ倍率(capMult)はここから撤去し、
+    // staffProcessingCapacity()(週の処理可能人数)へ読み替えた。座席キャパ自体は設備の影響を
+    // 受けなくなった(物理的な席数×回転数のみで決まる、という素直な形に戻った)。
+    var weeklyCapacity = seats * SEATS_TO_WEEKLY_CAPACITY;
     var queueRatio = weeklyCapacity > 0 ? totalDemand / weeklyCapacity : 0;
     var queueLevel = Math.max(0, queueRatio - 1); // 0=行列なし、値が大きいほど行列が伸びる
     if (state.flags && state.flags.forceQueueSpike) queueLevel = Math.max(queueLevel, 1.5);
@@ -493,6 +520,8 @@ window.Scoring = (function () {
     staffSpeedSum: staffSpeedSum,
     cookingQualityBonus: cookingQualityBonus,
     staffProcessingCapacity: staffProcessingCapacity,
+    equipmentProcessingBonus: equipmentProcessingBonus,
+    weeklyEquipUpkeep: weeklyEquipUpkeep,
     BASE_CUSTOMERS: BASE_CUSTOMERS
   };
 })();

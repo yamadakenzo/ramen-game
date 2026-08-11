@@ -240,7 +240,13 @@ window.ScreenLoop = (function () {
     // 加算済み。ここで再び足すと二重計上になるため、週末は費用(仕入)だけを引く。表示用のprofit
     // (週の損益)はこれまで通り売上込みの式のまま——週末の収支画面の「残り」の表示内容は変えない指示のため。
     state.money -= finance.foodCost;
-    var profit = finance.revenue - finance.foodCost - monthlyCosts;
+    // STEP7(docs/新設計/07_STEP7_設備_修正版.md §2): 設備の週維持費。月次のまとめ(monthlyCosts、
+    // 上のmonthChargedブロック)とは完全に別枠で、月をまたぐかどうかに関係なく毎週必ず引く
+    // (月初にまとめない)。家賃・給料と二重に引かれないよう、monthlyCostBreakdown()側には
+    // 一切触れていない。
+    var equipUpkeep = Scoring.weeklyEquipUpkeep(state);
+    state.money -= equipUpkeep;
+    var profit = finance.revenue - finance.foodCost - monthlyCosts - equipUpkeep;
 
     state.reputation = U.clamp(state.reputation + (avgSat - 50) * 0.04, 0, 100);
     EE.tickTempBoosts(state);
@@ -260,6 +266,7 @@ window.ScreenLoop = (function () {
       week: U.weekOfRun(state.day), month: U.monthSeq(state.day), customers: finance.bySegment,
       totalCustomers: finance.totalCustomers, revenue: Math.round(finance.revenue), foodCost: Math.round(finance.foodCost),
       monthlyCosts: monthlyCosts, rentCost: chargedBreakdown.rent, wageCost: chargedBreakdown.wages, loanCost: chargedBreakdown.loanPay,
+      equipUpkeep: equipUpkeep, // STEP7: 設備の週維持費(月次まとめとは別枠)
       profit: Math.round(profit), money: Math.round(state.money),
       avgSatisfaction: Math.round(avgSat), queueLevel: customers.queueLevel
     });
@@ -283,7 +290,7 @@ window.ScreenLoop = (function () {
     // 1. 今週の収支 → 2. イベント(あれば) → 3. 月次まとめ(あれば) → 4. 定休日のアクション、の順で必ず止めて見せる。
     // どの段階も「次へ」を押すまで進まない。state.dayはこの間ずっと今週の最終日のまま動かさない
     // (advanceWeekで初めて次の週の頭に進める)。
-    showWeeklyBalance(finance, customers, chargedBreakdown, monthCharged, function () {
+    showWeeklyBalance(finance, customers, chargedBreakdown, monthCharged, equipUpkeep, function () {
       proceedToEvents(finishedWeek, weekStats);
     });
   }
@@ -346,11 +353,12 @@ window.ScreenLoop = (function () {
 
   // ---------- 2-2: 月末にまとめを出す ----------
   function monthAggregate(monthNum) {
-    var agg = { revenue: 0, foodCost: 0, rent: 0, wages: 0, loan: 0, profit: 0, customers: 0 };
+    var agg = { revenue: 0, foodCost: 0, rent: 0, wages: 0, loan: 0, equipUpkeep: 0, profit: 0, customers: 0 };
     state.history.forEach(function (rec) {
       if (rec.month !== monthNum) return;
       agg.revenue += rec.revenue; agg.foodCost += rec.foodCost;
       agg.rent += rec.rentCost || 0; agg.wages += rec.wageCost || 0; agg.loan += rec.loanCost || 0;
+      agg.equipUpkeep += rec.equipUpkeep || 0; // STEP7: 週次で引かれた設備維持費を月内ぶん合算(内訳表示用)
       agg.profit += rec.profit; agg.customers += rec.totalCustomers;
     });
     return agg;
@@ -386,6 +394,7 @@ window.ScreenLoop = (function () {
       recapRow("客数", fmtCount(cur.customers), prev ? cur.customers - prev.customers : null, fmtCount),
       recapRow("売上", U.formatMoney(cur.revenue), prev ? cur.revenue - prev.revenue : null, U.formatMoney),
       recapRow("仕入", "−" + U.formatMoney(cur.foodCost), prev ? -(cur.foodCost - prev.foodCost) : null, U.formatMoney),
+      recapRow("設備維持費", "−" + U.formatMoney(cur.equipUpkeep), prev ? -(cur.equipUpkeep - prev.equipUpkeep) : null, U.formatMoney),
       recapRow("人件費", "−" + U.formatMoney(cur.wages), prev ? -(cur.wages - prev.wages) : null, U.formatMoney),
       recapRow("家賃", "−" + U.formatMoney(cur.rent), prev ? -(cur.rent - prev.rent) : null, U.formatMoney),
       recapRow("返済", "−" + U.formatMoney(cur.loan), prev ? -(cur.loan - prev.loan) : null, U.formatMoney)
@@ -448,10 +457,11 @@ window.ScreenLoop = (function () {
   // v14-3: 月額費用(家賃・人件費・返済)は「週割りの概算」ではなく、runWeeklyCalcが実際に
   // 所持金から引いた額(chargedBreakdown)をそのまま使う。月初でない週はここが全て0になるので、
   // その週は表示側でも「発生しない」として出す(推測で埋め直さない=逆算しない)。
-  function buildFlashData(finance, customers, chargedBreakdown, monthCharged) {
+  function buildFlashData(finance, customers, chargedBreakdown, monthCharged, equipUpkeep) {
     var s = satSplit(finance, customers);
     var cb = chargedBreakdown || { rent: 0, wages: 0, loanPay: 0 };
     var revenue = finance.revenue;
+    var upkeep = equipUpkeep || 0;
     return {
       week: U.weekOfRun(state.day),
       totalCustomers: finance.totalCustomers,
@@ -460,14 +470,16 @@ window.ScreenLoop = (function () {
       foodCostPct: revenue > 0 ? Math.round((finance.foodCost / revenue) * 100) : 0,
       monthCharged: !!monthCharged,
       wages: cb.wages, rent: cb.rent, loanPay: cb.loanPay,
-      net: revenue - finance.foodCost - cb.rent - cb.wages - cb.loanPay
+      // STEP7(§2): 設備維持費は月初かどうかに関係なく毎週発生するので、月次費用とは別の行として持つ。
+      equipUpkeep: upkeep,
+      net: revenue - finance.foodCost - cb.rent - cb.wages - cb.loanPay - upkeep
     };
   }
 
   // 週末停止の第1段階。読んでいる間に裏で時間が進むことは絶対にない(タイマーを一切使わない)。
   // 「次へ」を押すまでここで止まる。
-  function showWeeklyBalance(finance, customers, chargedBreakdown, monthCharged, onDone) {
-    lastFlashData = buildFlashData(finance, customers, chargedBreakdown, monthCharged);
+  function showWeeklyBalance(finance, customers, chargedBreakdown, monthCharged, equipUpkeep, onDone) {
+    lastFlashData = buildFlashData(finance, customers, chargedBreakdown, monthCharged, equipUpkeep);
     renderWeeklyBalanceModal(onDone);
   }
 
@@ -498,6 +510,9 @@ window.ScreenLoop = (function () {
         moneyRow("売上", d.revenue),
         moneyRow("仕入", -d.foodCost, { tone: "bad", suffix: "（原価率 " + d.foodCostPct + "%）" })
       ];
+      // STEP7(§2): 設備維持費は月初かどうかに関係なく毎週発生する固定費。家賃・人件費・返済の
+      // 判定(d.monthCharged)とは別に、毎週この行を出す(0円の週は出さない)。
+      if (d.equipUpkeep) rows.push(moneyRow("設備維持費", -d.equipUpkeep, { tone: "bad" }));
       // v14-3: 家賃・人件費・返済は月初の週にしか引き落とされない固定費。実際に引かれた週だけ、
       // 実際に引かれた額をそのまま出す(それ以外の週は行ごと出さない=無かったことにする)。
       if (d.monthCharged) {
@@ -831,8 +846,10 @@ window.ScreenLoop = (function () {
       }, [
         h("div", { className: "emoji emoji-font", text: eq.emoji }),
         h("div", { className: "name", text: eq.name + (owned ? "（導入済）" : "") }),
-        h("div", { className: "cost", text: U.formatMoney(eq.cost) }),
-        h("div", { className: "blurb", text: eq.effect })
+        // STEP7(§4): 購入前に週維持費が見えるようにする。
+        h("div", { className: "cost", text: U.formatMoney(eq.cost) + (eq.weekly_upkeep ? " / 週" + U.formatMoney(eq.weekly_upkeep) : " / 週維持費なし") }),
+        h("div", { className: "blurb", text: eq.effect }),
+        eq.penalty ? h("div", { className: "sub", text: "代償: " + eq.penalty }) : null
       ]));
     });
     box.appendChild(grid);

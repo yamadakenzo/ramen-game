@@ -225,8 +225,9 @@ window.ScreenSetup = (function () {
         selected: selected,
         disabled: !afford,
         locked: afford ? null : "今の資金では手が届きません",
+        // STEP7(docs/新設計/07_STEP7_設備_修正版.md §4): 購入前に週維持費が見えるようにする。
         detail: detailLines([
-          U.formatMoney(eq.cost),
+          "購入 " + U.formatMoney(eq.cost) + (eq.weekly_upkeep ? " / 週 " + U.formatMoney(eq.weekly_upkeep) : " / 週維持費なし"),
           eq.effect,
           eq.penalty ? "代償: " + eq.penalty : null,
           eq.note

@@ -38,15 +38,20 @@ window.DATA.property = {
       "desc": "有名な神社の参道から一本入った路地。人は多いが、みんな一度きり。"
     }
   ],
+  // STEP7(docs/新設計/07_STEP7_設備_修正版.md §1): 既存8種(ticket_machine〜pos)に
+  // weekly_upkeep(週維持費)を追加した。効果・デメリット・購入費は変更していない。
+  // 8種の合計は週14,000円(指示書§1・§6-7の確認値)。
+  // 「麺量アップ(extra_boiler)」は指示書の設備表(8種)に含まれておらず対象外。週維持費は付けて
+  // いない(付けると合計が14,000円からずれるため。指示書自身の合計例とも整合する解釈)。
   "equipment": [
-    { "id": "ticket_machine", "name": "券売機",       "emoji": "🎫", "cost": 850000,  "effect": "提供速度+15、人件費削減", "penalty": "家族連れ・観光客の満足度-10", "note": "回転型の要" },
-    { "id": "table_seats",    "name": "テーブル席",   "emoji": "🪑", "cost": 420000,  "effect": "家族連れ解放、席数+4", "penalty": "回転率-10", "requires_space": true },
-    { "id": "exhaust",        "name": "強力ダクト",   "emoji": "💨", "cost": 1200000, "effect": "匂いペナルティを70%軽減", "note": "OL・家族連れ狙いなら必須。豚骨と組むと効く" },
-    { "id": "multilingual",   "name": "多言語メニュー","emoji": "🌏", "cost": 120000,  "effect": "観光客解放、観光客満足度+15" },
-    { "id": "bright_light",   "name": "明るい照明",   "emoji": "💡", "cost": 180000,  "effect": "brightness+30", "penalty": "常連満足度-5" },
-    { "id": "big_pot",        "name": "大型寸胴",     "emoji": "🍲", "cost": 380000,  "effect": "1日の提供上限+40杯" },
-    { "id": "noodle_boiler",  "name": "高性能茹で麺器","emoji": "♨️", "cost": 640000,  "effect": "提供速度+20" },
-    { "id": "pos",            "name": "POSレジ",      "emoji": "🖥️", "cost": 300000,  "effect": "客層別の売上データを表示" },
+    { "id": "ticket_machine", "name": "券売機",       "emoji": "🎫", "cost": 850000,  "weekly_upkeep": 2000, "effect": "週の処理可能人数+60", "penalty": "家族連れ・観光客の満足度-10", "note": "回転型の要" },
+    { "id": "table_seats",    "name": "テーブル席",   "emoji": "🪑", "cost": 420000,  "weekly_upkeep": 1000, "effect": "家族連れ解放、席数+4", "penalty": "回転率-10", "requires_space": true },
+    { "id": "exhaust",        "name": "強力ダクト",   "emoji": "💨", "cost": 1200000, "weekly_upkeep": 4000, "effect": "匂いペナルティを70%軽減", "note": "OL・家族連れ狙いなら必須。豚骨と組むと効く" },
+    { "id": "multilingual",   "name": "多言語メニュー","emoji": "🌏", "cost": 120000,  "weekly_upkeep": 0,    "effect": "観光客解放、観光客満足度+15" },
+    { "id": "bright_light",   "name": "明るい照明",   "emoji": "💡", "cost": 180000,  "weekly_upkeep": 1500, "effect": "brightness+30", "penalty": "常連満足度-5" },
+    { "id": "big_pot",        "name": "大型寸胴",     "emoji": "🍲", "cost": 380000,  "weekly_upkeep": 1000, "effect": "週の処理可能人数+50" },
+    { "id": "noodle_boiler",  "name": "高性能茹で麺器","emoji": "♨️", "cost": 640000,  "weekly_upkeep": 3000, "effect": "週の処理可能人数+80" },
+    { "id": "pos",            "name": "POSレジ",      "emoji": "🖥️", "cost": 300000,  "weekly_upkeep": 1500, "effect": "客層別の売上データを表示" },
     { "id": "extra_boiler",   "name": "麺量アップ",   "emoji": "🍜", "cost": 300000,  "effect": "全メニューの量+15", "note": "茹で麺器の増設。学生・サラリーマンなど量を求める客層の底上げ" }
   ],
   "funding": [

@@ -58,14 +58,19 @@ window.DATA.actions = {
         miss: "どこも似たり寄ったりだった。目新しい発見なし。"
       }
     },
+    // STEP10(docs/新設計/10_STEP10_広告_認知度_評判_修正版.md §4): 「新しいアクションを増やさず、
+    // 既存のものを使うこと」の指示により、唯一の客足ブースト系アクションだった「商店街の寄合に
+    // 出る」を「宣伝をする」に読み替えた。手段は下のadMethodsから1つ選ぶ(needsTarget:"adMethod"、
+    // 選択UIはjs/screens/dayoff.js、判定はjs/event-engine.js)。
     {
-      id: "meeting", emoji: "🏮", name: "商店街の寄合に出る",
-      blurb: "顔を出すだけでも意味がある。通うほど馴染む",
-      kind: "variable", headline: "商店街の寄合に出た",
+      id: "meeting", emoji: "🏮", name: "宣伝をする",
+      blurb: "知ってもらう手段を選ぶ。安い/高い/タダの3通り",
+      kind: "variable", needsTarget: "adMethod",
+      headline: function (state, ctx) { return (ctx.adMethodName || "宣伝") + "をした"; },
       text: {
-        great: "話が弾んで、何人もの顔と名前が一致した。今度うちに寄ると言っていた。",
-        good: "顔を出して、少し世間話をしてきた。",
-        miss: "長引く話し合いに付き合わされただけだった。"
+        great: function (state, ctx) { return ctx.adMethodText ? ctx.adMethodText.great : ""; },
+        good: function (state, ctx) { return ctx.adMethodText ? ctx.adMethodText.good : ""; },
+        miss: function (state, ctx) { return ctx.adMethodText ? ctx.adMethodText.miss : ""; }
       }
     },
     {
@@ -105,6 +110,44 @@ window.DATA.actions = {
           if (ctx.scoutResult === "hired") return (ctx.staffName || "その人") + "が来てくれることになった。紹介料を払って迎え入れた。";
           return "3人と会ったが、今回は見送った。";
         }
+      }
+    }
+  ],
+  // STEP10(docs/新設計/10_STEP10_広告_認知度_評判_修正版.md §4): 「宣伝をする」で選ぶ3つの手段。
+  // 「安いが効きが小さい」「高いが効きが大きい」「タダだが不確実(評判が高いほど効く)」の3性格。
+  // 数値・chanceの決め方はjs/event-engine.jsのresolveVariableAction参照。ここは文言と固定値のみ。
+  adMethods: [
+    {
+      id: "flyer", emoji: "📄", name: "チラシを配る",
+      blurb: "安く済むが、効きは小さい",
+      cost: 5000, chanceBase: 0.85,
+      gainGreat: 6, gainGood: 3,
+      text: {
+        great: "配り終える前に何人か声をかけてくれた。手応えがあった。",
+        good: "ひと通り配り終えた。",
+        miss: "受け取ってもらえないことが多く、あまり広まらなかった。"
+      }
+    },
+    {
+      id: "paid_ad", emoji: "🖥️", name: "広告を出す",
+      blurb: "値は張るが、効きは大きい",
+      cost: 40000, chanceBase: 0.85,
+      gainGreat: 20, gainGood: 12,
+      text: {
+        great: "思った以上に目に留まったようだ。問い合わせも来た。",
+        good: "予定通り掲載された。",
+        miss: "出したはいいが、あまり反応がなかった。"
+      }
+    },
+    {
+      id: "sns", emoji: "📊", name: "SNSで発信する",
+      blurb: "タダだが、当たり外れが大きい。評判が良いほど伸びやすい",
+      cost: 0,
+      gainGreat: 15, gainGood: 8,
+      text: {
+        great: "思いがけず大きく広まった。",
+        good: "そこそこ反応があった。",
+        miss: "ほとんど反応がなかった。"
       }
     }
   ]

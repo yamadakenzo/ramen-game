@@ -368,8 +368,8 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .top-bar .tb-row { display: grid; gap: 4px; align-items: start; }
 /* 1行目: 日時(やや広め) + 所持金。この2つが重なるのが元の不具合だったので、専用の行に分ける */
 .top-bar .tb-row-main { grid-template-columns: 1.3fr 1fr; }
-/* 2行目: 今週の客・評判・疲労(+行列がいれば右にもう1列) */
-.top-bar .tb-row-sub { grid-template-columns: repeat(3, 1fr) auto; }
+/* 2行目: 今週の客・認知度・評判・疲労(+行列がいれば右にもう1列)。STEP10で認知度を追加し3→4列。 */
+.top-bar .tb-row-sub { grid-template-columns: repeat(4, 1fr) auto; }
 .top-bar .ti {
   text-align: center; line-height: 1.2;
   min-width: 0;   /* グリッド項目を内容幅より縮められるようにする(縮めないと隣に重なる) */

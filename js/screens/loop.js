@@ -32,6 +32,9 @@ window.ScreenLoop = (function () {
   var lastFlashData = null; // 週末の収支表示(詳細/1行トグル用に直近データを保持)
   // v12-3:「今週の客」= 実際に入店した人数を1人ずつ数えるカウンタ。週の開始でリセットする。
   var weekLiveCount = 0;
+  // STEP10: 認知度・評判の「今週いくつ動いたか」の表示用。表示専用の値なのでstateには持たせない
+  // (セーブする必要が無い上、renderTopBarは週次計算以外のタイミングでも何度も呼ばれるため)。
+  var lastAwarenessDelta = 0, lastReputationDelta = 0;
 
   function findStaffDef(id) { return window.Scoring.findStaffDef(state, id); } // STEP6: スカウト勢も対象に含める
 
@@ -215,6 +218,7 @@ window.ScreenLoop = (function () {
 
     var prev = state.history.length ? state.history[state.history.length - 1] : null;
     var repBefore = state.reputation;
+    var awarenessBefore = state.awareness;
     var moneyBefore = state.money;
 
     // v12-2: この週の客数・売上はstageWeekCustomers()で週の開始時に確定済み。ここで計算し直すと
@@ -256,6 +260,13 @@ window.ScreenLoop = (function () {
     var profit = finance.revenue - finance.foodCost - monthlyCosts - equipUpkeep + sideSales.revenue - sideSales.cost;
 
     state.reputation = U.clamp(state.reputation + (avgSat - 50) * 0.04, 0, 100);
+    // STEP10(docs/新設計/10_STEP10_広告_認知度_評判_修正版.md §3): 宣伝を止めると毎週1.5%ずつ
+    // 下がる(下限10。一度開業した店が完全に忘れられることはない、という指示のため0にはしない)。
+    // 「宣伝をする」の効果は定休日アクション側(js/event-engine.js)で先に加算されており、ここは
+    // 減衰だけを担当する(加算と減衰を同じ場所にまとめない=既存の評判と同じ「週1回動く」設計)。
+    state.awareness = Math.max(10, (state.awareness || 0) * (1 - 0.015));
+    lastAwarenessDelta = state.awareness - awarenessBefore;
+    lastReputationDelta = state.reputation - repBefore;
     EE.tickTempBoosts(state);
     if (state.flags.recipeLockWeeksLeft > 0) state.flags.recipeLockWeeksLeft--;
     // v07-3-3: 通常営業でも疲労が少しずつ溜まる(混んだ週ほど少し多く)。
@@ -287,6 +298,9 @@ window.ScreenLoop = (function () {
     EE.checkCardUnlocks(state).forEach(function (u) { window.UI.toast(u.text, 3200); });
 
     renderAll(finance, customers);
+    // STEP10: 認知度は毎週かならず1.5%下がる(=毎週動く)ため、評判のように閾値超えでポップアップ
+    // させると常時表示になってしまう。ポップアップはさせず、上帯の常時表示(renderTopBar)だけで
+    // 「今週いくつ動いたか」を伝える(§5)。
     emitFloats(prev, finance, state.reputation - repBefore, state.money - moneyBefore);
 
     var guideLine = G.checkAuto(state, { profit: profit, queueLevel: customers.queueLevel });
@@ -624,9 +638,18 @@ window.ScreenLoop = (function () {
     ]);
     // v12-3:「今週の客」は週の初めからの合計ではなく、実際に入店した人数を1人ずつ数えるカウンタ。
     var custCls = pulse ? "tv-pulse" : null;
+    // STEP10(docs/新設計/10_STEP10_広告_認知度_評判_修正版.md §5): 認知度と評判を並べて表示する。
+    // 別物であることが分かるよう、それぞれ「今週の変化」(直近のrunWeeklyCalcで動いた分。認知度は
+    // 放置による1.5%減、評判はその週の満足度による増減)をカッコ添えで見せる。
+    function withDelta(v, delta) {
+      var r = Math.round(delta);
+      if (r === 0) return String(Math.round(v));
+      return Math.round(v) + "(" + (r > 0 ? "+" : "") + r + ")";
+    }
     var subRow = h("div", { className: "tb-row tb-row-sub" }, [
       item("今週の客", weekLiveCount + "人", custCls),
-      item("評判", String(Math.round(state.reputation))),
+      item("認知度", withDelta(state.awareness, lastAwarenessDelta)),
+      item("評判", withDelta(state.reputation, lastReputationDelta)),
       item("疲労", String(fatigue), fatigueCls)
     ]);
     if (queued) subRow.appendChild(h("div", { className: "ti queue-mark" }, [h("span", { className: "emoji-font", text: "🚶行列" })]));

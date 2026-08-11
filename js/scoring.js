@@ -405,7 +405,11 @@ window.Scoring = (function () {
       var repeatMult = U.clamp(expectedSat / 65, 0.15, 1.7);
       var boost = state.tempBoosts && state.tempBoosts[seg.id] ? state.tempBoosts[seg.id].mult : 1;
       var hoursMult = hourCoverageMultiplier(seg, activeBands);
-      var potential = Math.max(0, flow * BASE_CUSTOMERS * repMult * seasonMult * repeatMult * boost * rivalMult * hoursMult);
+      // STEP10(docs/新設計/10_STEP10_広告_認知度_評判_修正版.md §2): 「週の来店者数 = 立地の
+      // 潜在客数(flow) × 認知度の係数 × 来店魅力度(repMult等、既存のまま)」。認知度0でも
+      // 0人にはならないよう下限0.3を持たせ、100で1.2倍まで伸びる(0〜100の間で最大4倍の差)。
+      var awarenessMult = 0.3 + U.clamp(state.awareness || 0, 0, 100) / 100 * 0.9;
+      var potential = Math.max(0, flow * BASE_CUSTOMERS * repMult * seasonMult * repeatMult * boost * rivalMult * hoursMult * awarenessMult);
       // ramenProbsは「今週の客数がどれだけ増減したか」の影響を受けない比率のまま持つ(§で人数の
       // 変動と選択比率は独立)。computeWeeklyFinance側でcount×確率として使う。
       results[seg.id] = { count: potential, satisfaction: expectedSat, blocked: false, ramenProbs: choice.probs };

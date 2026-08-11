@@ -223,6 +223,7 @@ window.EventEngine = (function () {
     var snap = {
       money: state.money,
       reputation: state.reputation,
+      awareness: state.awareness, // STEP10: 「宣伝をする」の結果表示に使う
       price: state.price,
       rentMultiplier: state.rentMultiplier || 1,
       recipeLock: state.flags.recipeLockWeeksLeft || 0,
@@ -278,6 +279,9 @@ window.EventEngine = (function () {
 
     d = after.reputation - before.reputation;
     if (Math.round(after.reputation) !== Math.round(before.reputation)) out.push(diffEntry("評判 " + signed(d), d));
+
+    d = after.awareness - before.awareness;
+    if (Math.round(after.awareness) !== Math.round(before.awareness)) out.push(diffEntry("認知度 " + signed(d), d));
 
     d = after.price - before.price;
     if (d !== 0) out.push(diffEntry("価格 " + signed(d) + "円", d));
@@ -534,14 +538,6 @@ window.EventEngine = (function () {
     return "miss";
   }
 
-  // 今の物件で客足の比重が大きい客層。「商店街の寄合に出る」の客足ブーストをどこに乗せるかに使う。
-  function dominantSegments(state) {
-    var prop = window.Scoring.getProperty(state);
-    if (!prop) return [];
-    var flows = prop.segment_flow;
-    return Object.keys(flows).sort(function (a, b) { return flows[b] - flows[a]; }).slice(0, 2);
-  }
-
   function resolveFixedAction(state, def, ctx) {
     var text;
     if (def.id === "teach_staff") {
@@ -610,6 +606,13 @@ window.EventEngine = (function () {
       var cdef = U.findById(CARDS, ctx.cardId);
       ctx.cardName = cdef ? cdef.name : "";
     }
+    if (def.id === "meeting") {
+      // STEP10(§4): dayoff.js側のピッカーでctx.adMethodに手段idが入って渡ってくる。
+      // 見出し・結果文言はここで手段側のtext/nameへ差し替える(actions.js側は器だけ持つ)。
+      var amdef = U.findById(window.DATA.actions.adMethods, ctx.adMethod);
+      ctx.adMethodName = amdef ? amdef.name : "宣伝";
+      ctx.adMethodText = amdef ? amdef.text : null;
+    }
 
     var chance = 0.3;
     switch (def.id) {
@@ -623,9 +626,14 @@ window.EventEngine = (function () {
         chance = 0.4 + U.clamp(state.reputation / 100, 0, 1) * 0.2;
         break;
       case "meeting":
-        var prop = window.Scoring.getProperty(state);
-        chance = 0.3 + (prop && prop.id === "shotengai" ? 0.25 : 0) +
-          Math.min((state.flags.meetingAttendCount || 0) * 0.05, 0.25);
+        // STEP10(§4): 手段(ctx.adMethod)ごとにchanceが違う。SNSだけは固定値を持たず、
+        // 「評判が高いほど効く」の指示通り評判から都度算出する(不確実・評判依存)。
+        var adDef = U.findById(window.DATA.actions.adMethods, ctx.adMethod);
+        if (adDef && adDef.id === "sns") {
+          chance = U.clamp(0.15 + U.clamp(state.reputation / 100, 0, 1) * 0.5, 0.05, 0.65);
+        } else {
+          chance = adDef ? adDef.chanceBase : 0.85;
+        }
         break;
       case "meet_person":
         chance = 0.25 + U.clamp((state.relationships[ctx.cardId] || 0) / 100, 0, 1) * 0.55;
@@ -661,10 +669,12 @@ window.EventEngine = (function () {
         }
         break;
       case "meeting":
-        state.flags.meetingAttendCount = (state.flags.meetingAttendCount || 0) + 1; // 空振りでも「出た回数」自体は積み上がる
-        if (tier !== "miss") {
-          var pct = tier === "great" ? 30 : 15;
-          dominantSegments(state).forEach(function (segId) { addTempBoost(state, segId, pct, 4); });
+        // STEP10(§4): 空振りは「1週間を損しただけ」に留める指示のため、費用も効果も
+        // tier==="miss"のときは一切発生させない(チラシ代・広告費も空振りなら払わない)。
+        if (tier !== "miss" && adDef) {
+          state.money -= adDef.cost || 0;
+          var gain = tier === "great" ? adDef.gainGreat : adDef.gainGood;
+          state.awareness = U.clamp((state.awareness || 0) + gain, 0, 100);
         }
         break;
       case "meet_person":

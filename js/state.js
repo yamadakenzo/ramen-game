@@ -24,7 +24,12 @@ window.GameState = (function () {
   // (extraRamens)とサイドメニュー(sideMenu)を持つようになったため11→12に上げた。
   // STEP9(docs/新設計/09_STEP9_客層相性_注文_満足度_修正版.md §9): state自体の形は変えていないが、
   // 満足度・客数・売上の計算式(客がどのラーメンを選ぶか)が大きく変わったため12→13に上げた。
-  var SAVE_VERSION = 13;
+  // STEP10(docs/新設計/10_STEP10_広告_認知度_評判_修正版.md §9): state.awarenessが今回から
+  // 実際に動く(それまでは初期値30のまま何にも使われない飾りだった)ようになり、週の客数の
+  // 計算式自体が変わった(認知度の係数が新たに掛かる)ため13→14に上げた。あわせて
+  // flags.meetingAttendCountは「商店街の寄合」自体が「宣伝をする」に読み替わり出番が無くなった
+  // ため削除した(このバージョン以降のセーブには残らない)。
+  var SAVE_VERSION = 14;
 
   function freshState() {
     return {
@@ -79,8 +84,10 @@ window.GameState = (function () {
       businessHours: ["lunch", "night"], // v10-2: 選んでいる営業時間帯(次の週から反映)。初期値は昼+夜
       businessHoursActive: ["lunch", "night"], // 今週すでに反映されている帯(週の頭でbusinessHoursから複製)
       reputation: 50,
-      // STEP1: 認知度の器(新規)。評判(reputation、上の行)とは別物として持つが、今回は値が動かず
-      // どこからも参照されない(docs/新設計/01_STEP1_新システム用データ基盤_修正版.md §2-3)。
+      // STEP1で器だけ作った認知度。評判(reputation、上の行)とは別物(docs/新設計/
+      // 01_STEP1_新システム用データ基盤_修正版.md §2-3)。STEP10(docs/新設計/
+      // 10_STEP10_広告_認知度_評判_修正版.md)からjs/scoring.jsの週の客数計算に実際に効くように
+      // なり、js/screens/loop.jsのrunWeeklyCalcで毎週1.5%ずつ下がる(下限10)。
       awareness: 30,
       relationships: { menya: 0, reporter: 0, landlord: 0, oldman: 0, lender: 0 },
       staffState: {}, // id -> {morale, rel, lowMoraleWeeks, statBonus}
@@ -96,8 +103,8 @@ window.GameState = (function () {
         fatigue: 0,              // v07-3-3: 唯一の新規パラメータ。0〜100
         tasteBonus: 0,           // v07: 「スープの試作」の積み上げ(素材の質に加算)
         costDiscountPct: 0,      // v07: 「仕入れ先を回る」の積み上げ(原価に掛ける割引%)
-        eventRecipesUnlocked: false, // v07: 「他店を食べ歩く」で野菜スープ・辛味タレが解禁
-        meetingAttendCount: 0    // v07: 「商店街の寄合に出る」を選んだ回数(成功率が積み上がる)
+        eventRecipesUnlocked: false // v07: 「他店を食べ歩く」で野菜スープ・辛味タレが解禁
+        // STEP10: meetingAttendCountは「商店街の寄合に出る」が「宣伝をする」に読み替わったため削除。
       },
       history: [], // {week, month, customers, revenue, foodCost, rent, wage, loanRepay, profit, money, satisfaction, queueLevel}
       eventLog: [], // {week, id, title}

@@ -8,6 +8,7 @@ window.DayOff = (function () {
   var ACTIONS = window.DATA.actions.actions;
   var STAFF = window.DATA.characters.staff;
   var CARDS = window.DATA.characters.cards;
+  var AD_METHODS = window.DATA.actions.adMethods; // STEP10
 
   function fatigueBlock(state) {
     var f = Math.round(state.flags.fatigue || 0);
@@ -64,6 +65,7 @@ window.DayOff = (function () {
         return;
       }
       if (def.needsTarget === "card") { renderCardPicker(def); return; }
+      if (def.needsTarget === "adMethod") { renderAdMethodPicker(def); return; }
       if (def.needsTarget === "scout") {
         // STEP6 §4: 上限に達していたら候補すら出さず、その旨を見せてアクションだけ消費する。
         if (state.staffHired.length >= window.MAX_STAFF) { resolve(def, { scoutResult: "full" }); return; }
@@ -109,6 +111,31 @@ window.DayOff = (function () {
           h("div", { className: "emoji emoji-font", text: c.emoji }),
           h("div", { className: "name", text: c.name }),
           h("div", { className: "sub", text: "関係値 " + rel })
+        ]));
+      });
+      box.appendChild(grid);
+      box.appendChild(backButton(renderGrid));
+    }
+
+    // STEP10(docs/新設計/10_STEP10_広告_認知度_評判_修正版.md §4): 宣伝の手段を3つから選ばせる。
+    // 費用が払えない手段(チラシ・広告出稿)はグレーアウトする(SNSは常に0円なので必ず選べる)。
+    function renderAdMethodPicker(def) {
+      box.className = "modal-box dayoff-box";
+      window.UI.clear(box);
+      box.appendChild(h("h2", { text: def.name }));
+      box.appendChild(h("p", { className: "dim", text: "どの手段で宣伝する？" }));
+      var grid = h("div", { className: "choice-grid wide" });
+      AD_METHODS.forEach(function (m) {
+        var affordable = state.money >= m.cost;
+        grid.appendChild(h("div", {
+          className: "choice-card" + (affordable ? "" : " disabled"),
+          onclick: function () { if (affordable) resolve(def, { adMethod: m.id }); }
+        }, [
+          h("div", { className: "emoji emoji-font", text: m.emoji }),
+          h("div", { className: "name", text: m.name }),
+          h("div", { className: "blurb", text: m.blurb }),
+          h("div", { className: "sub", text: m.cost > 0 ? "費用 " + U.formatMoney(m.cost) : "費用 なし" }),
+          !affordable ? h("div", { className: "locked", text: "お金が足りない" }) : null
         ]));
       });
       box.appendChild(grid);

@@ -260,6 +260,8 @@ window.ScreenSetup = (function () {
         selected: selected,
         disabled: full,
         locked: full ? "これ以上は雇えません" : null,
+        // STEP5(docs/新設計/05_STEP5_従業員能力と育成_修正版.md §1): 雇用前プレビューにも
+        // 新4能力(調理/速度/接客/開発)と最大Lvを表示する。雇用前なのでLv1・ボーナス無しの基礎値のみ。
         detail: detailLines([
           "給与 " + U.formatMoney(s.wage) + " / 月",
           h("div", { style: { margin: "4px 0" } }, [
@@ -267,6 +269,8 @@ window.ScreenSetup = (function () {
             h("span", { text: " 総合 " + window.Scoring.staffRating(s).avg })
           ]),
           window.StatusPanel.staffStats(s),
+          window.StatusPanel.newStaffStats(s),
+          s.maxLevel != null ? ("最大Lv " + s.maxLevel) : null,
           s.personality + " / " + s.traits.join(" / ")
         ]),
         onpick: function () {

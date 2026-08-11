@@ -4,6 +4,7 @@ window.Scoring = (function () {
   var SEGMENTS = window.DATA.segments.segments;
   var RECIPES = window.DATA.recipes;
   var PROPERTIES = window.DATA.property.properties;
+  var STAFF = window.DATA.characters.staff; // STEP5: 従業員の新4能力(newStats/maxLevel)の参照に使う
 
   // STEP1: BASE_CUSTOMERS / SEATS_TO_WEEKLY_CAPACITY / EXTRA_BOILER_VOLUME は
   // js/utils.js の window.* へ値そのまま移した(docs/新設計/01_STEP1_新システム用データ基盤_修正版.md §2-5)。
@@ -36,6 +37,48 @@ window.Scoring = (function () {
       });
     });
     return out;
+  }
+
+  // ---------- STEP5(docs/新設計/05_STEP5_従業員能力と育成_修正版.md): 従業員の新4能力 ----------
+  // 効果は「調理・接客・速度」の3つだけ配線する。開発は器を持つだけで今回はどこからも参照しない(§2-4)。
+  // 現在Lvで伸びた分の上乗せ(newStatBonus)は state.staffState[id] 側にあり、静的データ
+  // (js/data/characters.jsのnewStats)は書き換えない(既存のstatBonusと同じ考え方)。
+  function effectiveNewStat(id, key, state) {
+    var def = U.findById(STAFF, id);
+    if (!def || !def.newStats) return null;
+    var sstate = state.staffState && state.staffState[id];
+    var bonus = (sstate && sstate.newStatBonus && sstate.newStatBonus[key]) || 0;
+    return U.clamp(def.newStats[key] + bonus, 1, 10);
+  }
+  // 厨房にいる(=雇っている)従業員の調理の平均。誰もいなければ「増減なし」の基準である5を返す。
+  function staffCookingAvg(state) {
+    var vals = (state.staffHired || []).map(function (id) { return effectiveNewStat(id, "cooking", state); })
+      .filter(function (v) { return v != null; });
+    if (!vals.length) return 5;
+    return vals.reduce(function (a, b) { return a + b; }, 0) / vals.length;
+  }
+  // 接客の平均。誰もいなければ加点なし(0)。
+  function staffServiceAvg(state) {
+    var vals = (state.staffHired || []).map(function (id) { return effectiveNewStat(id, "service", state); })
+      .filter(function (v) { return v != null; });
+    if (!vals.length) return 0;
+    return vals.reduce(function (a, b) { return a + b; }, 0) / vals.length;
+  }
+  // 速度の合計(平均ではない。§2-2の式どおり全員分を足す)。誰もいなければ0。
+  function staffSpeedSum(state) {
+    var vals = (state.staffHired || []).map(function (id) { return effectiveNewStat(id, "speed", state); })
+      .filter(function (v) { return v != null; });
+    return vals.reduce(function (a, b) { return a + b; }, 0);
+  }
+  // §2-1: 最終品質 = レシピの品質 + (調理の平均-5)×3 + 設備補正。設備補正に該当する設備はまだ
+  // 無いため(STEP7で追加予定)、現時点は常に0。新しいペナルティ機構は作らず、既存のagg.qualityに
+  // 加算するだけ(素材品質と同じ0〜100前後のスケールにそのまま足し込む)。
+  function cookingQualityBonus(state) {
+    return (staffCookingAvg(state) - 5) * 3;
+  }
+  // §2-2: 週の処理可能人数(客数の上限キャップ)。120 + 速度の合計×30。
+  function staffProcessingCapacity(state) {
+    return 120 + staffSpeedSum(state) * 30;
   }
 
   function recipeAggregate(recipe, state) {
@@ -123,13 +166,16 @@ window.Scoring = (function () {
       Math.abs(agg.volume - seg.taste.volume) +
       Math.abs(agg.uniqueness - seg.taste.uniqueness);
     var fitScore = 100 - (diff / 3) * (30 / seg.tolerance);
-    var qualityScore = U.clamp(agg.quality, 0, 100);
+    // STEP5(§2-1): 最終品質 = レシピの品質 + (調理の平均-5)×3 + 設備補正(現状0)。
+    var qualityScore = U.clamp(agg.quality + cookingQualityBonus(state), 0, 100);
     var taste_score = fitScore * (1 - QUALITY_WEIGHT) + qualityScore * QUALITY_WEIGHT;
 
     var shop = computeShopStats(state);
     var w = seg.weights;
     var wsum = w.speed + w.cleanliness + w.brightness;
     var shop_score = (shop.speed * w.speed + shop.cleanliness * w.cleanliness + shop.brightness * w.brightness) / wsum;
+    // STEP5(§2-3): 接客の平均値を既存の枠にそのまま足す(新しい計算式は作らない)。
+    shop_score += staffServiceAvg(state);
     shop_score -= smellEffective(state) * w.smell_penalty;
     if (state.equipment.indexOf("ticket_machine") >= 0 && (seg.id === "family" || seg.id === "tourist")) shop_score -= 10;
     if (state.equipment.indexOf("bright_light") >= 0 && seg.id === "regular") shop_score -= 5;
@@ -235,9 +281,21 @@ window.Scoring = (function () {
       var scale = weeklyCapacity / finalTotal;
       Object.keys(results).forEach(function (id) { results[id].count *= scale; });
     }
+
+    // STEP5(§2-2): 従業員の速度による処理能力の上限。席数キャップとは別枠の追加キャップで、
+    // 現状の客数(週120人前後)ではまだ届かない可能性が高い(§0)。座席キャップ適用後の合計に
+    // さらにこれを掛けるので、両方のうちより厳しい方が効く。
+    var staffCapacity = staffProcessingCapacity(state);
+    var afterSeatTotal = 0;
+    Object.keys(results).forEach(function (id) { afterSeatTotal += results[id].count; });
+    if (afterSeatTotal > staffCapacity && staffCapacity > 0) {
+      var staffScale = staffCapacity / afterSeatTotal;
+      Object.keys(results).forEach(function (id) { results[id].count *= staffScale; });
+    }
+
     Object.keys(results).forEach(function (id) { results[id].count = Math.max(0, Math.round(results[id].count)); });
 
-    return { results: results, totalDemand: totalDemand, weeklyCapacity: weeklyCapacity, queueLevel: queueLevel };
+    return { results: results, totalDemand: totalDemand, weeklyCapacity: weeklyCapacity, queueLevel: queueLevel, staffCapacity: staffCapacity };
   }
 
   function computeWeeklyFinance(state, customersResult) {
@@ -363,7 +421,9 @@ window.Scoring = (function () {
     var material = materialScore(state);
     var score = U.clamp(fit * 0.6 + material * 0.4, 0, 100);
     return {
-      axes: { quality: agg.quality, richness: agg.richness, volume: agg.volume, uniqueness: agg.uniqueness },
+      // STEP5: 品質バーは実際に満足度計算へ流れる値(調理補正込み)を表示する。一方向データフロー
+      // (計算値→絵)を保つため、絵側は常に最新の計算結果をそのまま映すだけにしている。
+      axes: { quality: agg.quality + cookingQualityBonus(state), richness: agg.richness, volume: agg.volume, uniqueness: agg.uniqueness },
       cost: agg.cost,
       fit: Math.round(fit),
       material: Math.round(material),
@@ -416,6 +476,12 @@ window.Scoring = (function () {
     rankOf: rankOf,
     staffRating: staffRating,
     effectiveStat: effectiveStat,
+    effectiveNewStat: effectiveNewStat,
+    staffCookingAvg: staffCookingAvg,
+    staffServiceAvg: staffServiceAvg,
+    staffSpeedSum: staffSpeedSum,
+    cookingQualityBonus: cookingQualityBonus,
+    staffProcessingCapacity: staffProcessingCapacity,
     BASE_CUSTOMERS: BASE_CUSTOMERS
   };
 })();

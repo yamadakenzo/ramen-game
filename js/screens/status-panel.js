@@ -118,18 +118,40 @@ window.StatusPanel = (function () {
     return box;
   }
 
+  // STEP5(docs/新設計/05_STEP5_従業員能力と育成_修正版.md §1): 新4能力(調理/速度/接客/開発、
+  // 1〜10)の表示。sstate.newStatBonusは「教える」でLvアップした分の上乗せ(既存のstatBonusと
+  // 同じ考え方)。雇用前(sstateが無い)は基礎値のみを表示する。
+  function newStaffStats(def, sstate) {
+    var keys = ["cooking", "speed", "service", "development"];
+    var labels = ["調理", "速度", "接客", "開発"];
+    var box = h("div", { className: "stat-grid" });
+    if (!def.newStats) return box;
+    keys.forEach(function (k, i) {
+      var bonus = (sstate && sstate.newStatBonus && sstate.newStatBonus[k]) || 0;
+      var v = U.clamp(def.newStats[k] + bonus, 1, 10);
+      var grown = bonus > 0;
+      box.appendChild(h("span", { className: "stat-name", text: labels[i] }));
+      box.appendChild(bar(v, 10, grown ? "good-fill" : null));
+      box.appendChild(h("span", { className: "stat-num", text: String(v) + (grown ? "↑" : "") }));
+    });
+    return box;
+  }
+
   function staffBlock(def, sstate) {
     var bonus = sstate && sstate.statBonus;
     var rating = window.Scoring.staffRating(def, bonus);
+    var level = sstate ? (sstate.level || 1) : 1;
     var block = h("div", { className: "staff-card" }, [
       h("div", { className: "staff-head" }, [
         h("span", { className: "staff-emoji emoji-font", text: def.emoji }),
         h("span", { className: "staff-name", text: def.name }),
         h("span", { className: "dim", text: "（" + def.role + "）" }),
         rankBadge(rating.rank),
-        h("span", { className: "dim", text: "総合 " + rating.avg })
+        h("span", { className: "dim", text: "総合 " + rating.avg }),
+        def.maxLevel != null ? h("span", { className: "dim", text: "Lv " + level + "/" + def.maxLevel }) : null
       ]),
-      staffStats(def, bonus)
+      staffStats(def, bonus),
+      newStaffStats(def, sstate)
     ]);
     if (sstate) {
       var moraleCls = sstate.morale >= 60 ? "good-fill" : (sstate.morale >= 30 ? "warn-fill" : "bad-fill");
@@ -169,6 +191,6 @@ window.StatusPanel = (function () {
 
   return {
     render: render, renderRamen: renderRamen, renderStaff: renderStaff,
-    staffBlock: staffBlock, staffStats: staffStats, rankBadge: rankBadge
+    staffBlock: staffBlock, staffStats: staffStats, newStaffStats: newStaffStats, rankBadge: rankBadge
   };
 })();

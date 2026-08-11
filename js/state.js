@@ -13,7 +13,9 @@ window.GameState = (function () {
   // 警告の仕組み自体はSTEP1で作り切っているので、ここでは変更しない。
   // STEP2(docs/新設計/02_STEP2_素材カード基本システム_修正版.md §8): 所持カード(ownedMaterials)
   // を持つようになったため7→8に上げた。
-  var SAVE_VERSION = 8;
+  // STEP5(docs/新設計/05_STEP5_従業員能力と育成_修正版.md §7): 従業員のstaffStateにlevel/
+  // newStatBonusが増えたため8→9に上げた。
+  var SAVE_VERSION = 9;
 
   function freshState() {
     return {

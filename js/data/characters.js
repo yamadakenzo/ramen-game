@@ -18,6 +18,10 @@ window.DATA.characters = {
       "id": "yuta", "name": "ユウタ", "name_en": "Yuta", "emoji": "🧑‍🍳", "age": 22, "role": "麺上げ",
       "personality": "熱血・不器用", "tone": "「押忍！」「やらせてください！」",
       "stats": { "noodle": 70, "prep": 30, "service": 25, "numbers": 10, "teach": 15 },
+      // STEP5(docs/新設計/05_STEP5_従業員能力と育成_修正版.md §1): 新4能力(1〜10)と最大Lv。
+      // 指示書の移行表の値をそのまま採用(四捨五入の式は参考程度で、表の値を正とする指示のため)。
+      "newStats": { "cooking": 5, "speed": 6, "service": 3, "development": 3 },
+      "maxLevel": 8, // growth:high → 8。ユウタは弱いが最も伸びる
       "wage": 180000, "growth": "high",
       "traits": ["濃厚路線で士気が上がる", "あっさり路線だと士気が下がる"],
       "backstory": "工場勤めを辞めてラーメンの世界へ。腕はまだだが伸びしろがある。独立願望が強い。",
@@ -27,6 +31,8 @@ window.DATA.characters = {
       "id": "misaki", "name": "ミサキ", "name_en": "Misaki", "emoji": "👩‍🍳", "age": 28, "role": "接客",
       "personality": "如才ない・現実的", "tone": "「店長、それ言わなくていいですよ」",
       "stats": { "noodle": 20, "prep": 35, "service": 85, "numbers": 55, "teach": 40 },
+      "newStats": { "cooking": 3, "speed": 7, "service": 9, "development": 4 },
+      "maxLevel": 5, // growth:mid → 5
       "wage": 210000, "growth": "mid",
       "traits": ["OL・家族連れの満足度に補正", "店が汚いと機嫌が悪くなる"],
       "backstory": "カフェ勤務からの転職。接客は完璧だが、ラーメンそのものにはあまり興味がない。",
@@ -36,6 +42,8 @@ window.DATA.characters = {
       "id": "gonzo", "name": "ゴンゾウ", "name_en": "Gonzo", "emoji": "👨‍🦳", "age": 58, "role": "仕込み",
       "personality": "頑固・寡黙", "tone": "「……ふん」「そりゃ違う」",
       "stats": { "noodle": 55, "prep": 90, "service": 5, "numbers": 20, "teach": 60 },
+      "newStats": { "cooking": 7, "speed": 3, "service": 1, "development": 8 },
+      "maxLevel": 1, // growth:none → 1。ゴンゾウは最初から強いが成長しない
       "wage": 260000, "growth": "none",
       "traits": ["スープの質に大補正", "レシピを頻繁に変えると激怒", "若手を育てる"],
       "backstory": "潰れた老舗の元店主。腕は本物だが、プライドが高く扱いが難しい。",
@@ -45,6 +53,8 @@ window.DATA.characters = {
       "id": "rin", "name": "リン", "name_en": "Rin", "emoji": "👧", "age": 19, "role": "アルバイト",
       "personality": "軽い・SNS中毒", "tone": "「え、それバズるやつじゃないですか？」",
       "stats": { "noodle": 30, "prep": 20, "service": 60, "numbers": 15, "teach": 5 },
+      "newStats": { "cooking": 3, "speed": 7, "service": 6, "development": 2 },
+      "maxLevel": 5, // growth:mid → 5
       "wage": 95000, "growth": "mid",
       "traits": ["学生・観光客の流入に補正", "SNS拡散イベントを誘発", "無断欠勤あり"],
       "backstory": "近所の大学生。仕事は雑だが、外向きの発信力がある。",
@@ -54,6 +64,8 @@ window.DATA.characters = {
       "id": "tetsu", "name": "テツ", "name_en": "Tetsu", "emoji": "🧔", "age": 34, "role": "万能",
       "personality": "冷静・計算高い", "tone": "「原価、今月32%ですよ」",
       "stats": { "noodle": 55, "prep": 55, "service": 50, "numbers": 80, "teach": 45 },
+      "newStats": { "cooking": 6, "speed": 6, "service": 5, "development": 5 },
+      "maxLevel": 3, // growth:low → 3
       "wage": 290000, "growth": "low",
       "traits": ["原価と客数の詳細表示を解放", "赤字が続くと見限る"],
       "backstory": "チェーン店の元店長。数字は読めるが、味への情熱は薄い。",
@@ -102,17 +114,21 @@ window.DATA.characters = {
   ]
 };
 
-// STEP1(docs/新設計/01_STEP1_新システム用データ基盤_修正版.md §2-2): 従業員の新能力の型だけを
-// 宣言する。既存5人(ユウタ・ミサキ・ゴンゾウ・リン・テツ)にはまだ値を割り当てない
-// (割り当ての判断はSTEP5で行う。このSTEPでは器を空のまま置くだけ)。
-// 既存の5能力(noodle/prep/service/numbers/teach)・士気・関係値・ルート分岐は上のstaffのまま
-// 一切変更していない。
+// STEP1(docs/新設計/01_STEP1_新システム用データ基盤_修正版.md §2-2)で型だけ宣言していたが、
+// STEP5(docs/新設計/05_STEP5_従業員能力と育成_修正版.md §1)で実際に値を割り当てた。
+// 基礎値(cooking/speed/service/development)とmaxLevelは上のstaff各人の"newStats"/"maxLevel"を
+// 参照すること(このオブジェクトはキーの一覧を示す参考用にとどめ、書き換えていない)。
+// 現在Lv(level)と、Lvアップで伸びた分の上乗せは静的データではなく state.staffState[id] 側
+// (level, newStatBonus)で管理する(既存のstatBonusと同じ考え方。js/event-engine.jsのensureStaffState)。
+// 給料はLvが上がっても自動では上げない(§3の指示どおり。上げる仕組みはSTEP6のスカウトで扱う)。
+// 既存の5能力(noodle/prep/service/numbers/teach)・士気・関係値・ルート分岐・traits・backstory・
+// 専用イベントは1つも変更していない。
 window.DATA.newStaffStatShape = {
-  cooking: null,     // 調理 1〜10
-  speed: null,       // 速度 1〜10
-  service: null,     // 接客 1〜10
-  development: null, // 開発 1〜10
-  level: null,        // 現在Lv 1〜
-  maxLevel: null,      // 最大Lv(ポテンシャル) 1〜
-  wage: null           // 給料(円)
+  cooking: null,     // 調理 1〜10 (各staffの newStats.cooking を参照)
+  speed: null,       // 速度 1〜10 (各staffの newStats.speed を参照)
+  service: null,     // 接客 1〜10 (各staffの newStats.service を参照)
+  development: null, // 開発 1〜10 (各staffの newStats.development を参照。今回は計算に未使用)
+  level: null,        // 現在Lv 1〜 (state.staffState[id].level で管理。全員Lv1からスタート)
+  maxLevel: null,      // 最大Lv(ポテンシャル) 1〜 (各staffの maxLevel を参照)
+  wage: null           // 給料(円) (各staffの既存 wage を参照。Lvでは変わらない)
 };

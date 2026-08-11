@@ -29,6 +29,13 @@ window.EventEngine = (function () {
     if (!state.staffState[id].statBonus) {
       state.staffState[id].statBonus = { noodle: 0, prep: 0, service: 0, numbers: 0, teach: 0 };
     }
+    // STEP5(docs/新設計/05_STEP5_従業員能力と育成_修正版.md §3): 新4能力のLv。全員Lv1から始まり、
+    // 「従業員に教える」のたびに新能力側も1つ選んで+1する(statBonusと同じ考え方)。
+    // 静的データ(js/data/characters.jsのnewStats)は書き換えず、上乗せ分だけここに持つ。
+    if (state.staffState[id].level == null) state.staffState[id].level = 1;
+    if (!state.staffState[id].newStatBonus) {
+      state.staffState[id].newStatBonus = { cooking: 0, speed: 0, service: 0, development: 0 };
+    }
     return state.staffState[id];
   }
 
@@ -154,7 +161,7 @@ window.EventEngine = (function () {
     CARDS.forEach(function (c) { snap.rel[c.id] = state.relationships[c.id] || 0; });
     Object.keys(state.staffState).forEach(function (id) {
       var s = state.staffState[id];
-      snap.staff[id] = { morale: s.morale, rel: s.rel, wageMult: s.wageMult || 1 };
+      snap.staff[id] = { morale: s.morale, rel: s.rel, wageMult: s.wageMult || 1, level: s.level || 1 };
       // v10-1: 「従業員に教える」の結果表示用。伸びた能力値をbefore→afterで見せるために、
       // 5能力ぶんの上乗せ(statBonus)もスナップショットに含める。
       var b = s.statBonus || {};
@@ -210,12 +217,14 @@ window.EventEngine = (function () {
 
     Object.keys(after.staff).forEach(function (id) {
       // 適用中に ensureStaffState で作られた場合、初期値と同じ既定を before として扱う
-      var b = before.staff[id] || { morale: 70, rel: 0, wageMult: 1 };
+      var b = before.staff[id] || { morale: 70, rel: 0, wageMult: 1, level: 1 };
       var a = after.staff[id];
       var def = U.findById(STAFF, id);
       if (!def) return;
       if (a.rel !== b.rel) out.push(diffEntry(def.name + "との関係 " + signed(a.rel - b.rel), a.rel - b.rel));
       if (a.morale !== b.morale) out.push(diffEntry(def.name + "の士気 " + signed(a.morale - b.morale), a.morale - b.morale));
+      // STEP5: 「教える」で新4能力のLvが上がった場合の表示
+      if (a.level !== b.level) out.push(diffEntry(def.name + " Lv " + b.level + " → " + a.level, 1));
       if (Math.abs(a.wageMult - b.wageMult) > 0.001) {
         var wp = (a.wageMult / b.wageMult - 1) * 100;
         out.push(diffEntry(def.name + "の給与 " + signed(wp) + "%", wp, true));
@@ -466,6 +475,20 @@ window.EventEngine = (function () {
       var weakest = effective[0].k; // いちばん低い能力を伸ばす
       var gain = Math.round(3 + sdef.stats.teach / 15); // 教える側(=本人のteach)が高いほど伸びが大きい
       s.statBonus[weakest] = (s.statBonus[weakest] || 0) + gain;
+      // STEP5(§3): 新しいアクションを増やさず、既存の「教える」を流用してLvアップも行う。
+      // 最大Lvに達していれば何もしない(ゴンゾウはmaxLevel=1なので常にここで止まる=成長しない)。
+      // 4能力のうち、いちばん低いもの(タイなら先頭)を+1する。既存のweakest選択と同じ考え方。
+      if (sdef.newStats && s.level < sdef.maxLevel) {
+        var newKeys = ["cooking", "speed", "service", "development"];
+        var newEffective = newKeys.map(function (k) {
+          return { k: k, v: U.clamp(sdef.newStats[k] + (s.newStatBonus[k] || 0), 1, 10) };
+        });
+        newEffective.sort(function (a, b) { return a.v - b.v; });
+        if (newEffective[0].v < 10) {
+          s.newStatBonus[newEffective[0].k] = (s.newStatBonus[newEffective[0].k] || 0) + 1;
+          s.level += 1;
+        }
+      }
       ctx.staffName = sdef.name;
       text = def.text.fixed(state, ctx);
     } else if (def.id === "rest") {

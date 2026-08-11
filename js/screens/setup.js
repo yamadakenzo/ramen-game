@@ -252,7 +252,7 @@ window.ScreenSetup = (function () {
     var grid = h("div", { className: "choice-grid wide" });
     STAFF.forEach(function (s) {
       var selected = state.staffHired.indexOf(s.id) >= 0;
-      var full = state.staffHired.length >= 2 && !selected;
+      var full = state.staffHired.length >= window.MAX_STAFF && !selected; // STEP6: 定数化(js/utils.js)。値は変えていない
       grid.appendChild(card({
         emoji: s.emoji,
         name: s.name + "（" + s.role + "）",

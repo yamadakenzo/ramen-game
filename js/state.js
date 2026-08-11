@@ -15,7 +15,9 @@ window.GameState = (function () {
   // を持つようになったため7→8に上げた。
   // STEP5(docs/新設計/05_STEP5_従業員能力と育成_修正版.md §7): 従業員のstaffStateにlevel/
   // newStatBonusが増えたため8→9に上げた。
-  var SAVE_VERSION = 9;
+  // STEP6(docs/新設計/06_STEP6_従業員スカウト_修正版.md §9): スカウトで雇った従業員の定義
+  // (scoutedStaff)を持つようになったため9→10に上げた。
+  var SAVE_VERSION = 10;
 
   function freshState() {
     return {
@@ -49,6 +51,13 @@ window.GameState = (function () {
       ramenStats: { quality: 20, richness: 10, volume: 20, uniqueness: 10, cost: 0, workload: 0 },
       equipment: [],
       staffHired: [], // staff id 配列
+      // STEP6(docs/新設計/06_STEP6_従業員スカウト_修正版.md §5): 「求人を出す」で雇った従業員の
+      // 定義(id→{id,name,emoji,role,newStats,maxLevel,stats,wage})。既存5人はwindow.DATA.
+      // characters.staffという静的データに定義があるが、スカウト勢はプレイごとに生成される
+      // ため、静的データではなくここ(state)に持つ。参照はwindow.Scoring.findStaffDef(state,id)
+      // に一本化してあり、既存5人とスカウト勢のどちらでも同じ呼び方で定義が引ける。
+      scoutedStaff: {},
+      scoutCounter: 0, // スカウトIDの発行カウンタ(採用時にのみ1増える)
       price: 850,
       money: 0,
       loan: { monthlyRepay: 0, monthsLeft: 0 },

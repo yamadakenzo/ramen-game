@@ -9,6 +9,84 @@ window.EventEngine = (function () {
 
   function getEvent(id) { return U.findById(EVENTS, id); }
 
+  // ---------- STEP6(docs/新設計/06_STEP6_従業員スカウト_修正版.md): 求人 ----------
+  // 名前・絵文字は既存のものから選ぶ(§5)。既存5人と重複しない名前、既にこのゲームで
+  // 絵文字フォントへの単色化を確認済みの人物系絵文字だけを使う(新しい絵文字は追加しない)。
+  var SCOUT_NAMES = ["ケント", "アヤ", "ジュン", "ナオ", "ヒロ", "マイ", "ソラ", "レン", "ユキ", "カイ", "モモ", "タクミ"];
+  var SCOUT_EMOJI = ["🧑‍🍳", "👩‍🍳", "👨‍🦳", "👧", "🧔", "👩‍💼", "🧑‍💼", "🎓", "🧓", "🧳"];
+
+  function pickDistinct(pool, n) {
+    var copy = pool.slice();
+    var out = [];
+    for (var i = 0; i < n && copy.length; i++) {
+      var idx = U.randInt(0, copy.length - 1);
+      out.push(copy[idx]);
+      copy.splice(idx, 1);
+    }
+    return out;
+  }
+
+  // §2: 伸びしろ(最大Lv)は数値を見せず3段階の言葉にする
+  function potentialLabel(maxLevel) {
+    if (maxLevel >= 6) return "大";
+    if (maxLevel >= 3) return "中";
+    return "小";
+  }
+
+  // §2: 「能力の合計の目安は評判で変わる」の実装。指示書の3つの目安(評判30以下→12前後、
+  // 30〜60→18前後、60以上→24前後)を、評判15/45/75を通る直線で結んだ(9 + 評判×0.2)。
+  // 例: 評判15→12、評判45→18、評判75→24。±3の乱数で候補ごとに幅を持たせ、8〜36にクランプする。
+  function scoutTargetSum(state) {
+    var base = 9 + (state.reputation || 0) * 0.2;
+    return U.clamp(Math.round(base + U.randInt(-3, 3)), 8, 36);
+  }
+
+  // 4能力(各1〜10)へ目標合計をランダムに配る。1から始めて、余りを1ずつランダムな能力へ足していく
+  // (合計は8〜36の範囲でしかクランプしないため、4体×最大9=36で必ず配りきれる)。
+  function rollScoutAbilities(state) {
+    var keys = ["cooking", "speed", "service", "development"];
+    var vals = { cooking: 1, speed: 1, service: 1, development: 1 };
+    var remaining = scoutTargetSum(state) - 4;
+    while (remaining > 0) {
+      var k = keys[U.randInt(0, 3)];
+      if (vals[k] < 10) { vals[k]++; remaining--; }
+    }
+    return vals;
+  }
+
+  // STEP5で既存5人に付けた5能力(noodle/prep/service/numbers/teach)は、js/screens/shop-view.jsの
+  // 店員アニメーション速度やstaffRating(総合ランク)など、まだ随所で参照されている。スカウト勢にも
+  // 同じ形の値を持たせ、新しい分岐を各所に増やさずに既存の仕組みへそのまま乗せる。cooking/serviceは
+  // 直接対応、numbers/teachは対応するものが無いためdevelopmentから同じ値を写す(STEP5の逆算に近い)。
+  function deriveOldStats(newStats) {
+    return {
+      noodle: newStats.cooking * 10,
+      prep: newStats.cooking * 10,
+      service: newStats.service * 10,
+      numbers: newStats.development * 10,
+      teach: newStats.development * 10
+    };
+  }
+
+  // 求人を出したときに見せる3人分。まだ雇われていないので id は払い出さない(雇用時にのみ発行)。
+  function generateScoutCandidates(state) {
+    var names = pickDistinct(SCOUT_NAMES, 3);
+    var emoji = pickDistinct(SCOUT_EMOJI, 3);
+    var out = [];
+    for (var i = 0; i < 3; i++) {
+      var newStats = rollScoutAbilities(state);
+      var sum = newStats.cooking + newStats.speed + newStats.service + newStats.development;
+      var wage = Math.round((60000 + sum * 8000) / 1000) * 1000; // §2: 1,000円単位に丸める
+      var maxLevel = U.randInt(1, 8);
+      out.push({
+        name: names[i], emoji: emoji[i], role: "スタッフ",
+        newStats: newStats, maxLevel: maxLevel, potential: potentialLabel(maxLevel),
+        stats: deriveOldStats(newStats), wage: wage
+      });
+    }
+    return out;
+  }
+
   function initRun(state) {
     // 開業時に一度だけ、カードの登場ウィンドウを決めておく(密度が偏らないよう分散させる)。
     // v09-3: 「開業からNヶ月目」という相対的な間隔なので、実カレンダー月ではなく
@@ -219,7 +297,7 @@ window.EventEngine = (function () {
       // 適用中に ensureStaffState で作られた場合、初期値と同じ既定を before として扱う
       var b = before.staff[id] || { morale: 70, rel: 0, wageMult: 1, level: 1 };
       var a = after.staff[id];
-      var def = U.findById(STAFF, id);
+      var def = window.Scoring.findStaffDef(state, id); // STEP6: 既存5人+スカウト勢を一本化して引く
       if (!def) return;
       if (a.rel !== b.rel) out.push(diffEntry(def.name + "との関係 " + signed(a.rel - b.rel), a.rel - b.rel));
       if (a.morale !== b.morale) out.push(diffEntry(def.name + "の士気 " + signed(a.morale - b.morale), a.morale - b.morale));
@@ -233,7 +311,7 @@ window.EventEngine = (function () {
 
     before.staffHired.forEach(function (id) {
       if (after.staffHired.indexOf(id) >= 0) return;
-      var def = U.findById(STAFF, id);
+      var def = window.Scoring.findStaffDef(state, id);
       out.push(diffEntry((def ? def.name : id) + "が店を離れた", -1));
     });
 
@@ -275,7 +353,7 @@ window.EventEngine = (function () {
     Object.keys(after.staffBonus || {}).forEach(function (id) {
       var b = (before.staffBonus && before.staffBonus[id]) || { noodle: 0, prep: 0, service: 0, numbers: 0, teach: 0 };
       var a = after.staffBonus[id];
-      var def = U.findById(STAFF, id);
+      var def = window.Scoring.findStaffDef(state, id);
       if (!def) return;
       Object.keys(STAT_LABELS).forEach(function (k) {
         if (a[k] === b[k]) return;
@@ -468,7 +546,7 @@ window.EventEngine = (function () {
     var text;
     if (def.id === "teach_staff") {
       var s = ensureStaffState(state, ctx.staffId);
-      var sdef = U.findById(STAFF, ctx.staffId);
+      var sdef = window.Scoring.findStaffDef(state, ctx.staffId); // STEP6: スカウト勢も対象に含める
       var keys = ["noodle", "prep", "service", "numbers", "teach"];
       var effective = keys.map(function (k) { return { k: k, v: sdef.stats[k] + (s.statBonus[k] || 0) }; });
       effective.sort(function (a, b) { return a.v - b.v; });
@@ -499,6 +577,30 @@ window.EventEngine = (function () {
       var extra = lastRec ? Math.round(lastRec.revenue / 6) : Math.round(state.price * 8);
       state.money += extra;
       text = def.text.fixed;
+    } else if (def.id === "scout") {
+      // STEP6 §3: 実際の状態変更(お金・雇用)はここで行う。候補の生成と見送り/選択はdayoff.js側の
+      // UIで先に済ませてあり、ctx.scoutResultに結果("full"/"skip"/"hired")、ctx.candidateに
+      // 選ばれた候補(hiredのときのみ)が入って渡ってくる。
+      if (ctx.scoutResult === "hired" && ctx.candidate) {
+        var c = ctx.candidate;
+        if (state.money < c.wage) {
+          // UI側で既に資金チェック済みのはずだが、念のための保険。
+          ctx.scoutResult = "insufficient_funds";
+          ctx.staffName = c.name;
+        } else {
+          state.scoutCounter = (state.scoutCounter || 0) + 1;
+          var id = "scout" + state.scoutCounter;
+          state.money -= c.wage; // §3: 月給1か月分を紹介料として即座に払う
+          state.staffHired.push(id);
+          state.scoutedStaff[id] = {
+            id: id, name: c.name, emoji: c.emoji, role: c.role,
+            newStats: c.newStats, maxLevel: c.maxLevel, stats: c.stats, wage: c.wage
+          };
+          ensureStaffState(state, id);
+          ctx.staffName = c.name;
+        }
+      }
+      text = def.text.fixed(state, ctx);
     }
     return { tier: "fixed", text: text };
   }
@@ -622,6 +724,7 @@ window.EventEngine = (function () {
     checkWeeklyEvents: checkWeeklyEvents,
     markFired: markFired,
     ensureStaffState: ensureStaffState,
-    resolveDayOffAction: resolveDayOffAction
+    resolveDayOffAction: resolveDayOffAction,
+    generateScoutCandidates: generateScoutCandidates
   };
 })();

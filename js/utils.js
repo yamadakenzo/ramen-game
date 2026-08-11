@@ -19,6 +19,13 @@ window.SEATS_TO_WEEKLY_CAPACITY = 45;
 // 麺量アップ(茹で麺器の増設)はレシピではなく設備なので、state を渡された時だけ上乗せする
 window.EXTRA_BOILER_VOLUME = 15;
 
+// STEP6(docs/新設計/06_STEP6_従業員スカウト_修正版.md §4): 「現行の上限をそのまま使う。
+// 新しい上限の仕組みを作らないこと」。従業員の雇用上限は、これまでjs/screens/setup.jsの
+// stepStaff()内にだけ2という数値で埋め込まれていた(物件ごとの枠は実装されていない)。
+// スカウトの上限チェックでも同じ値を参照する必要が生じたため、ここへ定数として括り出した。
+// 値そのものは変えていない。
+window.MAX_STAFF = 2;
+
 window.Utils = (function () {
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
   function findById(list, id) { return list.find(function (x) { return x.id === id; }); }

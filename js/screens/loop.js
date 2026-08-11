@@ -32,7 +32,7 @@ window.ScreenLoop = (function () {
   // v12-3:「今週の客」= 実際に入店した人数を1人ずつ数えるカウンタ。週の開始でリセットする。
   var weekLiveCount = 0;
 
-  function findStaffDef(id) { return U.findById(STAFF, id); }
+  function findStaffDef(id) { return window.Scoring.findStaffDef(state, id); } // STEP6: スカウト勢も対象に含める
 
   // ---------- v09-1: 停止の一本化 ----------
   // 「週末だから止める」「パネルが開いたから止める」を別々のフラグで書くと、両方の条件が重なった

@@ -357,7 +357,7 @@ window.ShopView = (function () {
     orderQueue = [];
     readyQueue = [];
     var workers = state.staffHired.map(function (id) {
-      var def = U.findById(STAFF, id);
+      var def = window.Scoring.findStaffDef(state, id); // STEP6: スカウト勢も対象に含める
       return def ? { id: id, def: def } : null;
     }).filter(Boolean);
     assignRoles(workers);

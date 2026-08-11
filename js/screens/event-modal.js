@@ -14,7 +14,7 @@ window.ScreenEventModal = (function () {
   function resolveWho(choice, state, ctx) {
     var who = resolveText(choice.react_who, state, ctx);
     if (who === "staff") {
-      var def = ctx && ctx.staffId ? U.findById(STAFF, ctx.staffId) : null;
+      var def = ctx && ctx.staffId ? window.Scoring.findStaffDef(state, ctx.staffId) : null; // STEP6
       return def ? (def.emoji + " " + def.name) : "";
     }
     return who;

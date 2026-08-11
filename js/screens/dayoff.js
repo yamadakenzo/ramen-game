@@ -64,6 +64,12 @@ window.DayOff = (function () {
         return;
       }
       if (def.needsTarget === "card") { renderCardPicker(def); return; }
+      if (def.needsTarget === "scout") {
+        // STEP6 §4: 上限に達していたら候補すら出さず、その旨を見せてアクションだけ消費する。
+        if (state.staffHired.length >= window.MAX_STAFF) { resolve(def, { scoutResult: "full" }); return; }
+        renderScoutPicker(def);
+        return;
+      }
       resolve(def, {});
     }
 
@@ -74,7 +80,7 @@ window.DayOff = (function () {
       box.appendChild(h("p", { className: "dim", text: "誰に教える？" }));
       var grid = h("div", { className: "choice-grid wide" });
       state.staffHired.forEach(function (id) {
-        var sd = U.findById(STAFF, id);
+        var sd = window.Scoring.findStaffDef(state, id); // STEP6: スカウト勢も対象に含める
         if (!sd) return;
         grid.appendChild(h("div", {
           className: "choice-card",
@@ -107,6 +113,46 @@ window.DayOff = (function () {
       });
       box.appendChild(grid);
       box.appendChild(backButton(renderGrid));
+    }
+
+    // STEP6(docs/新設計/06_STEP6_従業員スカウト_修正版.md §2〜3): 求人を出すと候補が3人出る。
+    // 1人だけ雇うか、全員見送るか。候補はこの画面を開いた瞬間に1回だけ生成し(再描画で変わらない)、
+    // 見送った候補は次週に持ち越さない(このピッカーを閉じたら候補データごと消える)。
+    function renderScoutPicker(def) {
+      var candidates = EE.generateScoutCandidates(state);
+      box.className = "modal-box dayoff-box";
+      window.UI.clear(box);
+      box.appendChild(h("h2", { text: def.name }));
+      box.appendChild(h("p", { className: "dim", text: "3人が応募してきた。1人だけ雇うか、見送るか。" }));
+      var grid = h("div", { className: "choice-grid wide" });
+      candidates.forEach(function (c) {
+        var affordable = state.money >= c.wage;
+        var statBox = h("div", { className: "stat-grid" });
+        [["cooking", "調理"], ["speed", "速度"], ["service", "接客"], ["development", "開発"]].forEach(function (p) {
+          statBox.appendChild(h("span", { className: "stat-name", text: p[1] }));
+          statBox.appendChild(h("div", { className: "mini-track" }, [
+            h("div", { className: "mini-fill", style: { width: (c.newStats[p[0]] * 10) + "%" } })
+          ]));
+          statBox.appendChild(h("span", { className: "stat-num", text: String(c.newStats[p[0]]) }));
+        });
+        grid.appendChild(h("div", {
+          className: "choice-card" + (affordable ? "" : " disabled"),
+          onclick: function () {
+            if (!affordable) return;
+            resolve(def, { scoutResult: "hired", candidate: c });
+          }
+        }, [
+          h("div", { className: "emoji emoji-font", text: c.emoji }),
+          h("div", { className: "name", text: c.name }),
+          h("div", { className: "sub", text: "伸びしろ " + c.potential + " ・ 給与 " + U.formatMoney(c.wage) + "/月" }),
+          statBox,
+          !affordable ? h("div", { className: "locked", text: "紹介料が足りない" }) : null
+        ]));
+      });
+      box.appendChild(grid);
+      box.appendChild(h("div", { className: "modal-choices" }, [
+        h("button", { className: "btn small", text: "全員見送る", onclick: function () { resolve(def, { scoutResult: "skip" }); } })
+      ]));
     }
 
     function resolve(def, ctx) {

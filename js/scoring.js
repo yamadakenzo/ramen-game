@@ -39,12 +39,22 @@ window.Scoring = (function () {
     return out;
   }
 
+  // STEP6(docs/新設計/06_STEP6_従業員スカウト_修正版.md): 既存5人(window.DATA.characters.staff)
+  // に加え、スカウトで増えた従業員(state.scoutedStaff、プレイごとに生成されるためstate側に持つ)も
+  // 同じ形で引けるようにした検索関数。これまで各画面に散らばっていた U.findById(STAFF, id) を
+  // 全てこちらへ置き換えてある(既存5人だけを見ていたコードがスカウト勢を見落とさないようにするため)。
+  function findStaffDef(state, id) {
+    var def = U.findById(STAFF, id);
+    if (def) return def;
+    return (state && state.scoutedStaff && state.scoutedStaff[id]) || null;
+  }
+
   // ---------- STEP5(docs/新設計/05_STEP5_従業員能力と育成_修正版.md): 従業員の新4能力 ----------
   // 効果は「調理・接客・速度」の3つだけ配線する。開発は器を持つだけで今回はどこからも参照しない(§2-4)。
   // 現在Lvで伸びた分の上乗せ(newStatBonus)は state.staffState[id] 側にあり、静的データ
   // (js/data/characters.jsのnewStats)は書き換えない(既存のstatBonusと同じ考え方)。
   function effectiveNewStat(id, key, state) {
-    var def = U.findById(STAFF, id);
+    var def = findStaffDef(state, id);
     if (!def || !def.newStats) return null;
     var sstate = state.staffState && state.staffState[id];
     var bonus = (sstate && sstate.newStatBonus && sstate.newStatBonus[key]) || 0;
@@ -476,6 +486,7 @@ window.Scoring = (function () {
     rankOf: rankOf,
     staffRating: staffRating,
     effectiveStat: effectiveStat,
+    findStaffDef: findStaffDef,
     effectiveNewStat: effectiveNewStat,
     staffCookingAvg: staffCookingAvg,
     staffServiceAvg: staffServiceAvg,

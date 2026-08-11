@@ -90,6 +90,22 @@ window.DATA.actions = {
       blurb: "定休日を返上する。その場で売上が増える。疲れは残る",
       kind: "fixed", headline: "店を開けた",
       text: { fixed: "定休日を返上して、暖簾を出した。" }
+    },
+    // STEP6(docs/新設計/06_STEP6_従業員スカウト_修正版.md §1): 9つ目のアクションとして追加。
+    // 候補の生成・選択はjs/screens/dayoff.jsのUI側で行い、実際の雇用処理(お金・staffHiredへの
+    // 追加)はjs/event-engine.jsのresolveFixedAction("scout")が行う。
+    {
+      id: "scout", emoji: "📰", name: "求人を出す",
+      blurb: "貼り紙を出す。今週だけ3人と会える",
+      kind: "fixed", needsTarget: "scout", headline: "求人を出した",
+      text: {
+        fixed: function (state, ctx) {
+          if (ctx.scoutResult === "full") return "貼り紙を出したが、今はこれ以上雇えない状態だった。";
+          if (ctx.scoutResult === "insufficient_funds") return (ctx.staffName || "その人") + "が来てくれたが、紹介料が足りず雇えなかった。";
+          if (ctx.scoutResult === "hired") return (ctx.staffName || "その人") + "が来てくれることになった。紹介料を払って迎え入れた。";
+          return "3人と会ったが、今回は見送った。";
+        }
+      }
     }
   ]
 };

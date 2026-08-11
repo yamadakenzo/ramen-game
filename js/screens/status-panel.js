@@ -175,7 +175,7 @@ window.StatusPanel = (function () {
       return box;
     }
     state.staffHired.forEach(function (id) {
-      var def = U.findById(STAFF, id);
+      var def = window.Scoring.findStaffDef(state, id); // STEP6: スカウト勢も対象に含める
       if (!def) return;
       box.appendChild(staffBlock(def, window.EventEngine.ensureStaffState(state, id)));
     });

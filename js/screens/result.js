@@ -89,7 +89,7 @@ window.ScreenResult = (function () {
       staffPanel.appendChild(h("p", { className: "dim", text: "従業員なしで乗り切った。" }));
     }
     state.staffHired.forEach(function (id) {
-      var def = U.findById(STAFF, id);
+      var def = window.Scoring.findStaffDef(state, id); // STEP6: スカウト勢も対象に含める
       var s = window.EventEngine.ensureStaffState(state, id);
       staffPanel.appendChild(h("p", { className: "emoji-font" }, [
         def.emoji + " " + def.name + "（" + def.role + "）　士気: " + Math.round(s.morale) + "　関係値: " + Math.round(s.rel)

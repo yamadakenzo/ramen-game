@@ -16,6 +16,28 @@ window.Scoring = (function () {
   // 素材の値を加算していく、という指示どおりの構成)。
   var RAMEN_BASE = { quality: 20, richness: 10, volume: 20, uniqueness: 10, cost: 0, workload: 0 };
 
+  // STEP2(docs/新設計/02_STEP2_素材カード基本システム_修正版.md): 素材カードの所持判定。
+  // 対象は unlock:"start" の素材だけ(§1の初期8枚+試作で増える分)。unlock:"event"/"card_menya"/
+  // "recipe_lv3" の素材(野菜・辛味・自家製麺・ダブル)は既存の解放条件(state.flags.eventRecipesUnlocked
+  // 等)で今まで通り制御し、このSTEPでは触れていない。トッピングの「なし」は常に選択可能。
+  function isMaterialOwned(state, cat, id) {
+    if (cat === "topping" && id === "none") return true;
+    var owned = state.ownedMaterials && state.ownedMaterials[cat];
+    return !!owned && owned.indexOf(id) >= 0;
+  }
+
+  // unlock:"start"のうち、まだ持っていない素材の一覧({cat, item})。試作(soup_trial)の抽選対象。
+  function unownedStartMaterials(state) {
+    var out = [];
+    ["soup", "tare", "noodle", "topping"].forEach(function (cat) {
+      RECIPES[cat].forEach(function (item) {
+        if (item.unlock !== "start" || item.id === "none") return;
+        if (!isMaterialOwned(state, cat, item.id)) out.push({ cat: cat, item: item });
+      });
+    });
+    return out;
+  }
+
   function recipeAggregate(recipe, state) {
     var soup = U.findById(RECIPES.soup, recipe.soup);
     var tare = U.findById(RECIPES.tare, recipe.tare);
@@ -374,6 +396,8 @@ window.Scoring = (function () {
 
   return {
     recipeAggregate: recipeAggregate,
+    isMaterialOwned: isMaterialOwned,
+    unownedStartMaterials: unownedStartMaterials,
     getProperty: getProperty,
     totalSeats: totalSeats,
     computeShopStats: computeShopStats,

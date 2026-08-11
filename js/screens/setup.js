@@ -183,14 +183,19 @@ window.ScreenSetup = (function () {
     return wrap;
   }
 
+  // STEP2(docs/新設計/02_STEP2_素材カード基本システム_修正版.md §2): 未所持の素材も隠さず表示し、
+  // 選べない状態にする(薄く表示+「未所持」ラベル。どちらも既存のchoice-card.disabled/.lockedを流用)。
   function stepRecipe(cat) {
     var grid = h("div", { className: "choice-grid" });
     RECIPES[cat].filter(function (item) { return item.unlock === "start"; }).forEach(function (item) {
+      var owned = window.Scoring.isMaterialOwned(state, cat, item.id);
       grid.appendChild(card({
         emoji: item.emoji,
         name: item.name,
         blurb: G.blurb(item.id),
         selected: state.recipe[cat] === item.id,
+        disabled: !owned,
+        locked: !owned ? "未所持" : null,
         // STEP4(docs/新設計/04_STEP4_ラーメン新パラメータとレシピ計算_修正版.md §6): 「コク・脂・量」の
         // 3項表示を「品質・濃さ・量・個性」の4項表示に差し替えた。
         detail: detailLines([

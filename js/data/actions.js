@@ -9,9 +9,19 @@ window.DATA.actions = {
       id: "soup_trial", emoji: "🍲", name: "スープの試作",
       blurb: "味を寸胴の前で詰める。手応えは翌週に出る",
       kind: "variable", headline: "スープを試作した",
+      // STEP2: 未所持の素材が残っている間は、そのカードが手に入った旨の文言に差し替える
+      // (event-engine.jsがctx.gainedCardNameを立てたときだけ)。全て所持済みなら今まで通りの文言。
       text: {
-        great: "何度も味見して、狙った方向がはっきり見えた。手応えは十分。",
-        good: "新しい塩梅を試した。悪くない感触。",
+        great: function (state, ctx) {
+          return ctx.gainedCardName
+            ? "思いがけず、新しい素材「" + ctx.gainedCardName + "」が手に入った。"
+            : "何度も味見して、狙った方向がはっきり見えた。手応えは十分。";
+        },
+        good: function (state, ctx) {
+          return ctx.gainedCardName
+            ? "仕入れ先で見かけて、新しい素材「" + ctx.gainedCardName + "」を持ち帰った。"
+            : "新しい塩梅を試した。悪くない感触。";
+        },
         miss: "何度やっても同じところで止まった。今日は収穫なし。"
       }
     },

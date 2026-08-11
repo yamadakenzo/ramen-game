@@ -693,11 +693,16 @@ window.ScreenLoop = (function () {
         return false;
       }).forEach(function (item) {
         var selected = state.recipe[key] === item.id;
-        var locked = state.flags.recipeLockWeeksLeft > 0;
+        var recipeLocked = state.flags.recipeLockWeeksLeft > 0;
+        // STEP2(docs/新設計/02_STEP2_素材カード基本システム_修正版.md §2): unlock:"start"の素材は
+        // 所持していないと選べない(「なし」を除く)。unlock:"event"/"card_menya"の素材は既存どおり
+        // 解放条件だけで選べる(このSTEPでは所持カードの対象外)。
+        var unowned = item.unlock === "start" && item.id !== "none" && !window.Scoring.isMaterialOwned(state, key, item.id);
+        var disabled = recipeLocked || unowned;
         grid.appendChild(h("div", {
-          className: "choice-card" + (selected ? " selected" : "") + (locked ? " disabled" : ""),
+          className: "choice-card" + (selected ? " selected" : "") + (disabled ? " disabled" : ""),
           onclick: function () {
-            if (locked || selected) return;
+            if (disabled || selected) return;
             state.recipe[key] = item.id;
             state.recipeChangeLog.push(U.weekOfRun(state.day));
             window.UI.toast(c[1] + "を" + item.name + "に変更した");
@@ -706,13 +711,41 @@ window.ScreenLoop = (function () {
         }, [
           h("div", { className: "emoji emoji-font", text: item.emoji }),
           h("div", { className: "name", text: item.name }),
-          h("div", { className: "blurb", text: G.blurb(item.id) })
+          unowned ? h("div", { className: "locked", text: "未所持" }) : h("div", { className: "blurb", text: G.blurb(item.id) })
         ]));
       });
       sec.appendChild(grid);
       box.appendChild(sec);
     });
+    box.appendChild(materialCardsSection());
     return box;
+  }
+
+  // STEP2(docs/新設計/02_STEP2_素材カード基本システム_修正版.md §5): 手持ちの素材カード一覧。
+  // 「新しい画面を作らない」指示どおり、既存のレシピパネルの中に追記する形にした。
+  // 表示するのはカテゴリ・名前・絵文字・4軸の数値(品質/濃さ/量/個性)・原価だけ(§5の説明文ルール、
+  // STEP1 §3を厳守: 味わい系の文章は書かず、隠し効果も無い)。所持と未所持を分けて出す。
+  function materialCardsSection() {
+    var sec = h("div", { className: "sheet-section" }, [h("h3", { className: "emoji-font", text: "🎴 手持ちの素材カード" })]);
+    var cats = [["soup", "スープ"], ["tare", "タレ"], ["noodle", "麺"], ["topping", "トッピング"]];
+    cats.forEach(function (c) {
+      var key = c[0];
+      sec.appendChild(h("div", { className: "setup-hint", text: c[1] }));
+      var grid = h("div", { className: "choice-grid" });
+      RECIPES[key].filter(function (item) { return item.unlock === "start" && item.id !== "none"; }).forEach(function (item) {
+        var owned = window.Scoring.isMaterialOwned(state, key, item.id);
+        var stat = function (v) { return (v >= 0 ? "+" : "") + v; };
+        grid.appendChild(h("div", { className: "choice-card" + (owned ? "" : " disabled") }, [
+          h("div", { className: "emoji emoji-font", text: item.emoji }),
+          h("div", { className: "name", text: item.name }),
+          owned
+            ? h("div", { className: "blurb", text: "品質" + stat(item.quality) + " ・ 濃さ" + stat(item.richness) + " ・ 量" + stat(item.volume) + " ・ 個性" + stat(item.uniqueness) + " ・ 原価" + item.cost + "円" })
+            : h("div", { className: "locked", text: "未所持" })
+        ]));
+      });
+      sec.appendChild(grid);
+    });
+    return sec;
   }
 
   // v06-3-4: 価格変更は専用パネルに独立させた(以前はレシピパネルの一番下にあり、

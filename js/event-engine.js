@@ -5,6 +5,7 @@ window.EventEngine = (function () {
   var STAFF = window.DATA.characters.staff;
   var CARDS = window.DATA.characters.cards;
   var SEGMENTS = window.DATA.segments.segments;
+  var RECIPES = window.DATA.recipes; // STEP2: 素材カード(ownedMaterials)の名前引きに使う
 
   function getEvent(id) { return U.findById(EVENTS, id); }
 
@@ -141,6 +142,13 @@ window.EventEngine = (function () {
       rentMultiplier: state.rentMultiplier || 1,
       recipeLock: state.flags.recipeLockWeeksLeft || 0,
       staffHired: state.staffHired.slice(),
+      // STEP2: 試作(soup_trial)で増える所持素材カードの差分表示用。カテゴリごとの配列を複製する。
+      ownedMaterials: {
+        soup: (state.ownedMaterials.soup || []).slice(),
+        tare: (state.ownedMaterials.tare || []).slice(),
+        noodle: (state.ownedMaterials.noodle || []).slice(),
+        topping: (state.ownedMaterials.topping || []).slice()
+      },
       rel: {}, staff: {}, staffBonus: {}, boosts: {}, flags: {}
     };
     CARDS.forEach(function (c) { snap.rel[c.id] = state.relationships[c.id] || 0; });
@@ -218,6 +226,15 @@ window.EventEngine = (function () {
       if (after.staffHired.indexOf(id) >= 0) return;
       var def = U.findById(STAFF, id);
       out.push(diffEntry((def ? def.name : id) + "が店を離れた", -1));
+    });
+
+    // STEP2: 試作で増えた所持素材カードを1枚ずつ表示する
+    ["soup", "tare", "noodle", "topping"].forEach(function (cat) {
+      after.ownedMaterials[cat].forEach(function (id) {
+        if (before.ownedMaterials[cat].indexOf(id) >= 0) return;
+        var item = U.findById(RECIPES[cat], id);
+        out.push(diffEntry("新しい素材: " + (item ? item.emoji + item.name : id), 1));
+      });
     });
 
     var segIds = {};
@@ -494,7 +511,20 @@ window.EventEngine = (function () {
 
     switch (def.id) {
       case "soup_trial":
-        if (tier !== "miss") state.flags.tasteBonus = U.clamp((state.flags.tasteBonus || 0) + (tier === "great" ? 6 : 3), 0, 20);
+        // STEP2(docs/新設計/02_STEP2_素材カード基本システム_修正版.md §3): 新しいアクションは
+        // 増やさず、既存の試作アクションの結果としてカードを渡す。未所持の素材(unlock:"start"のみ)
+        // が残っている間はそちらを優先し、全て所持済みになったら今まで通りのtasteBonus加算に戻す。
+        // どのカードが出るかはランダム(この段階では偏りを作らない)。重複の扱いはSTEP3で決める。
+        if (tier !== "miss") {
+          var unowned = window.Scoring.unownedStartMaterials(state);
+          if (unowned.length > 0) {
+            var picked = U.pick(unowned);
+            state.ownedMaterials[picked.cat].push(picked.item.id);
+            ctx.gainedCardName = picked.item.name;
+          } else {
+            state.flags.tasteBonus = U.clamp((state.flags.tasteBonus || 0) + (tier === "great" ? 6 : 3), 0, 20);
+          }
+        }
         break;
       case "supplier_visit":
         if (tier !== "miss") state.flags.costDiscountPct = U.clamp((state.flags.costDiscountPct || 0) + (tier === "great" ? 4 : 2), 0, 20);

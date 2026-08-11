@@ -11,7 +11,9 @@ window.GameState = (function () {
   // STEP4(docs/新設計/04_STEP4_ラーメン新パラメータとレシピ計算_修正版.md §9): レシピ素材の
   // 持ち方(oiliness廃止、quality/uniqueness/workload追加)が変わったため6→7に上げた。
   // 警告の仕組み自体はSTEP1で作り切っているので、ここでは変更しない。
-  var SAVE_VERSION = 7;
+  // STEP2(docs/新設計/02_STEP2_素材カード基本システム_修正版.md §8): 所持カード(ownedMaterials)
+  // を持つようになったため7→8に上げた。
+  var SAVE_VERSION = 8;
 
   function freshState() {
     return {
@@ -22,6 +24,21 @@ window.GameState = (function () {
       funding: null,
       property: null,
       recipe: { soup: null, tare: null, noodle: null, topping: null },
+      // STEP2(docs/新設計/02_STEP2_素材カード基本システム_修正版.md §1): 開業時点で持っている
+      // 素材カード(カテゴリごとの id 配列)。各カテゴリ性格が反対のもの2枚ずつ、計8枚が初期所持。
+      // トッピングの「なし」(none)はカードとして扱わない(常に選択可能。ここには含めない)。
+      // 「CARDS」という名前は既に window.DATA.characters.cards(麺屋の親父・記者など関係値カード)
+      // で使われているため、別物と分かるよう ownedMaterials という名前にした。
+      // 2026-08-11差し替え: トッピングを「チャーシュー・野菜マシ」から「チャーシュー・海苔」に
+      // 変更した。野菜マシ(量+40)が初期にあると大盛り(量+60)を手に入れても量の上限がほとんど
+      // 変わらず、大盛りが目標にならなかったため。野菜マシは未所持スタート(試作で入手する側)に
+      // 回した。理由・数値の詳細はdocs/設計判断記録.md参照。
+      ownedMaterials: {
+        soup: ["chicken", "pork"],
+        tare: ["shoyu", "shio"],
+        noodle: ["thin", "thick"],
+        topping: ["chashu_thin", "nori"]
+      },
       // STEP1で新設した器(品質/濃さ/量/個性/原価/提供負荷)。STEP4(docs/新設計/
       // 04_STEP4_ラーメン新パラメータとレシピ計算_修正版.md)で計算式(js/scoring.jsの
       // recipeAggregate)側がこれと同じ基礎値(20/10/20/10/0/0)から実際に計算するようになった。

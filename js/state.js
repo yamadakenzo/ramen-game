@@ -29,7 +29,10 @@ window.GameState = (function () {
   // 計算式自体が変わった(認知度の係数が新たに掛かる)ため13→14に上げた。あわせて
   // flags.meetingAttendCountは「商店街の寄合」自体が「宣伝をする」に読み替わり出番が無くなった
   // ため削除した(このバージョン以降のセーブには残らない)。
-  var SAVE_VERSION = 14;
+  // STEP11(docs/新設計/11_STEP11_経済バランス統合_修正版.md §9): stateの形は変えていないが、
+  // 経済バランス(BASE_CUSTOMERS・認知度の係数・家賃・返済額・設備維持費)を大きく調整したため、
+  // 旧セーブのまま続けると収支の前提が変わってしまう。14→15に上げた。
+  var SAVE_VERSION = 15;
 
   function freshState() {
     return {

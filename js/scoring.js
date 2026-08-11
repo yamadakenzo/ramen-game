@@ -407,8 +407,11 @@ window.Scoring = (function () {
       var hoursMult = hourCoverageMultiplier(seg, activeBands);
       // STEP10(docs/新設計/10_STEP10_広告_認知度_評判_修正版.md §2): 「週の来店者数 = 立地の
       // 潜在客数(flow) × 認知度の係数 × 来店魅力度(repMult等、既存のまま)」。認知度0でも
-      // 0人にはならないよう下限0.3を持たせ、100で1.2倍まで伸びる(0〜100の間で最大4倍の差)。
-      var awarenessMult = 0.3 + U.clamp(state.awareness || 0, 0, 100) / 100 * 0.9;
+      // 0人にはならないよう下限0.3は維持。
+      // STEP11(docs/新設計/11_STEP11_経済バランス統合_修正版.md §3「認知度の係数」): 上限を
+      // 1.2倍→2.0倍に引き上げた。認知度の器自体はSTEP10で作ったばかりで、育て切っても
+      // 損益分岐点に届かなかったため(詳細はdocs/設計判断記録.md参照)。下限0.3は変えていない。
+      var awarenessMult = 0.3 + U.clamp(state.awareness || 0, 0, 100) / 100 * 1.7;
       var potential = Math.max(0, flow * BASE_CUSTOMERS * repMult * seasonMult * repeatMult * boost * rivalMult * hoursMult * awarenessMult);
       // ramenProbsは「今週の客数がどれだけ増減したか」の影響を受けない比率のまま持つ(§で人数の
       // 変動と選択比率は独立)。computeWeeklyFinance側でcount×確率として使う。

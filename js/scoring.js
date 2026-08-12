@@ -230,10 +230,26 @@ window.Scoring = (function () {
     return 1 - (activeRamenCount(state) - 1) * 0.12 - activeSideCount(state) * 0.06;
   }
 
-  // §2-2: 週の処理可能人数(客数の上限キャップ)。120 + 速度の合計×30 + 設備補正、に
+  // STEP13(docs/新設計/13_STEP13_全体統合_バランス是正_UI_修正版.md §1): 「満足度が高いと、
+  // 上限そのものが伸びる」係数。満足度50を基準(×1.0)に、そこから1点動くごとに約3%
+  // (1/33)動く。下限0.4・上限2.5でクランプ(満足度0でも上限が消えてなくならないよう下限を、
+  // 青天井になって「上限が全く効かなくなる」ことが無いよう上限を、それぞれ設けた)。
+  // 数値の選定過程(なぜ単純な満足度/50ではなくこの傾きにしたか)はdocs/設計判断記録.md参照。
+  var SATISFACTION_CAP_MULT_MIN = 0.4;
+  var SATISFACTION_CAP_MULT_MAX = 2.5;
+  var SATISFACTION_CAP_MULT_SLOPE = 33;
+  function satisfactionCapMultiplier(satisfaction) {
+    var s = satisfaction == null ? 50 : satisfaction;
+    return U.clamp(1 + (s - 50) / SATISFACTION_CAP_MULT_SLOPE, SATISFACTION_CAP_MULT_MIN, SATISFACTION_CAP_MULT_MAX);
+  }
+
+  // §2-2(STEP5): 週の処理可能人数(客数の上限キャップ)。120 + 速度の合計×30 + 設備補正、に
   // STEP8(§3)のメニュー係数を掛ける。
-  function staffProcessingCapacity(state) {
-    return (120 + staffSpeedSum(state) * 30 + equipmentProcessingBonus(state)) * menuCoefficient(state);
+  // STEP13(§1): さらに満足度係数を1つ掛けるだけ(「新しい仕組みを足さないこと」に対応、既存の
+  // 式はそのまま)。satisfactionは省略可(呼び出し元がまだ客数を計算していない場面向けの保険。
+  // 省略時は基準の50=×1.0として扱う。既存の呼び出し元(UI表示等)の挙動を壊さないため)。
+  function staffProcessingCapacity(state, satisfaction) {
+    return (120 + staffSpeedSum(state) * 30 + equipmentProcessingBonus(state)) * menuCoefficient(state) * satisfactionCapMultiplier(satisfaction);
   }
 
   // STEP8(§2): サイドメニューの週間販売。客がどのラーメンを選ぶかの判定(STEP9)とは独立に、
@@ -506,6 +522,13 @@ window.Scoring = (function () {
       totalDemand += potential;
     });
 
+    // STEP13(docs/新設計/13_STEP13_全体統合_バランス是正_UI_修正版.md §1): 満足度が高いほど
+    // 処理可能人数の上限が伸びるようにする(下のstaffCapacityで使う)。ここで使う満足度は、
+    // 行列・座席・スタッフの上限で客数が絞られる「前」の、客層ごとの期待満足度を件数で加重平均
+    // したもの(既存のweightedAvgSatisfaction()を再利用。キャップで絞ったあとの値を使うと、
+    // キャップ自体が満足度の重みに影響してしまうため、絞る前の値を使う)。
+    var avgSatForCapacity = weightedAvgSatisfaction({ results: results });
+
     var seats = totalSeats(state);
     // STEP7(§3): big_pot/noodle_boilerの座席キャパ倍率(capMult)はここから撤去し、
     // staffProcessingCapacity()(週の処理可能人数)へ読み替えた。座席キャパ自体は設備の影響を
@@ -536,7 +559,7 @@ window.Scoring = (function () {
     // STEP5(§2-2): 従業員の速度による処理能力の上限。席数キャップとは別枠の追加キャップで、
     // 現状の客数(週120人前後)ではまだ届かない可能性が高い(§0)。座席キャップ適用後の合計に
     // さらにこれを掛けるので、両方のうちより厳しい方が効く。
-    var staffCapacity = staffProcessingCapacity(state);
+    var staffCapacity = staffProcessingCapacity(state, avgSatForCapacity);
     var afterSeatTotal = 0;
     Object.keys(results).forEach(function (id) { afterSeatTotal += results[id].count; });
     if (afterSeatTotal > staffCapacity && staffCapacity > 0) {

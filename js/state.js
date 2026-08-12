@@ -38,7 +38,11 @@ window.GameState = (function () {
   // バージョン変更・旧セーブの破棄では一切消えない(§4)。
   // STEP3(docs/新設計/03_STEP3_素材カード育成と分岐_修正版.md §9): state.materialCards
   // (所持カードごとのLv・分岐の記録)が増えたため16→17に上げた。
-  var SAVE_VERSION = 17;
+  // STEP13(docs/新設計/13_STEP13_全体統合_バランス是正_UI_修正版.md §4-2): stateの形は
+  // 変えていないが、週の処理可能人数の計算式(満足度係数を追加)が変わったため17→18に上げた。
+  // 引き継ぎデータ(js/meta-state.js、キーramen_meta)はSAVE_VERSIONと無関係の別バージョンで
+  // 管理しており、このバージョン変更では一切消えない(STEP12 §4と同じ担保)。
+  var SAVE_VERSION = 18;
 
   // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §1): 既存の従業員5人ぶんの
   // staffStateを、js/event-engine.jsのensureStaffState()が作るのと同じ形であらかじめ

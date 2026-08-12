@@ -734,19 +734,33 @@ window.ScreenLoop = (function () {
   // STEP8(docs/新設計/08_STEP8_複数ラーメンとサイドメニュー_修正版.md §1・§3): 今の構成(ラーメン
   // 品数・サイド品数)と、それによって決まる週の処理可能人数を表示する。「見えないと選択にならない」
   // (§3)ため、メニューを増やすとこの数字が減ることが見える必要がある。
+  // STEP13(docs/新設計/13_STEP13_全体統合_バランス是正_UI_修正版.md §4-1): 「今の週に何人捌けるか
+  // (上限)と、実際に何人来たか」「上限に当たっている場合、それが分かること」を追加した。
+  // 上限自体もSTEP13(§1)で満足度に応じて動くようになったため、既定値(満足度50)での再計算では
+  // なく、この週の確定済みの値(lastCustomers.staffCapacity、stageWeekCustomers()で既に計算済み)
+  // をそのまま使う(一方向データフロー: 計算済みの値をそのまま映すだけで、ここで計算し直さない)。
   function menuOverviewSection() {
     var dev = Scoring.staffDevelopmentSum(state);
     var activeRamen = Scoring.activeRamenCount(state);
     var activeSide = Scoring.activeSideCount(state);
     var coef = Scoring.menuCoefficient(state);
-    var cap = Math.round(Scoring.staffProcessingCapacity(state));
+    var cap = lastCustomers ? Math.round(lastCustomers.staffCapacity) : Math.round(Scoring.staffProcessingCapacity(state));
+    var actual = lastFinance ? lastFinance.totalCustomers : 0;
+    var hittingCap = !!(lastCustomers && lastCustomers.totalDemand > lastCustomers.staffCapacity + 0.5);
     return h("div", { className: "sheet-section status-card" }, [
       h("h3", { className: "emoji-font", text: "📋 メニュー構成" }),
       h("div", { className: "dim", text: "開発の合計 " + Math.round(dev) + "(厨房にいる従業員全員ぶん。枠の解放に使う)" }),
       h("div", {}, [
         "今の構成：ラーメン" + activeRamen + "品・サイド" + activeSide + "品　→　週の処理可能人数 ",
         h("span", { className: "money", text: cap + "人" }),
-        h("span", { className: "dim", text: "（メニュー係数 ×" + coef.toFixed(2) + "）" })
+        h("span", { className: "dim", text: "（メニュー係数 ×" + coef.toFixed(2) + "・満足度が高いほど伸びる）" })
+      ]),
+      h("div", {}, [
+        "今週の実客数 ",
+        h("span", { className: hittingCap ? "bad" : "good", text: actual + "人" }),
+        hittingCap
+          ? h("span", { className: "bad", text: "　上限に当たっている(従業員を増やすと伸ばせる)" })
+          : h("span", { className: "dim", text: "　上限には余裕がある" })
       ])
     ]);
   }
@@ -1118,11 +1132,17 @@ window.ScreenLoop = (function () {
     var hireable = STAFF.filter(function (d) { return state.staffHired.indexOf(d.id) < 0; });
     if (hireable.length) {
       staffSec.appendChild(h("h3", { text: "雇う" }));
+      // STEP13(docs/新設計/13_STEP13_全体統合_バランス是正_UI_修正版.md §2-1): このセクションには
+      // MAX_STAFFの上限チェックが無く、ここから雇うと上限2人を超えて雇えてしまっていた
+      // (STEP6のスカウト・js/screens/setup.jsの雇用画面は既にチェック済みだった)。同じ考え方
+      // (state.staffHired.length >= window.MAX_STAFF なら選べなくする)をここにも入れた。
+      var atStaffCap = state.staffHired.length >= window.MAX_STAFF;
       var grid = h("div", { className: "choice-grid wide" });
       hireable.forEach(function (def) {
         grid.appendChild(h("div", {
-          className: "choice-card",
+          className: "choice-card" + (atStaffCap ? " disabled" : ""),
           onclick: function () {
+            if (atStaffCap) return;
             state.staffHired.push(def.id);
             EE.ensureStaffState(state, def.id);
             if (def.id === "yuta") state.flags.yutaHireWeek = U.weekOfRun(state.day);
@@ -1135,7 +1155,7 @@ window.ScreenLoop = (function () {
           h("div", { className: "name", text: def.name + "（" + def.role + "）" }),
           h("div", { className: "cost", text: U.formatMoney(def.wage) + "/月" }),
           window.StatusPanel.staffStats(def),
-          h("div", { className: "blurb", text: G.blurb(def.id) })
+          atStaffCap ? h("div", { className: "locked", text: "これ以上は雇えません" }) : h("div", { className: "blurb", text: G.blurb(def.id) })
         ]));
       });
       staffSec.appendChild(grid);

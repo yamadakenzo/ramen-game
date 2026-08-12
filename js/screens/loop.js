@@ -73,10 +73,11 @@ window.ScreenLoop = (function () {
   function clearTick() { if (tickTimer) { clearTimeout(tickTimer); tickTimer = null; } }
 
   // ---------- v10-2: 営業時間帯のヘルパー ----------
-  // 今週アクティブな帯(businessHoursActive。パネルでの変更は次週から)を開始時刻順で返す。
+  // v17(docs/新設計/v17_ラーメン屋_修正指示書.md §1-5/§1-6): 営業時間の選択が無くなり、
+  // window.BANDSの4帯(昼/昼下がり/夕/夜)が常に全て開いている。BANDSは既にstart昇順で
+  // 定義されているので、そのまま返すだけでよい。
   function activeBandDefs() {
-    var keys = (state.businessHoursActive && state.businessHoursActive.length) ? state.businessHoursActive : window.BASE_HOUR_BANDS;
-    return window.BANDS.filter(function (b) { return keys.indexOf(b.key) >= 0; }).sort(function (a, b) { return a.start - b.start; });
+    return window.BANDS;
   }
   function bandAt(min, bands) {
     for (var i = 0; i < bands.length; i++) {
@@ -111,9 +112,20 @@ window.ScreenLoop = (function () {
     var bands = activeBandDefs();
     var cur = bandAt(state.clockMin, bands);
     if (cur) {
-      // 営業中: 時計を進める。ちょうど帯の終わりを超えたらShopViewへ伝える(既存の客は自然に帰る)
+      // 営業中: 時計を進める。
       state.clockMin += TICK_MIN;
-      if (!bandAt(state.clockMin, bands)) window.ShopView.closeBand(cur.key);
+      var nowBand = bandAt(state.clockMin, bands);
+      if (!nowBand) {
+        // 帯の終わりを超えて、次の帯まで隙間がある(=閉店)。既存の客は自然に帰る。
+        window.ShopView.closeBand(cur.key);
+      } else if (nowBand.key !== cur.key) {
+        // v17(docs/新設計/v17_ラーメン屋_修正指示書.md §1-6): 4帯が隙間なく11:00〜23:00を
+        // 埋めているため、帯の切れ目(14:00/17:00/20:00)では次の帯へそのまま繋がる。
+        // 閉店処理(closeBand)は呼ばない(店は閉まっていない)が、新しい帯ぶんの客の湧きを
+        // 予約するためopenBandは呼ぶ必要がある(隙間ジャンプ時しかopenBandを呼んでいなかった
+        // 旧ロジックのままだと、隙間の無い帯の切り替わりで客が一切湧かなくなってしまう)。
+        window.ShopView.openBand(nowBand.key);
+      }
       renderTopBar();
       scheduleDayTick();
       return;
@@ -155,15 +167,15 @@ window.ScreenLoop = (function () {
   function monthlyCostBreakdown() {
     var property = Scoring.getProperty(state);
     var rent = Math.round(property.rent * (state.rentMultiplier || 1)); // v10-2-4: 家賃は営業時間に関係しない固定費
-    var costMult = Scoring.hoursCostMultiplier(state); // 開けている帯の数(÷2基準)。人件費はここに比例する
+    var costMult = Scoring.hoursCostMultiplier(state); // v17: 営業時間固定に伴い常に1.0(§1-3)
     var wages = 0;
     state.staffHired.forEach(function (id) {
       var s = EE.ensureStaffState(state, id);
       var def = findStaffDef(id);
       wages += Math.round(def.wage * (s.wageMult || 1) * costMult);
     });
-    var loanPay = state.loan.monthsLeft > 0 ? state.loan.monthlyRepay : 0; // 返済も固定費
-    return { rent: rent, wages: wages, loanPay: loanPay, total: rent + wages + loanPay };
+    // v17(docs/新設計/v17_ラーメン屋_修正指示書.md §2-3): 返済(loanPay)を撤去した。
+    return { rent: rent, wages: wages, total: rent + wages };
   }
 
   // ---------- v12-2: 週の客数・売上・湧きスケジュールを「週の開始」で確定する ----------
@@ -230,7 +242,7 @@ window.ScreenLoop = (function () {
     state.lastAvgSatisfaction = avgSat;
 
     var monthlyCosts = 0;
-    var chargedBreakdown = { rent: 0, wages: 0, loanPay: 0 }; // 月次まとめ用に、実際に引き落とされた内訳を週次ログへ残す
+    var chargedBreakdown = { rent: 0, wages: 0 }; // 月次まとめ用に、実際に引き落とされた内訳を週次ログへ残す
     // v09-3: 「月初」の判定を、週→月の近似(4.333週/月)から、表示上の月が実際に変わったかへ変更。
     // 週が月をまたいでよくなったため、月の請求は「その週で月が変わったこと」で判定する。
     var monthCharged = U.monthJustChanged(state.day);
@@ -238,7 +250,6 @@ window.ScreenLoop = (function () {
       chargedBreakdown = monthlyCostBreakdown();
       monthlyCosts = chargedBreakdown.total;
       state.money -= monthlyCosts;
-      if (state.loan.monthsLeft > 0) state.loan.monthsLeft--;
     }
 
     // v13-3/v16-1: 売上(finance.revenue)は丼が客の席に届くごとにonCustomerServed()で既に所持金へ
@@ -270,7 +281,7 @@ window.ScreenLoop = (function () {
     EE.tickTempBoosts(state);
     if (state.flags.recipeLockWeeksLeft > 0) state.flags.recipeLockWeeksLeft--;
     // v07-3-3: 通常営業でも疲労が少しずつ溜まる(混んだ週ほど少し多く)。
-    // v10-2-4: 開けている帯が多いほど疲れも増える(2帯基準=1.0倍)。「長く開ければ儲かるが疲れる」の本体。
+    // v17: 営業時間固定に伴いhoursCostMultiplierは常に1.0(§1-3)。疲労の量自体は変えていない。
     var hoursMult = Scoring.hoursCostMultiplier(state);
     state.flags.fatigue = U.clamp((state.flags.fatigue || 0) + U.clamp(3 + customers.queueLevel * 4, 3, 10) * hoursMult, 0, 100);
 
@@ -283,7 +294,7 @@ window.ScreenLoop = (function () {
       // (表示するときだけ U.monthSeqToCal で実際の月名に戻す)。
       week: U.weekOfRun(state.day), month: U.monthSeq(state.day), customers: finance.bySegment,
       totalCustomers: finance.totalCustomers, revenue: Math.round(finance.revenue), foodCost: Math.round(finance.foodCost),
-      monthlyCosts: monthlyCosts, rentCost: chargedBreakdown.rent, wageCost: chargedBreakdown.wages, loanCost: chargedBreakdown.loanPay,
+      monthlyCosts: monthlyCosts, rentCost: chargedBreakdown.rent, wageCost: chargedBreakdown.wages,
       equipUpkeep: equipUpkeep, // STEP7: 設備の週維持費(月次まとめとは別枠)
       sideRevenue: sideSales.revenue, sideCost: sideSales.cost, // STEP8: サイドメニューの売上・原価
       profit: Math.round(profit), money: Math.round(state.money),
@@ -360,8 +371,6 @@ window.ScreenLoop = (function () {
   function advanceWeek() {
     state.day++; // 今週の最終日で止めていた状態(runWeeklyCalc開始時点)から、次の週の1日目へ進める
     state.weekEndActive = false;
-    // v10-2-2: 営業時間の変更は「次の週から」反映。ここで選択中(businessHours)を確定させる。
-    state.businessHoursActive = state.businessHours.slice();
     var bands = activeBandDefs();
     state.clockMin = bands.length ? bands[0].start * 60 : 0;
     if (state.day > window.DAYS_PER_RUN) { window.GameState.save(); finishGame(); return; }
@@ -375,11 +384,11 @@ window.ScreenLoop = (function () {
 
   // ---------- 2-2: 月末にまとめを出す ----------
   function monthAggregate(monthNum) {
-    var agg = { revenue: 0, foodCost: 0, rent: 0, wages: 0, loan: 0, equipUpkeep: 0, sideRevenue: 0, sideCost: 0, profit: 0, customers: 0 };
+    var agg = { revenue: 0, foodCost: 0, rent: 0, wages: 0, equipUpkeep: 0, sideRevenue: 0, sideCost: 0, profit: 0, customers: 0 };
     state.history.forEach(function (rec) {
       if (rec.month !== monthNum) return;
       agg.revenue += rec.revenue; agg.foodCost += rec.foodCost;
-      agg.rent += rec.rentCost || 0; agg.wages += rec.wageCost || 0; agg.loan += rec.loanCost || 0;
+      agg.rent += rec.rentCost || 0; agg.wages += rec.wageCost || 0;
       agg.equipUpkeep += rec.equipUpkeep || 0; // STEP7: 週次で引かれた設備維持費を月内ぶん合算(内訳表示用)
       agg.sideRevenue += rec.sideRevenue || 0; agg.sideCost += rec.sideCost || 0; // STEP8: サイドの月内合算
       agg.profit += rec.profit; agg.customers += rec.totalCustomers;
@@ -421,8 +430,7 @@ window.ScreenLoop = (function () {
       recapRow("サイド原価", "−" + U.formatMoney(cur.sideCost), prev ? -(cur.sideCost - prev.sideCost) : null, U.formatMoney),
       recapRow("設備維持費", "−" + U.formatMoney(cur.equipUpkeep), prev ? -(cur.equipUpkeep - prev.equipUpkeep) : null, U.formatMoney),
       recapRow("人件費", "−" + U.formatMoney(cur.wages), prev ? -(cur.wages - prev.wages) : null, U.formatMoney),
-      recapRow("家賃", "−" + U.formatMoney(cur.rent), prev ? -(cur.rent - prev.rent) : null, U.formatMoney),
-      recapRow("返済", "−" + U.formatMoney(cur.loan), prev ? -(cur.loan - prev.loan) : null, U.formatMoney)
+      recapRow("家賃", "−" + U.formatMoney(cur.rent), prev ? -(cur.rent - prev.rent) : null, U.formatMoney)
     ]);
     var totalRow = recapRow("この月の損益", (cur.profit >= 0 ? "+" : "") + U.formatMoney(cur.profit),
       prev ? cur.profit - prev.profit : null, U.formatMoney);
@@ -479,12 +487,13 @@ window.ScreenLoop = (function () {
   }
 
   // 「今週：客52人/満足38・不満14/売上¥46,800」のようなデータをまとめておく。トグル切替の再描画にも使う。
-  // v14-3: 月額費用(家賃・人件費・返済)は「週割りの概算」ではなく、runWeeklyCalcが実際に
+  // v14-3: 月額費用(家賃・人件費)は「週割りの概算」ではなく、runWeeklyCalcが実際に
   // 所持金から引いた額(chargedBreakdown)をそのまま使う。月初でない週はここが全て0になるので、
   // その週は表示側でも「発生しない」として出す(推測で埋め直さない=逆算しない)。
+  // v17(§2-3): 返済(loanPay)を撤去した。
   function buildFlashData(finance, customers, chargedBreakdown, monthCharged, equipUpkeep, sideSales) {
     var s = satSplit(finance, customers);
-    var cb = chargedBreakdown || { rent: 0, wages: 0, loanPay: 0 };
+    var cb = chargedBreakdown || { rent: 0, wages: 0 };
     var revenue = finance.revenue;
     var upkeep = equipUpkeep || 0;
     var side = sideSales || { revenue: 0, cost: 0 };
@@ -495,12 +504,12 @@ window.ScreenLoop = (function () {
       revenue: revenue, foodCost: finance.foodCost,
       foodCostPct: revenue > 0 ? Math.round((finance.foodCost / revenue) * 100) : 0,
       monthCharged: !!monthCharged,
-      wages: cb.wages, rent: cb.rent, loanPay: cb.loanPay,
+      wages: cb.wages, rent: cb.rent,
       // STEP7(§2): 設備維持費は月初かどうかに関係なく毎週発生するので、月次費用とは別の行として持つ。
       equipUpkeep: upkeep,
       // STEP8(§2): サイドメニューの売上・原価。ラーメンの売上とは別の行として持つ。
       sideRevenue: side.revenue, sideCost: side.cost,
-      net: revenue - finance.foodCost - cb.rent - cb.wages - cb.loanPay - upkeep + side.revenue - side.cost
+      net: revenue - finance.foodCost - cb.rent - cb.wages - upkeep + side.revenue - side.cost
     };
   }
 
@@ -541,15 +550,15 @@ window.ScreenLoop = (function () {
       // STEP8(§2): サイドメニューの売上・原価。ラーメンとは別の行にする(0円の週は出さない)。
       if (d.sideRevenue) rows.push(moneyRow("サイド売上", d.sideRevenue));
       if (d.sideCost) rows.push(moneyRow("サイド原価", -d.sideCost, { tone: "bad" }));
-      // STEP7(§2): 設備維持費は月初かどうかに関係なく毎週発生する固定費。家賃・人件費・返済の
+      // STEP7(§2): 設備維持費は月初かどうかに関係なく毎週発生する固定費。家賃・人件費の
       // 判定(d.monthCharged)とは別に、毎週この行を出す(0円の週は出さない)。
       if (d.equipUpkeep) rows.push(moneyRow("設備維持費", -d.equipUpkeep, { tone: "bad" }));
-      // v14-3: 家賃・人件費・返済は月初の週にしか引き落とされない固定費。実際に引かれた週だけ、
+      // v14-3: 家賃・人件費は月初の週にしか引き落とされない固定費。実際に引かれた週だけ、
       // 実際に引かれた額をそのまま出す(それ以外の週は行ごと出さない=無かったことにする)。
+      // v17(§2-3): 返済(loanPay)の行を撤去した。
       if (d.monthCharged) {
         if (d.wages) rows.push(moneyRow("人件費", -d.wages, { tone: "bad" }));
         if (d.rent) rows.push(moneyRow("家賃", -d.rent, { tone: "bad" }));
-        if (d.loanPay) rows.push(moneyRow("返済", -d.loanPay, { tone: "bad" }));
       }
       rows.push(h("div", { className: "wf-divider" }));
       rows.push(moneyRow("残り", d.net, { sign: true }));
@@ -560,8 +569,8 @@ window.ScreenLoop = (function () {
       box.appendChild(h("div", {
         className: "wf-note",
         text: d.monthCharged
-          ? "人件費・家賃・返済は月初のこの週にまとめて引き落とし済み。"
-          : "人件費・家賃・返済は月初の週にまとめて引き落とし。今週の引き落としはなし。"
+          ? "人件費・家賃は月初のこの週にまとめて引き落とし済み。"
+          : "人件費・家賃は月初の週にまとめて引き落とし。今週の引き落としはなし。"
       }));
     } else {
       box.appendChild(h("p", { text: "売上 " + U.formatMoney(d.revenue) }));
@@ -1207,7 +1216,7 @@ window.ScreenLoop = (function () {
         h("span", { className: last.profit >= 0 ? "good" : "bad", text: U.formatMoney(last.profit) })]));
       var mc = monthlyCostBreakdown();
       num.appendChild(h("p", { className: "dim", text: "毎月の固定費: 家賃 " + U.formatMoney(mc.rent) +
-        " / 給与 " + U.formatMoney(mc.wages) + " / 返済 " + U.formatMoney(mc.loanPay) }));
+        " / 給与 " + U.formatMoney(mc.wages) }));
     }
     box.appendChild(num);
 
@@ -1227,49 +1236,15 @@ window.ScreenLoop = (function () {
     return box;
   }
 
-  // v10-2-2: 営業時間帯パネル。営業ループ中はいつでも変更できるが、反映は次の週から
-  // (今週アクティブなbusinessHoursActiveはここでは書き換えない)。
-  function panelHours() {
-    var box = h("div", {});
-    var changed = state.businessHours.slice().sort().join(",") !== state.businessHoursActive.slice().sort().join(",");
-    box.appendChild(h("div", { className: "setup-hint", text: "変更は次の週から反映される。最低1つは開けておく。" }));
-    if (changed) box.appendChild(h("p", { className: "dim", text: "今週はまだ今の設定のまま営業中。" }));
-    var grid = h("div", { className: "choice-grid" });
-    window.BANDS.forEach(function (b) {
-      var selected = state.businessHours.indexOf(b.key) >= 0;
-      var onlyOne = selected && state.businessHours.length === 1;
-      grid.appendChild(h("div", {
-        className: "choice-card" + (selected ? " selected" : "") + (onlyOne ? " disabled" : ""),
-        onclick: function () {
-          if (onlyOne) return;
-          if (selected) {
-            state.businessHours = state.businessHours.filter(function (k) { return k !== b.key; });
-            window.UI.toast("次の週から" + b.label + "を閉める");
-          } else {
-            state.businessHours.push(b.key);
-            window.UI.toast("次の週から" + b.label + "を開ける");
-          }
-          window.GameState.save();
-          refreshSheet();
-        }
-      }, [
-        h("div", { className: "emoji emoji-font", text: U.bandEmoji(b.key) }),
-        h("div", { className: "name", text: b.label + "（" + U.bandTimeLabel(b) + "）" }),
-        onlyOne ? h("div", { className: "locked", text: "最低1つは開けておく" }) : null
-      ]));
-    });
-    box.appendChild(grid);
-    return box;
-  }
-
   function renderFabs() {
     var col = document.getElementById("fab-col");
     if (!col) return;
     window.UI.clear(col);
+    // v17(docs/新設計/v17_ラーメン屋_修正指示書.md §1-5): 営業時間の選択が無くなったので
+    // 「⏰時間」パネルとそのFABを削除した(6個→5個)。
     [
       ["recipe", "🍜", "レシピ", "レシピ", panelRecipe],
       ["price", "💴", "価格", "価格", panelPrice],
-      ["hours", "⏰", "時間", "営業時間", panelHours],
       ["people", "👥", "人", "人", panelPeople],
       ["equip", "🛠", "設備", "設備", panelEquipment],
       ["data", "📊", "データ", "データ", panelData]
@@ -1319,7 +1294,6 @@ window.ScreenLoop = (function () {
     if (state.weekEndActive) {
       state.day++;
       state.weekEndActive = false;
-      state.businessHoursActive = state.businessHours.slice();
       var bands = activeBandDefs();
       state.clockMin = bands.length ? bands[0].start * 60 : 0;
     }

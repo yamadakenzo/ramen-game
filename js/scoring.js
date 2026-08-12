@@ -436,32 +436,14 @@ window.Scoring = (function () {
     return mult;
   }
 
-  // v10-2/3: 客層のpeak_hoursと、いま開けている帯を突き合わせて倍率を作る。
-  // 「昼+夜の2帯」を基準(=1.0)とし、開けている帯がそこから増えれば増え、減れば減る。
-  // OL(peak_hours=[lunch])は昼を閉めると0倍、学生(peak_hours=[lunch,night,latenight])は
-  // 深夜を追加で開けると1.5倍、という指示の具体例をどちらも満たす式になっている。
-  function segmentPhysicalBands(seg) {
-    var set = {};
-    (seg.peak_hours || []).forEach(function (ph) {
-      var band = ph === "weekend_lunch" ? "lunch" : (ph === "weekend_dinner" ? "dinner" : ph);
-      set[band] = true;
-    });
-    return Object.keys(set);
-  }
-  function hourCoverageMultiplier(seg, activeBands) {
-    var bands = segmentPhysicalBands(seg);
-    if (!bands.length) return 1; // peak_hours未設定の客層は影響を受けない(保険)
-    var base = window.BASE_HOUR_BANDS || ["lunch", "night"];
-    var baseCount = bands.filter(function (b) { return base.indexOf(b) >= 0; }).length;
-    var openCount = bands.filter(function (b) { return activeBands.indexOf(b) >= 0; }).length;
-    if (baseCount === 0) return bands.length ? openCount / bands.length : 0; // 現在のデータでは発生しない保険
-    return openCount / baseCount;
-  }
-  // v10-2-4: 開けた帯の数に比例するコスト倍率。基準は2帯(昼+夜)=1.0。
-  function hoursCostMultiplier(state) {
-    var bands = (state.businessHoursActive && state.businessHoursActive.length) ? state.businessHoursActive : (window.BASE_HOUR_BANDS || ["lunch", "night"]);
-    return bands.length / 2;
-  }
+  // v17(docs/新設計/v17_ラーメン屋_修正指示書.md §1-3): 営業時間の選択自体が無くなった
+  // (常に11:00〜23:00の通し営業)ため、開けている帯による客数・コストの倍率は撤去し、
+  // どちらも常に1.0を返すだけにした。STEP11・STEP13で調整済みの客数・収支の数値を
+  // そのまま維持するための措置(「昼+夜の2帯を選んだ状態」と同じ数字が出る)。
+  // 呼び出し側の引数(seg/activeBands/state)は使わないが、既存の呼び出し箇所を変えずに
+  // 済むよう関数自体は残してある。
+  function hourCoverageMultiplier() { return 1; }
+  function hoursCostMultiplier() { return 1; }
 
   // STEP9(docs/新設計/09_STEP9_客層相性_注文_満足度_修正版.md §1): 客はメニューを確率で選ぶ。
   // 一番満足するものを必ず選ぶ形にはしない(それだと3品置く意味が消える、指示書§1)。
@@ -483,7 +465,6 @@ window.Scoring = (function () {
     var property = getProperty(state);
     var results = {};
     var totalDemand = 0;
-    var activeBands = (state.businessHoursActive && state.businessHoursActive.length) ? state.businessHoursActive : (window.BASE_HOUR_BANDS || ["lunch", "night"]);
     // STEP9(§1): 置いてある全ラーメンを1回だけ確定する(客層に依存しない一覧なのでループの外)。
     var ramens = availableRamens(state);
 
@@ -507,7 +488,7 @@ window.Scoring = (function () {
       var seasonMult = seasonalFactor(property, seg, state.day);
       var repeatMult = U.clamp(expectedSat / 65, 0.15, 1.7);
       var boost = state.tempBoosts && state.tempBoosts[seg.id] ? state.tempBoosts[seg.id].mult : 1;
-      var hoursMult = hourCoverageMultiplier(seg, activeBands);
+      var hoursMult = hourCoverageMultiplier();
       // STEP10(docs/新設計/10_STEP10_広告_認知度_評判_修正版.md §2): 「週の来店者数 = 立地の
       // 潜在客数(flow) × 認知度の係数 × 来店魅力度(repMult等、既存のまま)」。認知度0でも
       // 0人にはならないよう下限0.3は維持。
@@ -610,35 +591,49 @@ window.Scoring = (function () {
   // ここはその結果を可視化のためだけに割り振る(このスケジュール自体は売上に一切影響しない)。
   // 端数は累積丸め(cumulative rounding)で吸収し、マス目の合計が客層ごとの週客数と一致するようにする
   // (週の終わりの表示客数と、絵の上で入店した客の合計を±10%以内に収める、という指示に対応)。
+  //
+  // v17(docs/新設計/v17_ラーメン屋_修正指示書.md §1-4): 営業時間の選択が無くなり、常に4帯
+  // (昼/昼下がり/夕/夜)全てが開いている。この関数だけを「重み付き配分」に変更した(表示専用、
+  // 総客数には一切影響しない)。客層のpeak_hoursに該当する帯は重み3、該当しない帯は重み1で
+  // 配分し、11:00〜23:00のあいだ切れ目なく客が湧くように見せる。深夜帯(latenight)はBANDSから
+  // 無くなったので、該当する客層(学生)の重みは自動的に他の3帯へ回る。weekend_lunch/
+  // weekend_dinner(土日だけ計上)の扱いは変更していない。
   function weeklyBandSchedule(state, customersResult) {
-    var activeBands = (state.businessHoursActive && state.businessHoursActive.length) ? state.businessHoursActive : (window.BASE_HOUR_BANDS || ["lunch", "night"]);
+    var activeBands = window.BANDS; // 常に4帯全て開いている
     var schedule = {};
     for (var d = 0; d < 7; d++) {
       schedule[d] = {};
-      activeBands.forEach(function (b) { schedule[d][b] = {}; });
+      activeBands.forEach(function (b) { schedule[d][b.key] = {}; });
     }
     SEGMENTS.forEach(function (seg) {
       var r = customersResult.results[seg.id];
       var total = r ? r.count : 0;
       if (!total) return;
+
+      // この客層のpeak_hoursから「該当する帯の集合」と「週末のみ計上か」を求める(既存の
+      // weekend_lunch/weekend_dinnerの読み替えロジックをそのまま踏襲)。
+      var matchBands = {};
+      var weekendOnly = false;
+      (seg.peak_hours || []).forEach(function (ph) {
+        if (ph === "weekend_lunch") { matchBands.lunch = true; weekendOnly = true; }
+        else if (ph === "weekend_dinner") { matchBands.dinner = true; weekendOnly = true; }
+        else { matchBands[ph] = true; } // "latenight"はBANDSに存在しないので自然と参照されず消える
+      });
+
       var cells = [];
       for (var dow = 0; dow < 7; dow++) {
         var weekend = (dow === 5 || dow === 6);
-        (seg.peak_hours || []).forEach(function (ph) {
-          var band, weekendOnly;
-          if (ph === "weekend_lunch") { band = "lunch"; weekendOnly = true; }
-          else if (ph === "weekend_dinner") { band = "dinner"; weekendOnly = true; }
-          else { band = ph; weekendOnly = false; }
-          if (weekendOnly && !weekend) return;
-          if (activeBands.indexOf(band) < 0) return;
-          cells.push({ dow: dow, band: band });
+        if (weekendOnly && !weekend) continue;
+        activeBands.forEach(function (b) {
+          cells.push({ dow: dow, band: b.key, weight: matchBands[b.key] ? 3 : 1 });
         });
       }
       if (!cells.length) return;
-      var per = total / cells.length;
-      var prevCum = 0;
-      cells.forEach(function (c, i) {
-        var cum = Math.round(per * (i + 1));
+      var weightSum = cells.reduce(function (s, c) { return s + c.weight; }, 0);
+      var cumWeight = 0, prevCum = 0;
+      cells.forEach(function (c) {
+        cumWeight += c.weight;
+        var cum = Math.round(total * cumWeight / weightSum);
         var v = cum - prevCum;
         prevCum = cum;
         schedule[c.dow][c.band][seg.id] = Math.max(0, v);

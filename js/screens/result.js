@@ -49,7 +49,6 @@ window.ScreenResult = (function () {
       totalFixed += rec.monthlyCosts;
       totalProfit += rec.profit;
     });
-    var loanBalance = state.loan.monthsLeft * state.loan.monthlyRepay;
     var totals = totalsBySegment(state);
     var maxCount = Math.max.apply(null, SEGMENTS.map(function (s) { return totals[s.id] || 0; }).concat([1]));
 
@@ -67,11 +66,10 @@ window.ScreenResult = (function () {
       h("h2", { text: "年間収支" }),
       h("p", {}, ["年間売上: ", h("span", { className: "money", text: U.formatMoney(totalRevenue) })]),
       h("p", {}, ["原価合計: ", h("span", { text: U.formatMoney(totalFoodCost) })]),
-      h("p", {}, ["家賃・人件費・返済: ", h("span", { text: U.formatMoney(totalFixed) })]),
+      h("p", {}, ["家賃・人件費: ", h("span", { text: U.formatMoney(totalFixed) })]),
       h("p", {}, ["営業利益: ", h("span", { className: totalProfit >= 0 ? "good" : "bad", text: U.formatMoney(totalProfit) })]),
       h("p", {}, ["納税額: ", h("span", { text: U.formatMoney(state.flags.lastTax || 0) })]),
-      h("p", {}, ["最終所持金: ", h("span", { className: "money", text: U.formatMoney(state.money) })]),
-      h("p", {}, ["借入残高: ", h("span", { text: U.formatMoney(loanBalance) })])
+      h("p", {}, ["最終所持金: ", h("span", { className: "money", text: U.formatMoney(state.money) })])
     ]);
     root.appendChild(financePanel);
 

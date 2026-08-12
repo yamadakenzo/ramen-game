@@ -42,7 +42,10 @@ window.GameState = (function () {
   // 変えていないが、週の処理可能人数の計算式(満足度係数を追加)が変わったため17→18に上げた。
   // 引き継ぎデータ(js/meta-state.js、キーramen_meta)はSAVE_VERSIONと無関係の別バージョンで
   // 管理しており、このバージョン変更では一切消えない(STEP12 §4と同じ担保)。
-  var SAVE_VERSION = 18;
+  // v17(docs/新設計/v17_ラーメン屋_修正指示書.md §3): state.funding/loan/businessHours/
+  // businessHoursActiveを削除したためstateの形が変わり、18→19に上げた。ramen_metaは
+  // 上記のとおりSAVE_VERSIONと無関係のため今回も消えない。
+  var SAVE_VERSION = 19;
 
   // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §1): 既存の従業員5人ぶんの
   // staffStateを、js/event-engine.jsのensureStaffState()が作るのと同じ形であらかじめ
@@ -79,8 +82,7 @@ window.GameState = (function () {
       version: SAVE_VERSION,
       phase: "opening", // opening -> setup -> loop -> result
       openingStep: 0,
-      setupStep: 0, // 0 資金,1 物件,2 スープ,3 タレ,4 麺,5 具,6 設備,7 従業員
-      funding: null,
+      setupStep: 0, // v17: 0 物件,1 スープ,2 タレ,3 麺,4 具,5 設備,6 従業員(資金調達・営業時間ステップは廃止)
       property: null,
       recipe: { soup: null, tare: null, noodle: null, topping: null }, // ラーメン1品目(既存のまま)
       // STEP8(docs/新設計/08_STEP8_複数ラーメンとサイドメニュー_修正版.md §1): ラーメン2・3品目。
@@ -128,11 +130,8 @@ window.GameState = (function () {
       scoutCounter: 0, // スカウトIDの発行カウンタ(採用時にのみ1増える)
       price: 850,
       money: 0,
-      loan: { monthlyRepay: 0, monthsLeft: 0 },
       day: 1, // v09-3: 開業からの通算日数(1始まり)。月日・曜日は表示時にUtilsで逆算する
       clockMin: 11 * 60, // v10-2: 「今日」の中の時計(分、0始まり)。開店前は無く、開いている帯の頭から始まる
-      businessHours: ["lunch", "night"], // v10-2: 選んでいる営業時間帯(次の週から反映)。初期値は昼+夜
-      businessHoursActive: ["lunch", "night"], // 今週すでに反映されている帯(週の頭でbusinessHoursから複製)
       reputation: 50,
       // STEP1で器だけ作った認知度。評判(reputation、上の行)とは別物(docs/新設計/
       // 01_STEP1_新システム用データ基盤_修正版.md §2-3)。STEP10(docs/新設計/
@@ -163,7 +162,7 @@ window.GameState = (function () {
         eventRecipesUnlocked: false // v07: 「他店を食べ歩く」で野菜スープ・辛味タレが解禁
         // STEP10: meetingAttendCountは「商店街の寄合に出る」が「宣伝をする」に読み替わったため削除。
       },
-      history: [], // {week, month, customers, revenue, foodCost, rent, wage, loanRepay, profit, money, satisfaction, queueLevel}
+      history: [], // {week, month, customers, revenue, foodCost, rent, wage, profit, money, satisfaction, queueLevel}
       eventLog: [], // {week, id, title}
       pendingEvents: [], // このtickで表示すべきイベントのキュー
       currentEvent: null,

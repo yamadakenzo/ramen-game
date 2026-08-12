@@ -96,15 +96,15 @@ window.Utils = (function () {
   function isWeekend(day) { var d = dow(day); return d === 5 || d === 6; }
   function dowLabel(day) { return DOW_LABEL[dow(day)]; }
 
-  // 帯は常にこの4つ。start/endは時(24時制、深夜だけ26時まで延長表記=実質翌1〜2時)。
+  // v17(docs/新設計/v17_ラーメン屋_修正指示書.md §1-2): 営業時間は11:00〜23:00の通し営業に固定し、
+  // 「開ける帯を選ぶ」概念自体を無くした。帯は表示・絵の湧き分け専用の4分割として常に全て開いている
+  // (深夜帯23:00-26:00は廃止。§1-3の指示により客数計算の倍率は常に1.0固定・帯の選択に一切影響されない)。
   window.BANDS = [
     { key: "lunch", label: "昼", start: 11, end: 14 },
+    { key: "afternoon", label: "昼下がり", start: 14, end: 17 },
     { key: "dinner", label: "夕", start: 17, end: 20 },
-    { key: "night", label: "夜", start: 20, end: 23 },
-    { key: "latenight", label: "深夜", start: 23, end: 26 }
+    { key: "night", label: "夜", start: 20, end: 23 }
   ];
-  // 「2帯(昼+夜)開けた状態」を現状の数値の基準とする(v10指示2-5)
-  window.BASE_HOUR_BANDS = ["lunch", "night"];
 
   // BANDSの要素は id ではなく key を識別子に持つので、findById(id前提)は使えない。
   function bandDef(key) { return window.BANDS.find(function (b) { return b.key === key; }); }
@@ -113,9 +113,10 @@ window.Utils = (function () {
     var h = Math.floor(min / 60), m = min % 60;
     return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m;
   }
-  var BAND_EMOJI = { lunch: "🌞", dinner: "🌇", night: "🌙", latenight: "🌃" };
+  var BAND_EMOJI = { lunch: "🌞", afternoon: "🌤", dinner: "🌇", night: "🌙" };
   function bandEmoji(key) { return BAND_EMOJI[key] || "🕐"; }
-  // 帯の時刻表示。終了が24時を超える(深夜)場合は「翌N:00」にする。setup/loopの両方で使う共通表記。
+  // 帯の時刻表示。v17で深夜帯(24時超え)が無くなったため「翌N:00」表記は実質発生しないが、
+  // 汎用の表記関数としてはそのまま残す。
   function bandTimeLabel(b) {
     var endLabel = b.end > 24 ? ("翌" + (b.end - 24) + ":00") : (b.end + ":00");
     return b.start + ":00〜" + endLabel;

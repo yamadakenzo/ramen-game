@@ -11,11 +11,11 @@ window.ScreenSetup = (function () {
   var G = window.Guide;
 
   // 1画面1問。レシピは4つに割って、それぞれ独立した問いにする。
-  // v10-2-2: 「営業時間」を物件の次に追加(何時に開けるかは、場所を決めた直後に決める操業判断という位置づけ)。
+  // v17(docs/新設計/v17_ラーメン屋_修正指示書.md §1-5/§2-4): 「営業時間」「資金調達」の
+  // 2ステップを削除した(営業時間は常に11:00〜23:00の通し営業に固定。開業資金は固定額の
+  // 自己資金のみになり、選ばせる概念自体を無くした)。9ステップ→7ステップ。
   var STEPS = [
-    { id: "funding",  kind: "funding" },
     { id: "property", kind: "property" },
-    { id: "hours",    kind: "hours" },
     { id: "soup",     kind: "recipe", cat: "soup" },
     { id: "tare",     kind: "recipe", cat: "tare" },
     { id: "noodle",   kind: "recipe", cat: "noodle" },
@@ -23,15 +23,15 @@ window.ScreenSetup = (function () {
     { id: "equip",    kind: "equipment" },
     { id: "staff",    kind: "staff" }
   ];
-  var PREVIEW_FROM = 3; // スープ以降は客層プレビューを出す
+  var PREVIEW_FROM = 1; // スープ以降は客層プレビューを出す
 
   var state, onDone;
   var reactLine = null; // 選んだ直後の案内役の反応。ステップを移ると消す
 
   // ---------- 予算 ----------
+  // v17(§2-2): 開業資金は固定額(PROPERTY_DATA.startingCapital)のみ。資金調達の選択は無くなった。
   function budgetAtPropertyStep() {
-    var funding = U.findById(PROPERTY_DATA.funding, state.funding);
-    return funding ? funding.amount : 0;
+    return PROPERTY_DATA.startingCapital;
   }
   function budgetAtEquipmentStep() {
     var b = budgetAtPropertyStep();
@@ -82,32 +82,14 @@ window.ScreenSetup = (function () {
   }
 
   // ---------- 各ステップ ----------
-  function stepFunding() {
-    var grid = h("div", { className: "choice-grid" });
-    PROPERTY_DATA.funding.forEach(function (f) {
-      grid.appendChild(card({
-        // v14-0: 「👪」はNoto Emojiにグリフが無く単色化できない。ZWJ結合の家族絵文字(👨‍👩‍👧等)も
-        // 構成要素(👨👩👧)は個別にあるのに結合済みリガチャがフォントに無く、結合全体がまるごと
-        // カラーへ落ちることが分かった。さらに🧒(中性の「子供」)は単体でもNoto Emoji側の色付き
-        // グリフしか無く単色化できないため避けた(👦も同様。👧は単色版がある)。
-        // 客層「家族連れ」と同じ、単色化を確認済みの🧑👧(ZWJで繋がない2文字並び)に差し替えた。
-        emoji: f.id === "family_loan" ? "🧑👧" : (f.id === "self_only" ? "🐖" : "🏦"),
-        name: f.name,
-        blurb: G.blurb(f.id),
-        selected: state.funding === f.id,
-        detail: detailLines([
-          "調達額 " + U.formatMoney(f.amount),
-          f.monthly_repay > 0 ? ("月々返済 " + U.formatMoney(f.monthly_repay) + " × " + f.months + "ヶ月") : "返済不要",
-          f.note
-        ]),
-        onpick: function () { pick(f.id, function () { state.funding = f.id; }); }
-      }));
-    });
-    return grid;
-  }
-
   function stepProperty() {
     var budget = budgetAtPropertyStep();
+    var wrap = h("div", {});
+    // v17(§2-4): 資金調達の選択肢が無くなったので、代わりに手持ちの自己資金を冒頭に表示する
+    // (以前は選んだ資金調達額が分かっていたので、その情報が消えないようにする)。
+    wrap.appendChild(h("div", { className: "setup-hint" }, [
+      "手持ちの自己資金：", h("span", { className: "money", text: U.formatMoney(budget) })
+    ]));
     var grid = h("div", { className: "choice-grid" });
     PROPERTY_DATA.properties.forEach(function (p) {
       var afford = p.initial_cost <= budget;
@@ -126,58 +108,6 @@ window.ScreenSetup = (function () {
         ].concat(p.traits)),
         onpick: function () { pick(p.id, function () { state.property = p.id; }); }
       }));
-    });
-    return grid;
-  }
-
-  // ---------- v10-2-2: 営業時間帯(複数選択・最低1つ) ----------
-  // その帯にどの客層が来るか(segments.jsのpeak_hoursから逆引き)。週末のみの客層には印を付ける。
-  function segmentsForBand(bandKey) {
-    var out = [];
-    SEGMENTS.forEach(function (seg) {
-      (seg.peak_hours || []).forEach(function (ph) {
-        var band = ph, weekendOnly = false;
-        if (ph === "weekend_lunch") { band = "lunch"; weekendOnly = true; }
-        else if (ph === "weekend_dinner") { band = "dinner"; weekendOnly = true; }
-        if (band === bandKey) out.push({ seg: seg, weekendOnly: weekendOnly });
-      });
-    });
-    return out;
-  }
-
-  function stepHours() {
-    var wrap = h("div", {});
-    wrap.appendChild(h("div", { className: "setup-hint", text: "最低1つは開けておく。長く開けるほど客は増えるが、原価・人件費・疲労もかさむ。" }));
-    var grid = h("div", { className: "choice-grid" });
-    window.BANDS.forEach(function (b) {
-      var selected = state.businessHours.indexOf(b.key) >= 0;
-      var onlyOne = selected && state.businessHours.length === 1;
-      var segs = segmentsForBand(b.key);
-      grid.appendChild(h("div", {
-        className: "choice-card" + (selected ? " selected" : "") + (onlyOne ? " disabled" : ""),
-        onclick: function () {
-          if (onlyOne) return;
-          if (selected) {
-            state.businessHours = state.businessHours.filter(function (k) { return k !== b.key; });
-            reactLine = G.unpick("hours");
-          } else {
-            state.businessHours.push(b.key);
-            reactLine = G.react(b.key);
-          }
-          draw();
-        }
-      }, [
-        h("div", { className: "emoji emoji-font", text: U.bandEmoji(b.key) }),
-        h("div", { className: "name", text: b.label + "（" + U.bandTimeLabel(b) + "）" }),
-        h("div", { className: "blurb", text: G.blurb(b.key) }),
-        h("div", { className: "hours-seg-row" }, segs.map(function (x) {
-          return h("span", {
-            className: "hours-seg-chip emoji-font" + (x.weekendOnly ? " weekend" : ""),
-            title: x.seg.name + (x.weekendOnly ? "（週末のみ）" : "")
-          }, [x.seg.emoji]);
-        })),
-        onlyOne ? h("div", { className: "locked", text: "最低1つは開けておく" }) : null
-      ]));
     });
     wrap.appendChild(grid);
     return wrap;
@@ -354,9 +284,7 @@ window.ScreenSetup = (function () {
   function canProceed() {
     var step = STEPS[state.setupStep];
     switch (step.kind) {
-      case "funding": return !!state.funding;
       case "property": return !!state.property;
-      case "hours": return state.businessHours.length >= 1;
       case "recipe": return !!state.recipe[step.cat];
       case "equipment": return true;
       case "staff": return state.staffHired.length >= 1;
@@ -366,9 +294,7 @@ window.ScreenSetup = (function () {
 
   function body() {
     var step = STEPS[state.setupStep];
-    if (step.kind === "funding") return stepFunding();
     if (step.kind === "property") return stepProperty();
-    if (step.kind === "hours") return stepHours();
     if (step.kind === "recipe") return stepRecipe(step.cat);
     if (step.kind === "equipment") return stepEquipment();
     return stepStaff();
@@ -391,17 +317,14 @@ window.ScreenSetup = (function () {
   }
 
   function commitAndStart() {
+    // v17(§2-3): 借り入れ・返済の概念を撤去した。開業資金は固定額の自己資金のみ(state.loanは廃止)。
     state.money = remainingBudget();
-    var funding = U.findById(PROPERTY_DATA.funding, state.funding);
-    state.loan = { monthlyRepay: funding.monthly_repay, monthsLeft: funding.months };
     state.staffHired.forEach(function (id) { window.EventEngine.ensureStaffState(state, id); });
     if (state.staffHired.indexOf("yuta") >= 0) state.flags.yutaHireWeek = 1;
     window.EventEngine.initRun(state);
-    // v10-2: 開業時点でbusinessHoursActiveをbusinessHoursと同じにして1週目から反映させる
-    // (「変更は翌週から」はプレイ中に変えた場合の話で、開業そのものはまだどの週も始まっていないため)。
-    state.businessHoursActive = state.businessHours.slice();
-    var sorted = window.BANDS.filter(function (b) { return state.businessHoursActive.indexOf(b.key) >= 0; });
-    state.clockMin = sorted.length ? sorted[0].start * 60 : 11 * 60;
+    // v17(docs/新設計/v17_ラーメン屋_修正指示書.md §1-6): 営業時間は11:00〜23:00の通し営業に
+    // 固定されたので、開業時点の時計は常にBANDSの先頭(11:00)から始まる。
+    state.clockMin = window.BANDS[0].start * 60;
     window.GameState.save();
     onDone();
   }

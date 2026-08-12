@@ -60,10 +60,9 @@ window.DATA.property = {
     { "id": "pos",            "name": "POSレジ",      "emoji": "🖥️", "cost": 300000,  "weekly_upkeep": 525,  "effect": "客層別の売上データを表示" },
     { "id": "extra_boiler",   "name": "麺量アップ",   "emoji": "🍜", "cost": 300000,  "effect": "全メニューの量+15", "note": "茹で麺器の増設。学生・サラリーマンなど量を求める客層の底上げ" }
   ],
-  "funding": [
-    { "id": "self_only",   "name": "自己資金のみ",         "amount": 3500000,  "monthly_repay": 0,      "months": 0,  "note": "借金なし。選べる物件が限られる" },
-    { "id": "public_loan", "name": "公庫融資",             "amount": 7000000,  "monthly_repay": 23800,  "months": 84, "note": "標準。手堅い" },
-    { "id": "big_loan",    "name": "公庫＋銀行",           "amount": 12000000, "monthly_repay": 47250,  "months": 84, "note": "選択肢は広がるが返済が重い" },
-    { "id": "family_loan", "name": "親から借りる",         "amount": 5000000,  "monthly_repay": 0,      "months": 0,  "note": "返済不要。ただし家族イベントが発生し続ける" }
-  ]
+  // v17(docs/新設計/v17_ラーメン屋_修正指示書.md §2-2): 「資金調達」の選択自体を無くし、
+  // 開業資金を単一の固定額(自己資金のみ)にした。金額の根拠はdocs/設計判断記録.md参照
+  // (安い方から2件=商店街3,200,000・大学前4,100,000は買える/3件目以降のオフィス街7,800,000以上は
+  // 買えない/大学前を買っても設備1つ+従業員1人+初回の固定費を払える残額がある、の3条件を満たす)。
+  "startingCapital": 5500000
 };

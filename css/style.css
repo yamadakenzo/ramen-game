@@ -275,15 +275,6 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .choice-card .cost { color: var(--c-ink); font-weight: 700; font-size: var(--fs-note); }
 .choice-card .sub { font-size: var(--fs-note); color: var(--c-ink-64); }
 .choice-card .locked { font-size: var(--fs-note); color: var(--c-down); margin-top: 3px; }
-/* v10-2-2: 営業時間帯カードの「この帯に来る客層」チップ */
-.hours-seg-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-.hours-seg-chip {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 1.5em; height: 1.5em; font-size: 0.85rem;
-  background: var(--c-bg); border: 2px solid var(--c-ink); border-radius: var(--r-s);
-  color: var(--c-ink-64); /* v14-2: 客層マーカー(理想値の縦線と同じ扱い) */
-}
-.hours-seg-chip.weekend { opacity: 0.55; border-style: dashed; }
 
 /* 4-3: 数値は初期状態で隠し、「詳しく見る」で出す */
 .detail-btn {

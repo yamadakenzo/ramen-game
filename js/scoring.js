@@ -28,7 +28,9 @@ window.Scoring = (function () {
     return !!owned && owned.indexOf(id) >= 0;
   }
 
-  // unlock:"start"のうち、まだ持っていない素材の一覧({cat, item})。試作(soup_trial)の抽選対象。
+  // unlock:"start"のうち、まだ持っていない素材の一覧({cat, item})。STEP2時点の抽選対象
+  // (STEP3以降はallStartMaterialsForDraw()の方を試作の抽選に使う。この関数自体は他の呼び先が
+  // 無くても、意味の分かりやすい単体の関数として残しておく)。
   function unownedStartMaterials(state) {
     var out = [];
     ["soup", "tare", "noodle", "topping"].forEach(function (cat) {
@@ -37,6 +39,84 @@ window.Scoring = (function () {
         if (!isMaterialOwned(state, cat, item.id)) out.push({ cat: cat, item: item });
       });
     });
+    return out;
+  }
+
+  // STEP3(docs/新設計/03_STEP3_素材カード育成と分岐_修正版.md §1): 未所持・所持済み(重複)の
+  // どちらも試作の抽選対象になる({cat, item, owned}の配列)。実際の重み付けはjs/event-engine.js側
+  // (js/meta-state.jsの図鑑補正と掛け合わせる必要があるため)。
+  function allStartMaterialsForDraw(state) {
+    var out = [];
+    ["soup", "tare", "noodle", "topping"].forEach(function (cat) {
+      RECIPES[cat].forEach(function (item) {
+        if (item.unlock !== "start" || item.id === "none") return;
+        out.push({ cat: cat, item: item, owned: isMaterialOwned(state, cat, item.id) });
+      });
+    });
+    return out;
+  }
+
+  // ---------- STEP3: 素材カードのLv・分岐 ----------
+  // Lv2に必要な累計重複枚数=1枚、Lv3=3枚(Lv2到達後さらに2枚。指示書§2の例と同じ配分)。
+  var MATERIAL_LV2_DUPES = 1;
+  var MATERIAL_LV3_DUPES = 3;
+  // Lvが上がるたびに、選んだ分岐の軸へ加算する量(Lv到達時点の累計値。Lv2で+4、Lv3で+8)。
+  var MATERIAL_LEVEL_STAT_BONUS = { 2: 4, 3: 8 };
+  // Lvが上がるたびに原価へ掛かる倍率(§2「原価も上がる」必須要件。分岐の種類に関わらず一律)。
+  var MATERIAL_LEVEL_COST_MULT = { 1: 1, 2: 1.15, 3: 1.35 };
+  // 「増やす」分岐(volume)のときだけ、提供負荷(workload)にも上乗せする(§3の方向性の例の表どおり)。
+  // workload自体はSTEP4から一貫してどの計算にも使われていない値のため、表示上の意味づけに留まる。
+  var MATERIAL_LEVEL_WORKLOAD_BONUS = { 2: 2, 3: 4 };
+
+  // 素材カード1枚の現在の育成状況。stateにまだ記録が無い(=未所持、または初期化前)場合は
+  // Lv1・重複0・分岐未選択として扱う(安全側のデフォルト)。
+  function materialCardState(state, cat, id) {
+    var rec = state && state.materialCards && state.materialCards[cat] && state.materialCards[cat][id];
+    var dupes = rec ? (rec.dupes || 0) : 0;
+    var branch = rec ? (rec.branch || null) : null;
+    // 分岐を選ぶまではLv2に上がらない(§3「Lv2に上がるとき、2つの方向から1つ選ぶ」)。
+    var level = !branch ? 1 : (dupes >= MATERIAL_LV3_DUPES ? 3 : 2);
+    var pendingBranch = dupes >= MATERIAL_LV2_DUPES && !branch; // 分岐選択待ち
+    var dupesToNextLevel = 0;
+    if (level === 1 && !pendingBranch) dupesToNextLevel = Math.max(0, MATERIAL_LV2_DUPES - dupes);
+    else if (level === 2) dupesToNextLevel = Math.max(0, MATERIAL_LV3_DUPES - dupes);
+    return { level: level, dupes: dupes, branch: branch, pendingBranch: pendingBranch, dupesToNextLevel: dupesToNextLevel, maxed: level >= 3 };
+  }
+
+  // STEP3(§3「分岐の内容は、選ぶ前に画面で全て見えていること」): 分岐を選ぶ前に、選んだら
+  // Lv2・Lv3でそれぞれ軸と原価がいくつ動くかを見せるためのプレビュー。stateを変更しない。
+  function branchOptionPreview(cat, id, branchKey) {
+    var base = U.findById(RECIPES[cat], id);
+    var branchDef = window.DATA.materialBranches && window.DATA.materialBranches[cat] && window.DATA.materialBranches[cat][branchKey];
+    if (!base || !branchDef) return null;
+    var costLv2 = Math.round(base.cost * MATERIAL_LEVEL_COST_MULT[2]) - base.cost;
+    var costLv3 = Math.round(base.cost * MATERIAL_LEVEL_COST_MULT[3]) - base.cost;
+    return {
+      key: branchDef.key, label: branchDef.label,
+      lv2: { statDelta: MATERIAL_LEVEL_STAT_BONUS[2], costDelta: costLv2 },
+      lv3: { statDelta: MATERIAL_LEVEL_STAT_BONUS[3], costDelta: costLv3 }
+    };
+  }
+
+  // 素材1枚の実効値(Lv・分岐を反映した4軸+原価+提供負荷)。unlock:"start"以外の素材(試作では
+  // 出ない=重複が起きない)はLvの対象外なので、常に生の値をそのまま返す。
+  function effectiveMaterialStats(state, cat, id) {
+    var base = U.findById(RECIPES[cat], id);
+    if (!base) return null;
+    var out = {
+      quality: base.quality, richness: base.richness, volume: base.volume, uniqueness: base.uniqueness,
+      cost: base.cost, workload: base.workload, smell: base.smell || 0
+    };
+    if (base.unlock !== "start") return out;
+    var cs = materialCardState(state, cat, id);
+    if (cs.level === 1) return out;
+    var branchDef = window.DATA.materialBranches && window.DATA.materialBranches[cat];
+    var chosen = branchDef && branchDef[cs.branch];
+    if (!chosen) return out;
+    var bonus = MATERIAL_LEVEL_STAT_BONUS[cs.level] || 0;
+    out[chosen.key] = out[chosen.key] + bonus;
+    out.cost = Math.round(out.cost * MATERIAL_LEVEL_COST_MULT[cs.level]);
+    if (chosen.key === "volume") out.workload = out.workload + (MATERIAL_LEVEL_WORKLOAD_BONUS[cs.level] || 0);
     return out;
   }
 
@@ -184,16 +264,23 @@ window.Scoring = (function () {
   }
 
   function recipeAggregate(recipe, state) {
-    var soup = U.findById(RECIPES.soup, recipe.soup);
-    var tare = U.findById(RECIPES.tare, recipe.tare);
-    var noodle = U.findById(RECIPES.noodle, recipe.noodle);
-    var topping = U.findById(RECIPES.topping, recipe.topping);
-    if (!soup || !tare || !noodle || !topping) {
+    var soupDef = U.findById(RECIPES.soup, recipe.soup);
+    var tareDef = U.findById(RECIPES.tare, recipe.tare);
+    var noodleDef = U.findById(RECIPES.noodle, recipe.noodle);
+    var toppingDef = U.findById(RECIPES.topping, recipe.topping);
+    if (!soupDef || !tareDef || !noodleDef || !toppingDef) {
       return {
         quality: RAMEN_BASE.quality, richness: RAMEN_BASE.richness, volume: RAMEN_BASE.volume,
         uniqueness: RAMEN_BASE.uniqueness, cost: RAMEN_BASE.cost, workload: RAMEN_BASE.workload, smell: 0
       };
     }
+    // STEP3(docs/新設計/03_STEP3_素材カード育成と分岐_修正版.md §2): Lv・分岐で伸びた実効値を
+    // 使う(生の素材データそのまま足すのではない)。stateが無い・Lv1のまま等の場合は生の値と
+    // 一致するので、STEP3より前の呼び出し元(recipeOverrideでのプレビュー等)の挙動は変わらない。
+    var soup = effectiveMaterialStats(state, "soup", recipe.soup) || soupDef;
+    var tare = effectiveMaterialStats(state, "tare", recipe.tare) || tareDef;
+    var noodle = effectiveMaterialStats(state, "noodle", recipe.noodle) || noodleDef;
+    var topping = effectiveMaterialStats(state, "topping", recipe.topping) || toppingDef;
     var volumeBonus = (state && state.equipment && state.equipment.indexOf("extra_boiler") >= 0)
       ? EXTRA_BOILER_VOLUME : 0;
     var rawCost = soup.cost + tare.cost + noodle.cost + topping.cost;
@@ -673,6 +760,10 @@ window.Scoring = (function () {
     availableRamens: availableRamens,
     ramenChoiceProbabilities: ramenChoiceProbabilities,
     sideSatisfactionBonus: sideSatisfactionBonus,
-    BASE_CUSTOMERS: BASE_CUSTOMERS
+    BASE_CUSTOMERS: BASE_CUSTOMERS,
+    allStartMaterialsForDraw: allStartMaterialsForDraw,
+    materialCardState: materialCardState,
+    effectiveMaterialStats: effectiveMaterialStats,
+    branchOptionPreview: branchOptionPreview
   };
 })();

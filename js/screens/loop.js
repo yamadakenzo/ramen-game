@@ -900,22 +900,69 @@ window.ScreenLoop = (function () {
   // 「新しい画面を作らない」指示どおり、既存のレシピパネルの中に追記する形にした。
   // 表示するのはカテゴリ・名前・絵文字・4軸の数値(品質/濃さ/量/個性)・原価だけ(§5の説明文ルール、
   // STEP1 §3を厳守: 味わい系の文章は書かず、隠し効果も無い)。所持と未所持を分けて出す。
+  // STEP3(docs/新設計/03_STEP3_素材カード育成と分岐_修正版.md §5): Lv・分岐を追加表示する。
+  // 表示するのは各カードのLv・Lvアップまでの枚数・選んだ分岐・Lv3の頭打ち表示のみ(§4-2、
+  // 数値の表だけに留める)。Lv2に上がる瞬間(分岐未選択)は、選ぶ前に両方の中身が見える
+  // ピッカーをこの場に出す(§3「選ぶ前に画面で全て見えていること」。新しい画面は作らない)。
+  var MATERIAL_STAT_LABEL = { quality: "品質", richness: "濃さ", volume: "量", uniqueness: "個性" };
   function materialCardsSection() {
     var sec = h("div", { className: "sheet-section" }, [h("h3", { className: "emoji-font", text: "🎴 手持ちの素材カード" })]);
     var cats = [["soup", "スープ"], ["tare", "タレ"], ["noodle", "麺"], ["topping", "トッピング"]];
+    var stat = function (v) { return (v >= 0 ? "+" : "") + v; };
     cats.forEach(function (c) {
       var key = c[0];
       sec.appendChild(h("div", { className: "setup-hint", text: c[1] }));
       var grid = h("div", { className: "choice-grid" });
       RECIPES[key].filter(function (item) { return item.unlock === "start" && item.id !== "none"; }).forEach(function (item) {
         var owned = window.Scoring.isMaterialOwned(state, key, item.id);
-        var stat = function (v) { return (v >= 0 ? "+" : "") + v; };
-        grid.appendChild(h("div", { className: "choice-card" + (owned ? "" : " disabled") }, [
+        if (!owned) {
+          grid.appendChild(h("div", { className: "choice-card disabled" }, [
+            h("div", { className: "emoji emoji-font", text: item.emoji }),
+            h("div", { className: "name", text: item.name }),
+            h("div", { className: "locked", text: "未所持" })
+          ]));
+          return;
+        }
+        var cs = Scoring.materialCardState(state, key, item.id);
+        if (cs.pendingBranch) {
+          // Lv2に上がる方向を選ぶピッカー。選ぶまでLv1のまま(戻せる余地は無い=§3「選んだら戻せない」)。
+          var optA = Scoring.branchOptionPreview(key, item.id, "a");
+          var optB = Scoring.branchOptionPreview(key, item.id, "b");
+          var pickerCard = h("div", { className: "choice-card wide" }, [
+            h("div", { className: "emoji emoji-font", text: item.emoji }),
+            h("div", { className: "name", text: item.name + "：育てる方向を選ぶ（戻せません）" })
+          ]);
+          [["a", optA], ["b", optB]].forEach(function (pair) {
+            var branchKey = pair[0], opt = pair[1];
+            pickerCard.appendChild(h("div", {
+              className: "choice-card",
+              onclick: function () {
+                state.materialCards[key][item.id].branch = branchKey;
+                window.UI.toast(item.name + "を「" + opt.label + "」の方向で育てることにした");
+                window.GameState.save();
+                refreshSheet();
+              }
+            }, [
+              h("div", { className: "name", text: opt.label }),
+              h("div", { className: "blurb", text: MATERIAL_STAT_LABEL[opt.key] + stat(opt.lv2.statDelta) + " ・ 原価" + stat(opt.lv2.costDelta) + "円（Lv2）" }),
+              h("div", { className: "dim", text: "Lv3では" + MATERIAL_STAT_LABEL[opt.key] + stat(opt.lv3.statDelta) + " ・ 原価" + stat(opt.lv3.costDelta) + "円" })
+            ]));
+          });
+          grid.appendChild(pickerCard);
+          return;
+        }
+        var eff = Scoring.effectiveMaterialStats(state, key, item.id) || item;
+        var branchDef = cs.branch && window.DATA.materialBranches[key][cs.branch];
+        var lvLabel = "Lv" + cs.level + (cs.maxed ? "（最大）" : "");
+        var sub = [];
+        if (branchDef) sub.push("方向: " + branchDef.label);
+        if (!cs.maxed) sub.push("Lvアップまであと" + cs.dupesToNextLevel + "枚");
+        else sub.push("これ以上重ねても無駄になる");
+        grid.appendChild(h("div", { className: "choice-card" }, [
           h("div", { className: "emoji emoji-font", text: item.emoji }),
-          h("div", { className: "name", text: item.name }),
-          owned
-            ? h("div", { className: "blurb", text: "品質" + stat(item.quality) + " ・ 濃さ" + stat(item.richness) + " ・ 量" + stat(item.volume) + " ・ 個性" + stat(item.uniqueness) + " ・ 原価" + item.cost + "円" })
-            : h("div", { className: "locked", text: "未所持" })
+          h("div", { className: "name", text: item.name + "　" + lvLabel }),
+          h("div", { className: "blurb", text: "品質" + stat(eff.quality) + " ・ 濃さ" + stat(eff.richness) + " ・ 量" + stat(eff.volume) + " ・ 個性" + stat(eff.uniqueness) + " ・ 原価" + eff.cost + "円" }),
+          h("div", { className: "dim", text: sub.join(" ・ ") })
         ]));
       });
       sec.appendChild(grid);

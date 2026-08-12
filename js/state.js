@@ -36,7 +36,9 @@ window.GameState = (function () {
   // staffStateの初期値がjs/meta-state.jsを参照するようになった(形自体は変わっていない)ため
   // 15→16に上げた。なお引き継ぎデータ自体(ramen_metaキー)はSAVE_VERSIONとは別物で、この
   // バージョン変更・旧セーブの破棄では一切消えない(§4)。
-  var SAVE_VERSION = 16;
+  // STEP3(docs/新設計/03_STEP3_素材カード育成と分岐_修正版.md §9): state.materialCards
+  // (所持カードごとのLv・分岐の記録)が増えたため16→17に上げた。
+  var SAVE_VERSION = 17;
 
   // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §1): 既存の従業員5人ぶんの
   // staffStateを、js/event-engine.jsのensureStaffState()が作るのと同じ形であらかじめ
@@ -53,6 +55,17 @@ window.GameState = (function () {
         statBonus: { noodle: 0, prep: 0, service: 0, numbers: 0, teach: 0 },
         level: 1, newStatBonus: { cooking: 0, speed: 0, service: 0, development: 0 }
       };
+    });
+    return out;
+  }
+
+  // STEP3(docs/新設計/03_STEP3_素材カード育成と分岐_修正版.md §2): 初期所持8枚ぶんの
+  // materialCards記録を作る({dupes:0, branch:null}、まだ重複を引いていないのでLv1)。
+  function initialMaterialCards() {
+    var owned = { soup: ["chicken", "pork"], tare: ["shoyu", "shio"], noodle: ["thin", "thick"], topping: ["chashu_thin", "nori"] };
+    var out = { soup: {}, tare: {}, noodle: {}, topping: {} };
+    Object.keys(owned).forEach(function (cat) {
+      owned[cat].forEach(function (id) { out[cat][id] = { dupes: 0, branch: null }; });
     });
     return out;
   }
@@ -87,6 +100,13 @@ window.GameState = (function () {
         noodle: ["thin", "thick"],
         topping: ["chashu_thin", "nori"]
       },
+      // STEP3(docs/新設計/03_STEP3_素材カード育成と分岐_修正版.md §2): 所持カードごとのLv育成状況
+      // (カテゴリ→id→{dupes, branch})。初期所持8枚ぶんもここで最初から記録しておく(試作で
+      // 重複を引いたときに初めて記録を作るのではなく、「持っている全カード」が常にこの器に
+      // 対応する形にする)。dupes=重複を引いた回数の累計、branch=Lv2で選んだ方向("a"/"b"、
+      // 未選択はnull)。Lvそのものはここに保存せず、dupes・branchから毎回
+      // js/scoring.jsのmaterialCardState()で計算する(値の二重管理を避けるため)。
+      materialCards: initialMaterialCards(),
       // STEP1で新設した器(品質/濃さ/量/個性/原価/提供負荷)。STEP4(docs/新設計/
       // 04_STEP4_ラーメン新パラメータとレシピ計算_修正版.md)で計算式(js/scoring.jsの
       // recipeAggregate)側がこれと同じ基礎値(20/10/20/10/0/0)から実際に計算するようになった。

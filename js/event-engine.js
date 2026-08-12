@@ -235,8 +235,16 @@ window.EventEngine = (function () {
         noodle: (state.ownedMaterials.noodle || []).slice(),
         topping: (state.ownedMaterials.topping || []).slice()
       },
+      // STEP3(docs/新設計/03_STEP3_素材カード育成と分岐_修正版.md §5): 試作で重複を引いてLvが
+      // 上がったときの差分表示用。カテゴリ→id→Lv、を今持っているカード全てぶん記録する。
+      materialLevels: {},
       rel: {}, staff: {}, staffBonus: {}, boosts: {}, flags: {}
     };
+    ["soup", "tare", "noodle", "topping"].forEach(function (cat) {
+      (state.ownedMaterials[cat] || []).forEach(function (id) {
+        snap.materialLevels[cat + ":" + id] = window.Scoring.materialCardState(state, cat, id).level;
+      });
+    });
     CARDS.forEach(function (c) { snap.rel[c.id] = state.relationships[c.id] || 0; });
     Object.keys(state.staffState).forEach(function (id) {
       var s = state.staffState[id];
@@ -326,6 +334,15 @@ window.EventEngine = (function () {
         var item = U.findById(RECIPES[cat], id);
         out.push(diffEntry("新しい素材: " + (item ? item.emoji + item.name : id), 1));
       });
+    });
+
+    // STEP3(docs/新設計/03_STEP3_素材カード育成と分岐_修正版.md §5): 重複でLvが上がったカードを表示する。
+    Object.keys(after.materialLevels).forEach(function (key) {
+      var b = before.materialLevels[key], a = after.materialLevels[key];
+      if (b == null || a === b) return; // 新規入手した回はLv1→Lv1(変化なし)なので出さない
+      var parts = key.split(":");
+      var item = U.findById(RECIPES[parts[0]], parts[1]);
+      out.push(diffEntry((item ? item.emoji + item.name : key) + " Lv" + b + " → Lv" + a, 1));
     });
 
     var segIds = {};
@@ -538,19 +555,25 @@ window.EventEngine = (function () {
     return "miss";
   }
 
-  // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §1): 図鑑に載っている素材ほど
-  // 試作で出やすい({cat,item}の配列から重み付き抽選)。MetaStateが無い環境では均等抽選
-  // (=以前と同じ)にフォールバックする。
-  function weightedPickMaterial(unowned) {
-    if (!window.MetaState) return U.pick(unowned);
-    var weights = unowned.map(function (u) { return window.MetaState.weightFor(u.cat, u.item.id); });
+  // STEP3(docs/新設計/03_STEP3_素材カード育成と分岐_修正版.md §1): 未所持・所持済み(重複)
+  // どちらも試作の抽選対象になった。未所持のほうが出やすいが差は極端でない(重み3:2)。
+  // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §1)の図鑑補正(重み3倍)と併存させる
+  // (掛け合わせる)。MetaStateが無い環境では図鑑補正だけ1倍(=無し)にフォールバックする。
+  var MATERIAL_DRAW_WEIGHT_UNOWNED = 3;
+  var MATERIAL_DRAW_WEIGHT_OWNED = 2;
+  function weightedPickMaterial(pool) {
+    var weights = pool.map(function (p) {
+      var base = p.owned ? MATERIAL_DRAW_WEIGHT_OWNED : MATERIAL_DRAW_WEIGHT_UNOWNED;
+      var compendium = window.MetaState ? window.MetaState.weightFor(p.cat, p.item.id) : 1;
+      return base * compendium;
+    });
     var total = weights.reduce(function (a, b) { return a + b; }, 0);
     var r = Math.random() * total;
-    for (var i = 0; i < unowned.length; i++) {
+    for (var i = 0; i < pool.length; i++) {
       r -= weights[i];
-      if (r <= 0) return unowned[i];
+      if (r <= 0) return pool[i];
     }
-    return unowned[unowned.length - 1];
+    return pool[pool.length - 1];
   }
 
   function resolveFixedAction(state, def, ctx) {
@@ -660,19 +683,30 @@ window.EventEngine = (function () {
     switch (def.id) {
       case "soup_trial":
         // STEP2(docs/新設計/02_STEP2_素材カード基本システム_修正版.md §3): 新しいアクションは
-        // 増やさず、既存の試作アクションの結果としてカードを渡す。未所持の素材(unlock:"start"のみ)
-        // が残っている間はそちらを優先し、全て所持済みになったら今まで通りのtasteBonus加算に戻す。
-        // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §1): 図鑑(前の周回で一度でも
-        // 入手した素材)に載っている素材は、そうでない素材より重み3倍で出やすくする(完全なランダム
-        // ではなくなった)。最初から持っている状態にはしない(あくまで「出る順番」が早まるだけ)。
+        // 増やさず、既存の試作アクションの結果としてカードを渡す。
+        // STEP3(docs/新設計/03_STEP3_素材カード育成と分岐_修正版.md §1): 未所持・所持済み
+        // どちらも出るようになった。未所持なら新規入手、所持済みなら重複としてLvの育成材料になる
+        // (Lv3で頭打ちの素材が出た場合だけ「無駄」になる。指示書§2「無駄になる旨を表示すること」)。
         if (tier !== "miss") {
-          var unowned = window.Scoring.unownedStartMaterials(state);
-          if (unowned.length > 0) {
-            var picked = weightedPickMaterial(unowned);
+          var pool = window.Scoring.allStartMaterialsForDraw(state);
+          var picked = weightedPickMaterial(pool);
+          if (!picked.owned) {
             state.ownedMaterials[picked.cat].push(picked.item.id);
+            state.materialCards[picked.cat][picked.item.id] = { dupes: 0, branch: null };
             ctx.gainedCardName = picked.item.name;
           } else {
-            state.flags.tasteBonus = U.clamp((state.flags.tasteBonus || 0) + (tier === "great" ? 6 : 3), 0, 20);
+            var beforeState = window.Scoring.materialCardState(state, picked.cat, picked.item.id);
+            if (beforeState.maxed) {
+              ctx.dupeCardName = picked.item.name;
+              ctx.dupeWasted = true;
+            } else {
+              var rec = state.materialCards[picked.cat][picked.item.id];
+              if (!rec) rec = state.materialCards[picked.cat][picked.item.id] = { dupes: 0, branch: null };
+              rec.dupes = (rec.dupes || 0) + 1;
+              ctx.dupeCardName = picked.item.name;
+              ctx.dupeWasted = false;
+              ctx.dupePendingBranch = window.Scoring.materialCardState(state, picked.cat, picked.item.id).pendingBranch;
+            }
           }
         }
         break;

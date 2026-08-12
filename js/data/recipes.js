@@ -43,3 +43,15 @@ window.DATA.recipes = {
     { "id": "none",        "name": "なし",             "emoji": "➖", "quality": 0,  "richness": 0,  "volume": 0,  "uniqueness": 0, "workload": 0, "cost": 0,   "unlock": "start" }
   ]
 };
+
+// STEP3(docs/新設計/03_STEP3_素材カード育成と分岐_修正版.md §3): Lv2で選ぶ2方向。
+// 「カードごとに選べる方向は2つだけ」の指示により、4軸(品質/濃さ/量/個性)のうち
+// カテゴリごとに2つだけを割り当てた(個別カードごとではなくカテゴリ単位。理由は
+// docs/設計判断記録.md参照)。keyはjs/scoring.jsのeffectiveMaterialStats()が読む軸名、
+// labelは表示用の短い方向名(§4-2「説明文は数値の表だけ」を守り、味わい文は書かない)。
+window.DATA.materialBranches = {
+  soup:    { a: { key: "quality",    label: "磨く" },   b: { key: "richness",   label: "濃くする" } },
+  tare:    { a: { key: "quality",    label: "磨く" },   b: { key: "uniqueness", label: "尖らせる" } },
+  noodle:  { a: { key: "quality",    label: "磨く" },   b: { key: "volume",     label: "増やす" } },
+  topping: { a: { key: "volume",     label: "増やす" }, b: { key: "uniqueness", label: "尖らせる" } }
+};

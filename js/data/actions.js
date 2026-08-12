@@ -9,18 +9,27 @@ window.DATA.actions = {
       id: "soup_trial", emoji: "🍲", name: "スープの試作",
       blurb: "味を寸胴の前で詰める。手応えは翌週に出る",
       kind: "variable", headline: "スープを試作した",
-      // STEP2: 未所持の素材が残っている間は、そのカードが手に入った旨の文言に差し替える
-      // (event-engine.jsがctx.gainedCardNameを立てたときだけ)。全て所持済みなら今まで通りの文言。
+      // STEP2: 未所持の素材が出たときはctx.gainedCardNameが立つ。
+      // STEP3(docs/新設計/03_STEP3_素材カード育成と分岐_修正版.md §1): 所持済みの素材(重複)が
+      // 出たときはctx.dupeCardName・ctx.dupeWasted(Lv3で頭打ちのため無駄になったか)が立つ。
       text: {
         great: function (state, ctx) {
-          return ctx.gainedCardName
-            ? "思いがけず、新しい素材「" + ctx.gainedCardName + "」が手に入った。"
-            : "何度も味見して、狙った方向がはっきり見えた。手応えは十分。";
+          if (ctx.gainedCardName) return "思いがけず、新しい素材「" + ctx.gainedCardName + "」が手に入った。";
+          if (ctx.dupeCardName) {
+            return ctx.dupeWasted
+              ? "「" + ctx.dupeCardName + "」がまた出たが、もう十分に育て切っていた。今日は空振りに近い。"
+              : "「" + ctx.dupeCardName + "」がまた出た。育てる方向を選べそうだ。";
+          }
+          return "何度も味見して、狙った方向がはっきり見えた。手応えは十分。";
         },
         good: function (state, ctx) {
-          return ctx.gainedCardName
-            ? "仕入れ先で見かけて、新しい素材「" + ctx.gainedCardName + "」を持ち帰った。"
-            : "新しい塩梅を試した。悪くない感触。";
+          if (ctx.gainedCardName) return "仕入れ先で見かけて、新しい素材「" + ctx.gainedCardName + "」を持ち帰った。";
+          if (ctx.dupeCardName) {
+            return ctx.dupeWasted
+              ? "「" + ctx.dupeCardName + "」がまた出たが、もう十分に育て切っていた。"
+              : "「" + ctx.dupeCardName + "」を、もう1枚手に入れた。";
+          }
+          return "新しい塩梅を試した。悪くない感触。";
         },
         miss: "何度やっても同じところで止まった。今日は収穫なし。"
       }

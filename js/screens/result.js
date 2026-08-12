@@ -33,7 +33,9 @@ window.ScreenResult = (function () {
     return CATCHPHRASE[sorted[0].id] || "つかみどころのない店";
   }
 
-  function render(state) {
+  // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §9): newlyAddedはjs/main.jsが
+  // window.MetaState.recordRunEnd(state)から受け取ってそのまま渡してくる({cat,id}の配列)。
+  function render(state, newlyAdded) {
     var screen = document.getElementById("screen-result");
     window.UI.clear(screen);
     // 固定枠の中に収める。スクロールしてよいのはこの中だけ。
@@ -51,8 +53,13 @@ window.ScreenResult = (function () {
     var totals = totalsBySegment(state);
     var maxCount = Math.max.apply(null, SEGMENTS.map(function (s) { return totals[s.id] || 0; }).concat([1]));
 
+    // STEP12(§5): 周回数(何周目のプレイだったか)を既存のタイトル枠に添える。新しい画面は作らない。
+    // この画面に来る時点でMetaState.recordRunEnd()は呼ばれ済み(js/main.js)なので、
+    // currentRunNumber()(次に始まる周回の番号)ではなくlastRunNumber()(今終わった周回の番号)を使う。
+    var runNumber = window.MetaState ? window.MetaState.lastRunNumber() : 1;
     root.appendChild(h("div", { className: "pixel-panel result-title" }, [
       h("h1", { text: "1年が経った" }),
+      h("div", { className: "dim", text: runNumber + "周目のプレイ" }),
       h("div", { className: "catch", text: "「" + catchphrase(totals) + "」" })
     ]));
 
@@ -111,6 +118,32 @@ window.ScreenResult = (function () {
     });
     cardPanel.appendChild(cardBox);
     root.appendChild(cardPanel);
+
+    // STEP12(§3): 図鑑の収集状況(何種類中、何種類集めたか)と、今回新しく載ったカード。
+    // 引き継ぎ自体(js/meta-state.js)は既に main.js 側でこの画面に入る直前に済ませてある。
+    if (window.MetaState) {
+      var RECIPES = window.DATA.recipes;
+      var stats = window.MetaState.compendiumStats();
+      var compendiumPanel = h("div", { className: "pixel-panel" });
+      compendiumPanel.appendChild(h("h2", { text: "素材図鑑" }));
+      compendiumPanel.appendChild(h("p", {}, ["収集状況: ", h("span", { text: stats.collected + " / " + stats.total + " 種" })]));
+      if (newlyAdded && newlyAdded.length) {
+        var newBox = h("div", { className: "card-collection" });
+        newlyAdded.forEach(function (n) {
+          var item = U.findById(RECIPES[n.cat], n.id);
+          if (!item) return;
+          newBox.appendChild(h("div", { className: "card-item" }, [
+            h("div", { className: "emoji emoji-font", text: item.emoji }),
+            h("div", { text: item.name })
+          ]));
+        });
+        compendiumPanel.appendChild(h("p", { className: "dim", text: "今回新しく図鑑に載った素材:" }));
+        compendiumPanel.appendChild(newBox);
+      } else {
+        compendiumPanel.appendChild(h("p", { className: "dim", text: "今回新しく図鑑に載った素材はなかった。" }));
+      }
+      root.appendChild(compendiumPanel);
+    }
 
     var densityPanel = h("div", { className: "pixel-panel" });
     densityPanel.appendChild(h("h2", { text: "イベント密度ログ（開発確認用）" }));

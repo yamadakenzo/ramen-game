@@ -413,6 +413,11 @@ window.ScreenSetup = (function () {
     var last = state.setupStep === STEPS.length - 1;
 
     root.appendChild(G.bar(reactLine || G.ask(step.id), !!reactLine));
+    // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §5): 周回数を既存のパネルに追加する。
+    // 新しい画面は作らない(開業準備の間ずっと見えている、この帯に添えるだけ)。
+    if (window.MetaState) {
+      root.appendChild(h("div", { className: "dim", style: { textAlign: "center", fontSize: "12px" }, text: window.MetaState.currentRunNumber() + "周目" }));
+    }
     root.appendChild(stepDots());
 
     var scroll = h("div", { className: "scroll-area setup-body" }, [body()]);

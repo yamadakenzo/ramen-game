@@ -10,13 +10,13 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>ラーメン屋経営 プロトタイプ v07</title>
-<!-- ?v=20260811235434 はキャッシュ対策。tools/deploy-pages.sh が公開時に実際の日時へ自動置換する
-     (このファイル自体には常に 20260811235434 のプレースホルダのまま残る。ローカル確認では気にしなくてよい) -->
+<!-- ?v=20260812000729 はキャッシュ対策。tools/deploy-pages.sh が公開時に実際の日時へ自動置換する
+     (このファイル自体には常に 20260812000729 のプレースホルダのまま残る。ローカル確認では気にしなくてよい) -->
 <!-- v14-1: 本文フォント(M PLUS Rounded 1c、同梱)。style.cssより先に読み込む -->
-<link rel="stylesheet" href="css/fonts.css?v=20260811235434">
+<link rel="stylesheet" href="css/fonts.css?v=20260812000729">
 <!-- v14-0: 絵文字フォント(NotoEmojiGame、実体はNoto Emoji、同梱)。同じくstyle.cssより先に読み込む -->
-<link rel="stylesheet" href="css/emoji-fonts.css?v=20260811235434">
-<link rel="stylesheet" href="css/style.css?v=20260811235434">
+<link rel="stylesheet" href="css/emoji-fonts.css?v=20260812000729">
+<link rel="stylesheet" href="css/style.css?v=20260812000729">
 </head>
 <body>
 <div id="app">
@@ -37,34 +37,37 @@
 </div>
 
 <!-- データ(埋め込みJSON、file://でもfetch不要で動くようスクリプトとして読み込む) -->
-<script src="js/data/segments.js?v=20260811235434"></script>
-<script src="js/data/recipes.js?v=20260811235434"></script>
-<script src="js/data/characters.js?v=20260811235434"></script>
-<script src="js/data/property.js?v=20260811235434"></script>
-<script src="js/data/events.js?v=20260811235434"></script>
-<script src="js/data/guide.js?v=20260811235434"></script>
-<script src="js/data/actions.js?v=20260811235434"></script>
-<script src="js/data/cards.js?v=20260811235434"></script>
-<script src="js/data/sides.js?v=20260811235434"></script>
+<script src="js/data/segments.js?v=20260812000729"></script>
+<script src="js/data/recipes.js?v=20260812000729"></script>
+<script src="js/data/characters.js?v=20260812000729"></script>
+<script src="js/data/property.js?v=20260812000729"></script>
+<script src="js/data/events.js?v=20260812000729"></script>
+<script src="js/data/guide.js?v=20260812000729"></script>
+<script src="js/data/actions.js?v=20260812000729"></script>
+<script src="js/data/cards.js?v=20260812000729"></script>
+<script src="js/data/sides.js?v=20260812000729"></script>
 
 <!-- ロジック -->
-<script src="js/utils.js?v=20260811235434"></script>
-<script src="js/ui.js?v=20260811235434"></script>
-<script src="js/state.js?v=20260811235434"></script>
-<script src="js/scoring.js?v=20260811235434"></script>
-<script src="js/event-engine.js?v=20260811235434"></script>
+<script src="js/utils.js?v=20260812000729"></script>
+<script src="js/ui.js?v=20260812000729"></script>
+<!-- STEP12: 周回引き継ぎ(図鑑・記録・関係)。通常セーブ(state.js)より先に読み込む。
+     freshState()が起動時に一度だけ呼ばれ、その中で参照するため。 -->
+<script src="js/meta-state.js?v=20260812000729"></script>
+<script src="js/state.js?v=20260812000729"></script>
+<script src="js/scoring.js?v=20260812000729"></script>
+<script src="js/event-engine.js?v=20260812000729"></script>
 
 <!-- 画面 -->
-<script src="js/screens/opening.js?v=20260811235434"></script>
-<script src="js/screens/guide.js?v=20260811235434"></script>
-<script src="js/screens/shop-view.js?v=20260811235434"></script>
-<script src="js/screens/status-panel.js?v=20260811235434"></script>
-<script src="js/screens/setup.js?v=20260811235434"></script>
-<script src="js/screens/dayoff.js?v=20260811235434"></script>
-<script src="js/screens/loop.js?v=20260811235434"></script>
-<script src="js/screens/event-modal.js?v=20260811235434"></script>
-<script src="js/screens/result.js?v=20260811235434"></script>
+<script src="js/screens/opening.js?v=20260812000729"></script>
+<script src="js/screens/guide.js?v=20260812000729"></script>
+<script src="js/screens/shop-view.js?v=20260812000729"></script>
+<script src="js/screens/status-panel.js?v=20260812000729"></script>
+<script src="js/screens/setup.js?v=20260812000729"></script>
+<script src="js/screens/dayoff.js?v=20260812000729"></script>
+<script src="js/screens/loop.js?v=20260812000729"></script>
+<script src="js/screens/event-modal.js?v=20260812000729"></script>
+<script src="js/screens/result.js?v=20260812000729"></script>
 
-<script src="js/main.js?v=20260811235434"></script>
+<script src="js/main.js?v=20260812000729"></script>
 </body>
 </html>

@@ -538,6 +538,21 @@ window.EventEngine = (function () {
     return "miss";
   }
 
+  // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §1): 図鑑に載っている素材ほど
+  // 試作で出やすい({cat,item}の配列から重み付き抽選)。MetaStateが無い環境では均等抽選
+  // (=以前と同じ)にフォールバックする。
+  function weightedPickMaterial(unowned) {
+    if (!window.MetaState) return U.pick(unowned);
+    var weights = unowned.map(function (u) { return window.MetaState.weightFor(u.cat, u.item.id); });
+    var total = weights.reduce(function (a, b) { return a + b; }, 0);
+    var r = Math.random() * total;
+    for (var i = 0; i < unowned.length; i++) {
+      r -= weights[i];
+      if (r <= 0) return unowned[i];
+    }
+    return unowned[unowned.length - 1];
+  }
+
   function resolveFixedAction(state, def, ctx) {
     var text;
     if (def.id === "teach_staff") {
@@ -647,11 +662,13 @@ window.EventEngine = (function () {
         // STEP2(docs/新設計/02_STEP2_素材カード基本システム_修正版.md §3): 新しいアクションは
         // 増やさず、既存の試作アクションの結果としてカードを渡す。未所持の素材(unlock:"start"のみ)
         // が残っている間はそちらを優先し、全て所持済みになったら今まで通りのtasteBonus加算に戻す。
-        // どのカードが出るかはランダム(この段階では偏りを作らない)。重複の扱いはSTEP3で決める。
+        // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §1): 図鑑(前の周回で一度でも
+        // 入手した素材)に載っている素材は、そうでない素材より重み3倍で出やすくする(完全なランダム
+        // ではなくなった)。最初から持っている状態にはしない(あくまで「出る順番」が早まるだけ)。
         if (tier !== "miss") {
           var unowned = window.Scoring.unownedStartMaterials(state);
           if (unowned.length > 0) {
-            var picked = U.pick(unowned);
+            var picked = weightedPickMaterial(unowned);
             state.ownedMaterials[picked.cat].push(picked.item.id);
             ctx.gainedCardName = picked.item.name;
           } else {

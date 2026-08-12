@@ -32,7 +32,30 @@ window.GameState = (function () {
   // STEP11(docs/新設計/11_STEP11_経済バランス統合_修正版.md §9): stateの形は変えていないが、
   // 経済バランス(BASE_CUSTOMERS・認知度の係数・家賃・返済額・設備維持費)を大きく調整したため、
   // 旧セーブのまま続けると収支の前提が変わってしまう。14→15に上げた。
-  var SAVE_VERSION = 15;
+  // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §9): freshState()のrelationships・
+  // staffStateの初期値がjs/meta-state.jsを参照するようになった(形自体は変わっていない)ため
+  // 15→16に上げた。なお引き継ぎデータ自体(ramen_metaキー)はSAVE_VERSIONとは別物で、この
+  // バージョン変更・旧セーブの破棄では一切消えない(§4)。
+  var SAVE_VERSION = 16;
+
+  // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §1): 既存の従業員5人ぶんの
+  // staffStateを、js/event-engine.jsのensureStaffState()が作るのと同じ形であらかじめ
+  // 作っておく(relだけ前回終了時点の値で上書きする。他の欄を欠けさせるとensureStaffState()側の
+  // 「無ければ作る」判定(state.staffState[id]が既にあると素通りする)を通ってしまい、
+  // morale等が未定義のまま残ってしまうため)。
+  function initialStaffState() {
+    var ids = ["yuta", "misaki", "gonzo", "rin", "tetsu"];
+    var out = {};
+    ids.forEach(function (id) {
+      var rel = window.MetaState ? window.MetaState.startingStaffRel(id) : 0;
+      out[id] = {
+        morale: 70, rel: rel, lowMoraleWeeks: 0,
+        statBonus: { noodle: 0, prep: 0, service: 0, numbers: 0, teach: 0 },
+        level: 1, newStatBonus: { cooking: 0, speed: 0, service: 0, development: 0 }
+      };
+    });
+    return out;
+  }
 
   function freshState() {
     return {
@@ -92,8 +115,15 @@ window.GameState = (function () {
       // 10_STEP10_広告_認知度_評判_修正版.md)からjs/scoring.jsの週の客数計算に実際に効くように
       // なり、js/screens/loop.jsのrunWeeklyCalcで毎週1.5%ずつ下がる(下限10)。
       awareness: 30,
-      relationships: { menya: 0, reporter: 0, landlord: 0, oldman: 0, lender: 0 },
-      staffState: {}, // id -> {morale, rel, lowMoraleWeeks, statBonus}
+      // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §1): 「既存キャラ5人との関係値は、
+      // 前回仲良くなった人は次も好意的に始まる」。js/meta-state.js(通常のセーブとは別キーで
+      // 持つ、周回をまたいで残るデータ)から前回終了時点の値を引き継ぐ。MetaStateが無い環境
+      // (このファイル単体を古い順で読み込んだ場合の保険)では従来どおり0からになる。
+      relationships: window.MetaState ? window.MetaState.startingRelationships() : { menya: 0, reporter: 0, landlord: 0, oldman: 0, lender: 0 },
+      // STEP12(§1): 従業員は「雇った人はリセット。既存5人は関係値だけ引き継ぐ」。育成状態
+      // (士気・statBonus・Lv・newStatBonus)は毎回まっさらにし、rel(関係値)だけ前回終了時点の
+      // 値を引き継ぐ(ensureStaffState()が後から埋める形と同じ完成形をここで先に作っておく)。
+      staffState: initialStaffState(), // id -> {morale, rel, lowMoraleWeeks, statBonus, level, newStatBonus}
       cardsUnlocked: {}, // card id -> true (関係値要求を満たしイベント発生済み)
       cardsMet: {}, // card id -> true (関係値要求を満たした瞬間、イベント待ち)
       comboFired: {},

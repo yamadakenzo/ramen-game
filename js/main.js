@@ -19,13 +19,17 @@
     } else if (phase === "loop") {
       window.UI.showScreen("loop");
       window.ScreenLoop.render(state, function () {
+        // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §9): 52週が終わってresult画面に
+        // 入る直前の、この1回だけで呼ぶ(ここを逃すとcompendium・関係値・記録が更新されない)。
+        // 通常セーブ(state.phase="result")とは別に、js/meta-state.js側(ramen_meta)へも保存する。
+        state.__newlyAddedCards = window.MetaState.recordRunEnd(state);
         state.phase = "result";
         window.GameState.save();
         goToPhase("result");
       });
     } else if (phase === "result") {
       window.UI.showScreen("result");
-      window.ScreenResult.render(state);
+      window.ScreenResult.render(state, state.__newlyAddedCards || []);
     }
   }
 

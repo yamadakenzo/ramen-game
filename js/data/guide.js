@@ -8,6 +8,28 @@
 // 語尾の口癖は付けない（「〜だよ！」等の癖は翻訳で必ず失われる）。素性の説明もしない。
 window.DATA = window.DATA || {};
 window.DATA.guide = {
+  // v19(docs/完了/旧文書/v19_ラーメン屋_修正指示書.md §3-3): 開業フェーズの選択7ステップを
+  // なくし、どんぶりちゃんが話すだけのチュートリアルに置き換えた。ask/react/blurb/unpickは
+  // 選択式だった頃の名残で、blurbは今も営業ループ側(js/screens/loop.js)のカード一言表示に
+  // 使われているため残す。ask/react/unpickは新しいjs/screens/setup.jsからは呼ばれなくなった
+  // (旧開業フェーズ専用だったため)。
+  //
+  // repeatOk: true の行だけが2周目以降の短縮版に残る(§3-4「1・4・6・7を飛ばす」に対応。
+  // ここでは行を削除するのではなくrepeatOk:falseで飛ばす対象を示す形にした)。
+  // {cost}/{rent}はjs/screens/setup.jsがjs/data/property.jsの実際の値に置き換える
+  // (§3-3「金額を文字列に直接書かない」)。
+  tutorial: [
+    { id: "intro",    repeatOk: false, text: "僕はどんぶりちゃん。一緒に日本一のラーメン屋を作ろう。" },
+    { id: "property", repeatOk: true,  text: "商店街に、ちょうどいい空き店舗を見つけたよ。" },
+    { id: "money",    repeatOk: true,  text: "初期費用は{cost}、家賃は月{rent}。ここからのスタートだ。" },
+    { id: "future",   repeatOk: false, text: "お店が育てば、他の場所も選べるようになる。楽しみにしてて。" },
+    { id: "material", repeatOk: true,  text: "素材をプレゼントするよ。鶏ガラ・醤油・細麺の3つ。" },
+    { id: "topping",  repeatOk: false, text: "具は今はなし。作れる素材は、これから増えていく。" },
+    { id: "equip",    repeatOk: false, text: "設備もまだ何もない。お金が貯まったら、少しずつ揃えよう。" },
+    { id: "staff",    repeatOk: true,  text: "リンさんを紹介するね。一緒に働いてもらおう。" },
+    { id: "start",    repeatOk: true,  text: "じゃあ、開店しよう！" }
+  ],
+
   ask: {
     // v17(docs/新設計/v17_ラーメン屋_修正指示書.md §2-4): 資金調達ステップが無くなったので、
     // 物件ステップのセリフに「手持ちはこれだけ」の趣旨を一言足した。

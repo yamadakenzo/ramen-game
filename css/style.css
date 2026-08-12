@@ -245,8 +245,12 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .guide-bubble .guide-face { font-size: calc(var(--frame-w) * 0.07); padding: 2px; }
 .guide-bubble .guide-line { font-size: var(--fs-note); min-height: 0; }
 
-/* ================= 開業フェーズ(1画面1問) ================= */
+/* ================= 開業フェーズ(チュートリアル、選択なし) ================= */
 #screen-setup { padding: 0; }
+
+/* v19: 常設のスキップボタン。#screen-setup自体が.screenでposition:absoluteなので、
+   これを基準に右上へ重ねる(新しい色・新しい飾りは足さず、既存の.btn.smallをそのまま使う)。 */
+.setup-skip { position: absolute; top: 8px; right: 8px; z-index: 5; }
 
 .step-dots { display: flex; gap: 3px; padding: 6px 10px 0; flex: 0 0 auto; }
 .step-dots .dot { flex: 1; height: 4px; background: var(--c-ink-16); border: 1px solid var(--c-ink); }

@@ -45,7 +45,11 @@ window.GameState = (function () {
   // v17(docs/新設計/v17_ラーメン屋_修正指示書.md §3): state.funding/loan/businessHours/
   // businessHoursActiveを削除したためstateの形が変わり、18→19に上げた。ramen_metaは
   // 上記のとおりSAVE_VERSIONと無関係のため今回も消えない。
-  var SAVE_VERSION = 19;
+  // v19(docs/完了/旧文書/v19_ラーメン屋_修正指示書.md §1・§4): 開業フェーズの7ステップ選択を
+  // なくし、チュートリアル(選択なし)に置き換えた。それに伴い開業時点の初期状態が変わった
+  // (物件・レシピ・従業員が固定、初期所持カードが8枚→3枚)ため19→20に上げた。ramen_metaは
+  // 上記のとおりSAVE_VERSIONと無関係のため今回も消えない。
+  var SAVE_VERSION = 20;
 
   // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §1): 既存の従業員5人ぶんの
   // staffStateを、js/event-engine.jsのensureStaffState()が作るのと同じ形であらかじめ
@@ -66,10 +70,13 @@ window.GameState = (function () {
     return out;
   }
 
-  // STEP3(docs/新設計/03_STEP3_素材カード育成と分岐_修正版.md §2): 初期所持8枚ぶんの
+  // STEP3(docs/新設計/03_STEP3_素材カード育成と分岐_修正版.md §2): 初期所持ぶんの
   // materialCards記録を作る({dupes:0, branch:null}、まだ重複を引いていないのでLv1)。
+  // v19(docs/完了/旧文書/v19_ラーメン屋_修正指示書.md §4-2): 8枚→3枚(鶏ガラ・醤油・細麺)に
+  // 減らした。トッピングは0枚(「なし」は元々カード扱いしていない、上のコメントの通り)。
+  // 下のfreshState().ownedMaterialsと必ず同じ内容にすること(片方だけ変えると食い違う)。
   function initialMaterialCards() {
-    var owned = { soup: ["chicken", "pork"], tare: ["shoyu", "shio"], noodle: ["thin", "thick"], topping: ["chashu_thin", "nori"] };
+    var owned = { soup: ["chicken"], tare: ["shoyu"], noodle: ["thin"], topping: [] };
     var out = { soup: {}, tare: {}, noodle: {}, topping: {} };
     Object.keys(owned).forEach(function (cat) {
       owned[cat].forEach(function (id) { out[cat][id] = { dupes: 0, branch: null }; });
@@ -82,9 +89,19 @@ window.GameState = (function () {
       version: SAVE_VERSION,
       phase: "opening", // opening -> setup -> loop -> result
       openingStep: 0,
-      setupStep: 0, // v17: 0 物件,1 スープ,2 タレ,3 麺,4 具,5 設備,6 従業員(資金調達・営業時間ステップは廃止)
+      // v19(docs/完了/旧文書/v19_ラーメン屋_修正指示書.md §1・§3): 開業フェーズは選択式の
+      // 7ステップから、どんぶりちゃんが話すだけのチュートリアル(セリフの通し番号)に変わった。
+      // setupStepの意味も「選んだステップ数」から「読んだセリフの番号」に変わっている
+      // (js/screens/setup.jsのtutorialLines()が返す配列への添字)。
+      setupStep: 0,
       property: null,
-      recipe: { soup: null, tare: null, noodle: null, topping: null }, // ラーメン1品目(既存のまま)
+      recipe: { soup: null, tare: null, noodle: null, topping: null }, // ラーメン1品目(既存のまま)。
+      // v19 §4-2: 開業チュートリアル完了時にjs/screens/setup.jsが固定値
+      // (soup:"chicken", tare:"shoyu", noodle:"thin", topping:"none")で埋める。
+      // topping は null/undefined ではなく必ず文字列 "none" にすること(空にしても
+      // js/data/recipes.js側に id:"none" の実体があるので、recipeAggregate()等の既存コードは
+      // 無改修のまま正しく計算できる。null/undefinedのままだとtoppingDefが見つからず、
+      // soup/tare/noodleの値まで巻き添えで消えるフォールバックに落ちる)。
       // STEP8(docs/新設計/08_STEP8_複数ラーメンとサイドメニュー_修正版.md §1): ラーメン2・3品目。
       // 開発の合計が閾値を超えると解放され(枠自体は常に見える)、解放後にプレイヤーが
       // soup/tare/noodle/toppingを全部選ぶと「品」として数えられる(未設定の間はnull)。
@@ -92,19 +109,20 @@ window.GameState = (function () {
       // STEP8(§1): サイドメニューの選択中id配列(最大2)。開発の合計が閾値を超えると枠が解放される。
       sideMenu: [],
       // STEP2(docs/新設計/02_STEP2_素材カード基本システム_修正版.md §1): 開業時点で持っている
-      // 素材カード(カテゴリごとの id 配列)。各カテゴリ性格が反対のもの2枚ずつ、計8枚が初期所持。
+      // 素材カード(カテゴリごとの id 配列)。
       // トッピングの「なし」(none)はカードとして扱わない(常に選択可能。ここには含めない)。
       // 「CARDS」という名前は既に window.DATA.characters.cards(麺屋の親父・記者など関係値カード)
       // で使われているため、別物と分かるよう ownedMaterials という名前にした。
-      // 2026-08-11差し替え: トッピングを「チャーシュー・野菜マシ」から「チャーシュー・海苔」に
-      // 変更した。野菜マシ(量+40)が初期にあると大盛り(量+60)を手に入れても量の上限がほとんど
-      // 変わらず、大盛りが目標にならなかったため。野菜マシは未所持スタート(試作で入手する側)に
-      // 回した。理由・数値の詳細はdocs/設計判断記録.md参照。
+      // v19(docs/完了/旧文書/v19_ラーメン屋_修正指示書.md §4-2): 8枚(各カテゴリ2枚)→3枚
+      // (鶏ガラ・醤油・細麺のみ、トッピングは0枚)に減らした。開業フェーズの選択7ステップを
+      // なくしたのに8枚持ったまま始まると、営業ループのレシピパネルから最初から全部選べて
+      // しまい「選択肢はなく、進めると増える」という案内と中身が食い違うため。理由の詳細は
+      // docs/設計判断記録.md参照。上のinitialMaterialCards()と必ず同じ内容にすること。
       ownedMaterials: {
-        soup: ["chicken", "pork"],
-        tare: ["shoyu", "shio"],
-        noodle: ["thin", "thick"],
-        topping: ["chashu_thin", "nori"]
+        soup: ["chicken"],
+        tare: ["shoyu"],
+        noodle: ["thin"],
+        topping: []
       },
       // STEP3(docs/新設計/03_STEP3_素材カード育成と分岐_修正版.md §2): 所持カードごとのLv育成状況
       // (カテゴリ→id→{dupes, branch})。初期所持8枚ぶんもここで最初から記録しておく(試作で

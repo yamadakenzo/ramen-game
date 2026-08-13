@@ -127,7 +127,8 @@ body { display: flex; justify-content: center; align-items: center; }
 /* タップ判定を安定させるための土台。
    touch-action: manipulation でダブルタップズーム等のジェスチャー判定待ちを無くし、
    タップした瞬間にそのままクリックとして処理させる(スマホでタップが反応しない/遅れる対策)。 */
-.btn, .choice-card, .fab, .detail-btn, .sheet-backdrop, .guide-bubble, .step-dots .dot {
+.btn, .choice-card, .fab, .detail-btn, .sheet-backdrop, .guide-bubble,
+.setup-window, .card-reveal-overlay {
   touch-action: manipulation;
 }
 
@@ -245,19 +246,64 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .guide-bubble .guide-face { font-size: calc(var(--frame-w) * 0.07); padding: 2px; }
 .guide-bubble .guide-line { font-size: var(--fs-note); min-height: 0; }
 
-/* ================= 開業フェーズ(チュートリアル、選択なし) ================= */
+/* ================= 開業フェーズ(v20: 会話イベント) =================
+   v19までの「セリフ+次へ」の素っ気ない画面を、どんぶりちゃんが喋っている会話イベントに
+   見せ替える(docs/指示書/v20_ラーメン屋_修正指示書.md §3・§4)。数値・state の形・
+   commitTutorialAndStart()の副作用5点は一切変えていない(演出のみ)。
+   v14で固定した4色パレットの外に出ない。グラデーション・ぼかしshadowは使わない。 */
 #screen-setup { padding: 0; }
 
-/* v19: 常設のスキップボタン。#screen-setup自体が.screenでposition:absoluteなので、
-   これを基準に右上へ重ねる(新しい色・新しい飾りは足さず、既存の.btn.smallをそのまま使う)。 */
-.setup-skip { position: absolute; top: 8px; right: 8px; z-index: 5; }
+/* v19→v20でも位置は変えない(既存のスキップボタンの置き場所を維持)。z-indexだけ、後から
+   足したカード演出オーバーレイ(.card-reveal-overlay)の上に来るよう引き上げた。 */
+.setup-skip { position: absolute; top: 8px; right: 8px; z-index: 30; }
 
-.step-dots { display: flex; gap: 3px; padding: 6px 10px 0; flex: 0 0 auto; }
-.step-dots .dot { flex: 1; height: 4px; background: var(--c-ink-16); border: 1px solid var(--c-ink); }
-.step-dots .dot.done { background: var(--c-up); }
-.step-dots .dot.active { background: var(--c-accent); }
+/* v20 §2-1: 背景は店の断面図(ShopView)を静止画として置く。ShopView.mount()自体は
+   タイマー・湧きループを一切起動しないため(調査済み)、ここではただの絶対配置の入れ物でよい。
+   念のためjs側でsetPaused(true)も掛けている(js/screens/setup.js)。 */
+.setup-bg { position: absolute; inset: 0; z-index: 1; overflow: hidden; }
 
-.setup-body { padding: 8px 10px 12px; }
+/* §3-1: 上半分にどんぶりちゃんを、今までの案内バーより明確に大きく置く */
+.setup-char-wrap {
+  position: absolute; left: 0; right: 0; top: 4%; height: 46%;
+  z-index: 2; pointer-events: none;
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.setup-char { font-size: calc(var(--frame-w) * 0.34); line-height: 1; display: block; }
+/* §3-4: 文字を送っている間だけ上下に小さく揺れる(周期0.4秒)。svEat(css内の既存アニメ)と
+   同じ ease-in-out 系に速さを揃える(指示: 新しい動きは既存の速さの感じに揃えること)。 */
+@keyframes setupCharBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+.setup-char.talking { animation: setupCharBob 0.4s ease-in-out infinite; }
+
+/* §3-1: 下半分の会話ウインドウ。枠線・角丸・背景・影はすべて指示どおりの指定値そのまま。 */
+.setup-window {
+  position: absolute; left: 8px; right: 8px; bottom: 8px; height: 46%;
+  z-index: 10;
+  display: flex; flex-direction: column;
+  padding: 10px 12px;
+  background: var(--c-panel);
+  border: 2px solid var(--c-ink);
+  border-radius: var(--r);
+  box-shadow: 0 2px 0 var(--c-ink-16);
+  cursor: pointer;
+}
+.setup-window-name {
+  flex: 0 0 auto;
+  font-size: var(--fs-note); font-weight: 700; color: var(--c-accent);
+  margin-bottom: 4px;
+}
+.setup-window-body {
+  flex: 1 1 auto; min-height: 0;
+  font-size: var(--fs-body); line-height: 1.6;
+  overflow: hidden;
+}
+/* §3-1: 右下の「次へ」の三角。文字送りが終わったら点滅する。
+   即時反応(0.2〜0.25s/ease)ではなく余韻側(0.6〜1.7s/ease-out系)の速さに寄せる。
+   svEatと同じ無限ループ系なので、既存の使い分けどおりease-in-outを使う(ease-inは使わない)。 */
+.setup-window-next { flex: 0 0 auto; align-self: flex-end; font-size: var(--fs-label); opacity: 0; }
+@keyframes setupNextBlink { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+.setup-window-next.show { animation: setupNextBlink 1.2s ease-in-out infinite; }
+
+/* setup-hintはloop.js側の設備/従業員パネルでも使う共通クラス(削除しない) */
 .setup-hint { font-size: var(--fs-note); color: var(--c-ink-64); margin-bottom: 6px; }
 
 .choice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
@@ -304,42 +350,68 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 }
 .choice-card.show-detail .card-detail { display: block; }
 
-/* 4-5: 客層プレビュー(固定枠に収まる横スクロールの帯) */
-.setup-preview {
-  flex: 0 0 auto;
-  padding: 6px 10px;
-  background: var(--c-ink-08);
-  border-top: 2px solid var(--c-ink);
+/* ================= カード出現演出(js/screens/card-reveal.js、共通部品) =================
+   v20 §4: チュートリアルの「素材をプレゼント」「リンさんを紹介」の直後にだけ今回は使う
+   (docs/指示書/v20_ラーメン屋_修正指示書.md §4-1)。跳ねる速さ・光り方はv14の4色パレット・
+   グラデーション/ぼかしshadow禁止の決定の中に収めてある。 */
+.card-reveal-overlay {
+  position: absolute; inset: 0; z-index: 15;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--c-ink-64); /* 既存のmodal-overlayと同じ暗幕(新しい色は作らない) */
+  cursor: pointer;
 }
-.preview-head { display: flex; align-items: baseline; gap: 6px; font-size: var(--fs-note); margin-bottom: 5px; }
-.segment-preview { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 3px; }
-.segment-chip {
-  flex: 0 0 auto;
-  display: flex; align-items: center; gap: 5px;
+.card-reveal-row { display: flex; gap: 10px; }
+.card-reveal-card {
+  position: relative;
+  background: var(--c-panel);
   border: 2px solid var(--c-ink);
-  border-radius: var(--r-s);
-  padding: 4px 7px;
-  background: var(--c-panel);
-  opacity: 0.35;
-  transition: opacity 0.2s, border-color 0.2s;
-  font-size: var(--fs-note);
-  white-space: nowrap;
+  border-radius: var(--r);
+  box-shadow: 0 2px 0 var(--c-ink-16);
+  padding: 12px 14px;
+  min-width: 74px;
+  text-align: center;
+  opacity: 0;
 }
-/* v14-2で気づいた既存不具合: position:relativeが無く、子の.bar-fill(position:absolute)が
-   最寄りの配置済み祖先(#app等)まで飛んで画面全体に色面を描いていた。旧配色(暗色地に
-   琥珀のbar-fill)では紛れて気づきにくかったが、新配色で朱の巨大な矩形として表面化した。
-   数値・ロジックには触れていない、位置指定の土台を足すだけの修正。 */
-.segment-chip .bar { position: relative; width: 34px; height: 5px; background: var(--c-ink-16); border: 1px solid var(--c-ink); }
-.segment-chip .bar-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--c-accent); }
-.segment-chip.lit { opacity: 1; border-color: var(--c-accent); }
-.segment-chip.blocked { opacity: 0.3; }
+.card-reveal-emoji { display: block; font-size: 1.8rem; line-height: 1.1; }
+.card-reveal-name { margin-top: 4px; font-size: var(--fs-label); font-weight: 700; }
+.card-reveal-sub { margin-top: 2px; font-size: var(--fs-note); color: var(--c-ink-64); }
+/* §4-3: 下から跳ねて出る(0.5秒以内)。既存のsvRepPop/floatUpと同じease-out系に速さを揃える
+   (ease-inは使わない指示)。光り方はグラデーション・放射光を使わず、枠色を一瞬太くして戻すだけ。 */
+@keyframes cardRevealPop {
+  0%   { opacity: 0; transform: translateY(26px) scale(0.92); }
+  60%  { opacity: 1; transform: translateY(-4px) scale(1.03); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes cardRevealFlash {
+  0%   { border-color: var(--c-ink); }
+  35%  { border-color: var(--c-accent); }
+  100% { border-color: var(--c-ink); }
+}
+.card-reveal-card.in {
+  animation: cardRevealPop 0.45s ease-out forwards, cardRevealFlash 0.45s ease-out forwards;
+}
+/* §2-2/§4-3: ✨は使えると確認済み(emoji-fonts.cssのサブセットに含まれる)。1枚につき1個だけ、
+   角に小さく出して消す。 */
+.card-reveal-sparkle {
+  position: absolute; top: -0.3em; right: -0.3em;
+  font-size: 0.9em; pointer-events: none;
+  animation: cardRevealSparkle 0.5s ease-out forwards;
+}
+@keyframes cardRevealSparkle {
+  0%   { opacity: 0; transform: scale(0.4) rotate(-8deg); }
+  40%  { opacity: 1; transform: scale(1.15) rotate(6deg); }
+  100% { opacity: 0; transform: scale(0.9) rotate(0deg); }
+}
 
-.setup-footer {
-  flex: 0 0 auto;
-  display: flex; justify-content: space-between; align-items: center; gap: 8px;
-  padding: 8px 10px;
-  background: var(--c-panel);
-  border-top: 2px solid var(--c-ink);
+/* v20 §3-3/§3-4/§4: prefers-reduced-motionでは文字送り・揺れ・カード演出を止める。
+   文字送り自体(1文字ずつのsetInterval)とどんぶりちゃんの揺れ開始はjs/screens/setup.js側で
+   window.matchMedia("(prefers-reduced-motion: reduce)")を見て分岐しているが、CSS側でも
+   念のため同じ内容を保険として止めておく。 */
+@media (prefers-reduced-motion: reduce) {
+  .setup-char.talking { animation: none; }
+  .setup-window-next.show { animation: none; opacity: 1; }
+  .card-reveal-card.in { animation: none; opacity: 1; transform: none; }
+  .card-reveal-sparkle { animation: none; opacity: 0; }
 }
 
 /* ================= 営業ループ(店の絵を枠いっぱいに) ================= */

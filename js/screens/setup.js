@@ -1,19 +1,31 @@
-// 開業フェーズ(v19): 選択を1つも挟まない案内画面。
-// docs/完了/旧文書/v19_ラーメン屋_修正指示書.md §1・§3: 「物件→スープ→タレ→麺→トッピング→
-// 設備→従業員」の7ステップ選択式を廃止し、どんぶりちゃんが話すだけの画面に置き換えた。
-// プレイヤーは「次へ」を押すだけで、選ぶものは1つもない。スキップボタンで最後まで飛ばせる。
+// 開業フェーズ(v20): v19の「セリフ+次へ」の素っ気ない画面を、どんぶりちゃんが喋っている
+// 会話イベントに見せ替える(docs/指示書/v20_ラーメン屋_修正指示書.md)。
+// 数値・計算式・state の形・commitTutorialAndStart()の副作用5点は一切変えていない。
+// 変えたのは見せ方だけ(文字送り・どんぶりちゃんの大写し・素材/リンのカード演出・静止した店の断面図)。
 window.ScreenSetup = (function () {
   var h = window.UI.h;
   var U = window.Utils;
   var PROPERTY_DATA = window.DATA.property;
-  var G = window.Guide;
+  var RECIPE_DATA = window.DATA.recipes;
+  var CHAR_DATA = window.DATA.characters;
+  var DONBURI = CHAR_DATA.guide;
 
   // v19 §4: 開業直後の状態は固定。物件はこの1つだけ、レシピもこの3+1つだけ、従業員はリン1人。
   var FIXED_PROPERTY_ID = "shotengai";
   var FIXED_RECIPE = { soup: "chicken", tare: "shoyu", noodle: "thin", topping: "none" }; // toppingは必ず文字列"none"。null/undefinedにしない(§2-1: recipeAggregate()がsoup/tare/noodleごと壊れるフォールバックに落ちるため)。
   var FIXED_STAFF_ID = "rin";
 
+  var TYPE_MS = 30; // §3-3: 1文字ずつ、30ms/文字
+
   var state, onDone;
+
+  // 画面のDOM要素。build()で1回だけ作り、以後はセリフが変わるたびに中身だけ書き換える
+  // (§2-1調査どおりShopViewは動かないので、毎回作り直す必要がない)。
+  var els = null;
+  var typeTimer = null;
+  var typedText = "";
+  var typedLen = 0;
+  var lineReady = false; // 全文表示済みか(true でタップすると次のセリフへ進む)
 
   // ---------- セリフ ----------
   // §3-4: 2周目以降はrepeatOk:falseの行を飛ばした短縮版にする(自己紹介・説明は初回だけ)。
@@ -36,11 +48,19 @@ window.ScreenSetup = (function () {
     return all.filter(function (line) { return repeatIds[line.id]; });
   }
 
+  function reducedMotion() {
+    return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
+
   // ---------- 開業直後の状態を確定させる ----------
   // §2-2: 旧commitAndStart()が担っていた副作用5点(お金/従業員初期化/イベントスケジュール初期化/
   // 時計/セーブ)を1つも漏らさず移植する。物件・レシピ・従業員はここで固定値を書き込む
   // (以前はプレイヤーの選択をそのまま使っていた箇所)。スキップされても最後まで読まれても、
   // 呼ばれるのはこの関数1回だけ(呼んだ直後にonDone()でこの画面自体を離れるため)。
+  //
+  // v20注記: 背景描画のためにmountShopBackground()がstate.propertyを先出しすることがあるが
+  // (下記)、ここでの代入は消さない。二重代入のままにする(スキップ経路や将来の変更で
+  // 「先出しがあるからもう要らない」と誤って穴を空けないため。ユーザー承認済み)。
   function commitTutorialAndStart() {
     state.property = FIXED_PROPERTY_ID;
     state.equipment = []; // §4-1: 設備なし
@@ -60,55 +80,144 @@ window.ScreenSetup = (function () {
     onDone();
   }
 
-  // ---------- 進行 ----------
-  function stepDots(lines) {
-    var bar = h("div", { className: "step-dots" });
-    lines.forEach(function (l, i) {
-      bar.appendChild(h("div", {
-        className: "dot" + (i === state.setupStep ? " active" : (i < state.setupStep ? " done" : ""))
-      }));
-    });
-    return bar;
+  // ---------- v20 §2-1: 背景に店の断面図を静止画として置く ----------
+  // ShopView.mount()自体はタイマー・客の湧きループ・店員の往復を一切起動しない(調査済み。
+  // openBand()/update()を呼ばない限り何も動かない)。念のためsetPaused(true)も掛けておき、
+  // 将来shop-view.js側にタイマーが増えてもこの画面が動き出さない保険にする(ユーザー指示)。
+  function mountShopBackground() {
+    if (!window.ShopView || !els) return;
+    // 描画目的でだけ商店街を先に入れる。commitTutorialAndStart()側の代入は上記のとおり消さない。
+    // ここで先出ししても安全: チュートリアル中は他に自動保存が走らない(セーブされるのは
+    // commitTutorialAndStart()の⑤save1箇所だけ)ので、この先出しが保存されて中途半端な
+    // state(お金は引かれていない等)が残ることはない。
+    state.property = FIXED_PROPERTY_ID;
+    window.ShopView.destroy();
+    window.ShopView.mount(els.bg, state, {});
+    window.ShopView.setPaused(true);
   }
 
-  function draw() {
-    var root = document.getElementById("screen-setup");
-    window.UI.clear(root);
+  // ---------- §4-4: カード演出に出す中身。文字列に直接書かず、必ずデータから読む ----------
+  function materialCardItems() {
+    function pick(list, id, sub) {
+      var d = U.findById(list, id);
+      return { emoji: d ? d.emoji : "", name: d ? d.name : "", sub: sub };
+    }
+    return [
+      pick(RECIPE_DATA.soup, FIXED_RECIPE.soup, "スープ"),
+      pick(RECIPE_DATA.tare, FIXED_RECIPE.tare, "タレ"),
+      pick(RECIPE_DATA.noodle, FIXED_RECIPE.noodle, "麺")
+    ];
+  }
+
+  function staffCardItems() {
+    var d = U.findById(CHAR_DATA.staff, FIXED_STAFF_ID);
+    return [{ emoji: d ? d.emoji : "", name: d ? d.name : "" }];
+  }
+
+  // ---------- 文字送り(§3-3) ----------
+  function stopTyping() {
+    if (typeTimer) { clearInterval(typeTimer); typeTimer = null; }
+  }
+
+  function finishTyping() {
+    stopTyping();
+    typedLen = typedText.length;
+    els.body.textContent = typedText;
+    lineReady = true;
+    els.char.classList.remove("talking");
+    els.next.classList.add("show");
+  }
+
+  function startTyping(text) {
+    stopTyping();
+    typedText = text;
+    typedLen = 0;
+    lineReady = false;
+    els.body.textContent = "";
+    els.next.classList.remove("show");
+    if (reducedMotion()) { finishTyping(); return; } // reduced-motion: 文字送りをせず最初から全文
+    els.char.classList.add("talking"); // §3-4: 送っている間だけ揺れる
+    typeTimer = setInterval(function () {
+      typedLen++;
+      els.body.textContent = typedText.slice(0, typedLen);
+      if (typedLen >= typedText.length) finishTyping();
+    }, TYPE_MS);
+  }
+
+  // ---------- 進行 ----------
+  function showLine() {
     var lines = tutorialLines();
     if (state.setupStep >= lines.length) state.setupStep = lines.length - 1;
     if (state.setupStep < 0) state.setupStep = 0;
-    var last = state.setupStep === lines.length - 1;
+    startTyping(lines[state.setupStep].text);
+  }
+
+  // §4-4: 「素材をプレゼントするよ」「リンさんを紹介するね」の直後にだけカードを出す。
+  // カード演出が終わってから次のセリフへ進む(doneCbで繋ぐ)。
+  function afterLine(lineId, next) {
+    if (lineId === "material" && window.CardReveal) {
+      window.CardReveal.show(materialCardItems(), next);
+    } else if (lineId === "staff" && window.CardReveal) {
+      window.CardReveal.show(staffCardItems(), next);
+    } else {
+      next();
+    }
+  }
+
+  function advance() {
+    var lines = tutorialLines();
     var line = lines[state.setupStep];
+    var isLast = state.setupStep >= lines.length - 1;
+    afterLine(line.id, function () {
+      if (isLast) { commitTutorialAndStart(); return; }
+      state.setupStep++;
+      showLine();
+    });
+  }
+
+  // §3-3: どこをタップしても、全文表示済みでなければ即座に全文表示。表示済みなら次へ進む。
+  function onTapWindow() {
+    if (!lineReady) { finishTyping(); return; }
+    advance();
+  }
+
+  // §4-4: スキップ時はカード演出も飛ばす。副作用5点はcommitTutorialAndStart()側に必ず1回だけ通す。
+  function onSkip() {
+    stopTyping();
+    if (window.CardReveal) window.CardReveal.cancel();
+    commitTutorialAndStart();
+  }
+
+  // ---------- 画面構築(render()につき1回) ----------
+  function build() {
+    var root = document.getElementById("screen-setup");
+    window.UI.clear(root);
+
+    var bg = h("div", { className: "setup-bg" });
+    root.appendChild(bg);
+
+    var charEl = h("span", { className: "setup-char emoji-font", text: DONBURI.emoji });
+    root.appendChild(h("div", { className: "setup-char-wrap" }, [charEl]));
 
     root.appendChild(h("button", {
-      className: "btn small setup-skip", text: "スキップ",
-      onclick: commitTutorialAndStart
+      className: "btn small setup-skip", text: "スキップ", onclick: onSkip
     }));
 
-    root.appendChild(G.bar(line.text, false));
-    if (window.MetaState) {
-      root.appendChild(h("div", { className: "dim", style: { textAlign: "center", fontSize: "12px" }, text: window.MetaState.currentRunNumber() + "周目" }));
-    }
-    root.appendChild(stepDots(lines));
+    var nameEl = h("div", { className: "setup-window-name", text: DONBURI.name });
+    var bodyEl = h("div", { className: "setup-window-body" });
+    var nextEl = h("div", { className: "setup-window-next emoji-font", text: "▶" });
+    root.appendChild(h("div", { className: "setup-window", onclick: onTapWindow }, [nameEl, bodyEl, nextEl]));
 
-    // 固定ビューポートを守るため中身は置かない(セリフと「次へ」だけ、§3-2)。
-    root.appendChild(h("div", { className: "scroll-area setup-body" }));
-
-    root.appendChild(h("div", { className: "setup-footer", style: { justifyContent: "center" } }, [
-      last
-        ? h("button", { className: "btn primary", text: "開店する！", onclick: commitTutorialAndStart })
-        : h("button", {
-          className: "btn primary", text: "次へ",
-          onclick: function () { state.setupStep++; draw(); }
-        })
-    ]));
+    els = { bg: bg, char: charEl, body: bodyEl, next: nextEl };
+    mountShopBackground();
   }
 
   function render(gameState, doneCb) {
     state = gameState;
     onDone = doneCb;
     if (state.setupStep == null || state.setupStep < 0) state.setupStep = 0;
-    draw();
+    build();
+    showLine();
   }
 
   return { render: render };

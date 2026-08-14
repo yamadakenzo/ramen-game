@@ -262,15 +262,19 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    念のためjs側でsetPaused(true)も掛けている(js/screens/setup.js)。 */
 .setup-bg { position: absolute; inset: 0; z-index: 1; overflow: hidden; }
 
-/* v21(docs/指示書/v21_ラーメン屋_修正指示書.md §3-1): どんぶりちゃんの絵と会話ウインドウを
+/* v21(docs/完了/旧文書/v21_ラーメン屋_修正指示書.md §3-1): どんぶりちゃんの絵と会話ウインドウを
    1枚の外枠(.setup-panel)にまとめる。枠線・角丸・影はv20の.setup-windowが使っていた実値を
    そのまま流用(§2-2で読み取った値、新しい値は作っていない)。背景は透明
    (transparentは色ではないため4色パレット制約の対象外。半透明rgba()/opacityは使わない)。
    z-indexはCardRevealのオーバーレイ(z-index:15、#app直下のフルスクリーン)より下、
    .setup-skip(z-index:30)より下になるよう、旧.setup-windowと同じ10のまま据え置く
-   (ユーザー指示)。 */
+   (ユーザー指示)。
+   v21続報: 「上段は残りの高さを全部取る」指示は実機でパネルが画面いっぱいまで広がり、
+   枠線が画面の縁と区別できなくなる副作用が出たため撤回された。画面下寄せの固定サイズ
+   (高さ52%・下端14px浮かせ・左右14px余白)に差し替え、上・左右・下すべてに背景の断面図が
+   見える状態にする(ユーザー指示)。 */
 .setup-panel {
-  position: absolute; left: 8px; right: 8px; top: 4%; bottom: 8px;
+  position: absolute; left: 14px; right: 14px; bottom: 14px; height: 52%;
   z-index: 10;
   display: flex; flex-direction: column;
   background: transparent;
@@ -280,16 +284,20 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   cursor: pointer;
 }
 /* 上段: 背景透過(店の断面図が透けて見える)。どんぶりちゃんの絵だけが乗る。
-   残りの高さを全部取る(flex: 1 1 auto、下段は次項で固定高さにする)。 */
+   残りの高さを取る(flex: 1 1 auto、下段は次項で固定高さにする)。
+   v21続報: 丼が区切り線に接触して見えた(align-items: flex-endだったため)ので、
+   上下左右とも中央(center/center)に置くよう変更(ユーザー指示)。 */
 .setup-panel-top {
   flex: 1 1 auto; min-height: 0;
   background: transparent;
-  display: flex; align-items: flex-end; justify-content: center;
+  display: flex; align-items: center; justify-content: center;
 }
-/* v20時点は上半分(画面高46%)に対する比率(0.34)だったが、下段を2行固定で大幅に縮めた分だけ
-   上段が広がったため、その広さに対して自然に見えるよう比率を調整した(実装者裁量、
-   ユーザー指示どおり)。固定ビューポートを超えないことは§5で実測確認する。 */
-.setup-char { font-size: calc(var(--frame-w) * 0.4); line-height: 1; display: block; }
+/* v21続報: パネルを画面いっぱいから52%高さに縮めたことで上段も縮んだため、比率を再調整。
+   scratchpad配下のPlaywrightで実測(480×853のリファレンスviewport): 上段の高さ321.5px。
+   目安の0.55〜0.6の中間(0.575)に合わせるとcharの高さ約184.9px、frame-w(479.8px)に対する
+   係数は0.385。0.4→0.385に調整した(実測してユーザー指示の目安に合わせた値、実装者裁量)。
+   固定ビューポートを超えないことは§5で実測確認する。 */
+.setup-char { font-size: calc(var(--frame-w) * 0.385); line-height: 1; display: block; }
 /* §3-4(v20由来、v21でも維持): 文字を送っている間だけ上下に小さく揺れる(周期0.4秒)。svEatと
    同じease-in-out系に速さを揃える。v21 §2-1の調査で既に.setup-char本体に付いていたことを
    確認済みのため、適用先の変更は不要(外枠.setup-panelごと揺れることはない)。 */

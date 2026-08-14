@@ -68,6 +68,19 @@ window.EventEngine = (function () {
     };
   }
 
+  // v23(docs/完了/v23_週次費用と月次成績_指示書.md §1-3): 週給 = 14,000 + 能力合計×1,800
+  // (100円単位に丸め)。旧式(月給 60,000+能力合計×8,000、1,000円単位丸め)からの換算値で、
+  // 能力合計20なら旧¥220,000/月 に対し新¥50,000/週(月額換算¥216,667)でほぼ一致する。
+  function scoutWeeklyWage(sum) {
+    return Math.round((14000 + sum * 1800) / 100) * 100;
+  }
+  // v23(docs/完了/v23_週次費用と月次成績_指示書.md §D): 採用時の紹介料は「週給」そのものではなく、
+  // 従来どおり「月給1か月分」相当を維持する(週給が月額の1/4.3333になったため、紹介料まで
+  // 週給と同額にすると意図せず約77%目減りしてしまう。数値バランスは変えない指示のため)。
+  function scoutHiringFee(weeklyWage) {
+    return Math.round(weeklyWage * 4.3333 / 100) * 100;
+  }
+
   // 求人を出したときに見せる3人分。まだ雇われていないので id は払い出さない(雇用時にのみ発行)。
   function generateScoutCandidates(state) {
     var names = pickDistinct(SCOUT_NAMES, 3);
@@ -76,12 +89,12 @@ window.EventEngine = (function () {
     for (var i = 0; i < 3; i++) {
       var newStats = rollScoutAbilities(state);
       var sum = newStats.cooking + newStats.speed + newStats.service + newStats.development;
-      var wage = Math.round((60000 + sum * 8000) / 1000) * 1000; // §2: 1,000円単位に丸める
+      var wage = scoutWeeklyWage(sum);
       var maxLevel = U.randInt(1, 8);
       out.push({
         name: names[i], emoji: emoji[i], role: "スタッフ",
         newStats: newStats, maxLevel: maxLevel, potential: potentialLabel(maxLevel),
-        stats: deriveOldStats(newStats), wage: wage
+        stats: deriveOldStats(newStats), wage: wage, hiringFee: scoutHiringFee(wage)
       });
     }
     return out;
@@ -617,14 +630,17 @@ window.EventEngine = (function () {
       // 選ばれた候補(hiredのときのみ)が入って渡ってくる。
       if (ctx.scoutResult === "hired" && ctx.candidate) {
         var c = ctx.candidate;
-        if (state.money < c.wage) {
+        var hiringFee = c.hiringFee != null ? c.hiringFee : scoutHiringFee(c.wage);
+        if (state.money < hiringFee) {
           // UI側で既に資金チェック済みのはずだが、念のための保険。
           ctx.scoutResult = "insufficient_funds";
           ctx.staffName = c.name;
         } else {
           state.scoutCounter = (state.scoutCounter || 0) + 1;
           var id = "scout" + state.scoutCounter;
-          state.money -= c.wage; // §3: 月給1か月分を紹介料として即座に払う
+          // v23: 週給の約4.3週分＝従来の月給1か月分相当を紹介料として徴収(§D。週給そのものを
+          // 徴収すると数値バランスが変わってしまうため、従来と同額になるよう明示的に換算する)。
+          state.money -= hiringFee;
           state.staffHired.push(id);
           state.scoutedStaff[id] = {
             id: id, name: c.name, emoji: c.emoji, role: c.role,

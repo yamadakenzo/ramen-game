@@ -21,7 +21,7 @@ window.DATA.guide = {
   tutorial: [
     { id: "intro",    repeatOk: false, text: "僕はどんぶりちゃん。一緒に日本一のラーメン屋を作ろう。" },
     { id: "property", repeatOk: true,  text: "商店街に、ちょうどいい空き店舗を見つけたよ。" },
-    { id: "money",    repeatOk: true,  text: "初期費用は{cost}、家賃は月{rent}。ここからのスタートだ。" },
+    { id: "money",    repeatOk: true,  text: "初期費用は{cost}、家賃は週{rent}。ここからのスタートだ。" },
     { id: "future",   repeatOk: false, text: "お店が育てば、他の場所も選べるようになる。楽しみにしてて。" },
     { id: "material", repeatOk: true,  text: "素材をプレゼントするよ。鶏ガラ・醤油・細麺の3つ。" },
     { id: "topping",  repeatOk: false, text: "具は今はなし。作れる素材は、これから増えていく。" },

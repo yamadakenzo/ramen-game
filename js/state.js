@@ -53,7 +53,12 @@ window.GameState = (function () {
   // チュートリアルを追加した。state.tutorialStep(進行状況)とstate.developedRamens(命名して
   // 完成させたラーメンの不変の記録)が増えたため20→21に上げた。ramen_metaは上記のとおり
   // SAVE_VERSIONと無関係のため今回も消えない。
-  var SAVE_VERSION = 21;
+  // v23(docs/完了/v23_週次費用と月次成績_指示書.md §4-7/§F): state.dailyLogを新設し、家賃
+  // (js/data/property.js の rent)・給料(js/data/characters.js の wage)の意味を月額→週額に
+  // 変更したため、旧セーブとの互換性が無くなった。21→22に上げた(SAVE_VERSIONの数字とvNNの
+  // 数字はもともと一致していないので揃えていない)。ramen_metaは上記のとおり無関係のため
+  // 今回も消えない。
+  var SAVE_VERSION = 22;
 
   // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §1): 既存の従業員5人ぶんの
   // staffStateを、js/event-engine.jsのensureStaffState()が作るのと同じ形であらかじめ
@@ -185,6 +190,9 @@ window.GameState = (function () {
         // STEP10: meetingAttendCountは「商店街の寄合に出る」が「宣伝をする」に読み替わったため削除。
       },
       history: [], // {week, month, customers, revenue, foodCost, rent, wage, profit, money, satisfaction, queueLevel}
+      // v23(docs/完了/v23_週次費用と月次成績_指示書.md §3-1): day(開業からの通算日数) -> {customers, revenue}。
+      // 週末処理(runWeeklyCalc)で7日ぶんまとめて書く。暦月ベースの月次成績(showMonthlyRecap)の集計元。
+      dailyLog: {},
       eventLog: [], // {week, id, title}
       pendingEvents: [], // このtickで表示すべきイベントのキュー
       currentEvent: null,

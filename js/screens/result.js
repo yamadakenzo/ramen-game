@@ -46,7 +46,7 @@ window.ScreenResult = (function () {
     state.history.forEach(function (rec) {
       totalRevenue += rec.revenue;
       totalFoodCost += rec.foodCost;
-      totalFixed += rec.monthlyCosts;
+      totalFixed += rec.fixedCosts; // v23(§E): monthlyCosts→fixedCostsにリネーム(rec.js/screens/loop.js参照)
       totalProfit += rec.profit;
     });
     var totals = totalsBySegment(state);

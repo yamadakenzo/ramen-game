@@ -153,7 +153,7 @@ window.DayOff = (function () {
       box.appendChild(h("p", { className: "dim", text: "3人が応募してきた。1人だけ雇うか、見送るか。" }));
       var grid = h("div", { className: "choice-grid wide" });
       candidates.forEach(function (c) {
-        var affordable = state.money >= c.wage;
+        var affordable = state.money >= c.hiringFee; // v23: 雇用時に引かれるのは週給ではなく紹介料(§D)
         var statBox = h("div", { className: "stat-grid" });
         [["cooking", "調理"], ["speed", "速度"], ["service", "接客"], ["development", "開発"]].forEach(function (p) {
           statBox.appendChild(h("span", { className: "stat-name", text: p[1] }));
@@ -171,7 +171,8 @@ window.DayOff = (function () {
         }, [
           h("div", { className: "emoji emoji-font", text: c.emoji }),
           h("div", { className: "name", text: c.name }),
-          h("div", { className: "sub", text: "伸びしろ " + c.potential + " ・ 給与 " + U.formatMoney(c.wage) + "/月" }),
+          h("div", { className: "sub", text: "伸びしろ " + c.potential + " ・ 給与 " + U.formatMoney(c.wage) + "/週" +
+            " ・ 紹介料 " + U.formatMoney(c.hiringFee) }),
           statBox,
           !affordable ? h("div", { className: "locked", text: "紹介料が足りない" }) : null
         ]));

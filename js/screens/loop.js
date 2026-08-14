@@ -174,7 +174,12 @@ window.ScreenLoop = (function () {
     window.GameState.save();
   }
 
-  function monthlyCostBreakdown() {
+  // v23(docs/完了/v23_週次費用と月次成績_指示書.md §1-1/§1-2/§E): 家賃・人件費は月初一括では
+  // なく毎週発生する固定費になった。データ側(js/data/property.jsのrent、js/data/characters.js
+  // のwage)を最初から週額で持つよう書き換えたので、ここで月額を割る処理は一切しない(v14で
+  // 「表示と実引き落としが合わない」不具合の原因になった方式を踏まない)。名前も実態に合わせて
+  // monthlyCostBreakdown→weeklyCostBreakdownに変更した。
+  function weeklyCostBreakdown() {
     var property = Scoring.getProperty(state);
     var rent = Math.round(property.rent * (state.rentMultiplier || 1)); // v10-2-4: 家賃は営業時間に関係しない固定費
     var costMult = Scoring.hoursCostMultiplier(state); // v17: 営業時間固定に伴い常に1.0(§1-3)
@@ -186,6 +191,55 @@ window.ScreenLoop = (function () {
     });
     // v17(docs/新設計/v17_ラーメン屋_修正指示書.md §2-3): 返済(loanPay)を撤去した。
     return { rent: rent, wages: wages, total: rent + wages };
+  }
+
+  // v23(§3-1): 週の合計(客数 or 売上)を、曜日ごとの重み比で7日へ配分する。0〜5日目は重み比で
+  // 丸め、6日目(週の最終日)で端数を吸収し、7日の合計が必ずweekTotalと一致するようにする
+  // (四捨五入の積み上げでズレるのを防ぐ、指示書§3-1の指定どおり)。
+  function distributeWeekToDays(weekTotal, dayWeights) {
+    var weightSum = dayWeights.reduce(function (a, b) { return a + b; }, 0);
+    var out = [0, 0, 0, 0, 0, 0, 0];
+    if (weightSum <= 0) { out[6] = weekTotal; return out; }
+    var acc = 0;
+    for (var d = 0; d < 6; d++) {
+      out[d] = Math.round(weekTotal * dayWeights[d] / weightSum);
+      acc += out[d];
+    }
+    out[6] = weekTotal - acc;
+    return out;
+  }
+
+  // Scoring.weeklyBandScheduleの戻り値(schedule[dow][bandKey][segId]=count)から、曜日ごとの
+  // 客数合計(全帯・全客層を合算した7要素の配列、dow=0〜6)を作る。weeklyBandSchedule自体が
+  // 「マス目合計=週客数」と完全一致することを検証済みのデータなので、ここで作る7要素の合計は
+  // 追加の丸めなしでfinance.totalCustomersと厳密に一致する。
+  function dailyCustomerTotals(schedule) {
+    var totals = [0, 0, 0, 0, 0, 0, 0];
+    for (var d = 0; d < 7; d++) {
+      var bandsObj = schedule[d] || {};
+      Object.keys(bandsObj).forEach(function (bandKey) {
+        var segObj = bandsObj[bandKey];
+        Object.keys(segObj).forEach(function (segId) { totals[d] += segObj[segId]; });
+      });
+    }
+    return totals;
+  }
+
+  // v23(§3-1): 週末処理でその週7日ぶんのdailyLogをまとめて書く(1杯ごとの書き足しはしない。
+  // 売上のstate.moneyへの加算は「丼が客の席に届いた瞬間」に起きるため、バックグラウンドタブの
+  // アニメーション遅延で実績値が理論値からズレることがあり、それを月次の集計元にすると週次画面の
+  // 客数と食い違ってしまう。weeklyBandSchedule由来の確定データを使えば週次・月次が構造的に一致する)。
+  // §B-1で検算済みのとおり、週初日のU.dow()は常に0固定なので、week初日の通算day
+  // (=このrunWeeklyCalc実行時点でのstate.day-6。state.dayは週末処理中「今週最終日」のまま)に
+  // オフセット無しでschedule[0]〜[6]をそのまま対応させられる。
+  function writeDailyLog(finance) {
+    if (!state.dailyLog) state.dailyLog = {};
+    var weekStartDay = state.day - 6;
+    var custByDay = dailyCustomerTotals(lastSchedule || {});
+    var revByDay = distributeWeekToDays(Math.round(finance.revenue), custByDay);
+    for (var d = 0; d < 7; d++) {
+      state.dailyLog[weekStartDay + d] = { customers: custByDay[d], revenue: revByDay[d] };
+    }
   }
 
   // ---------- v12-2: 週の客数・売上・湧きスケジュールを「週の開始」で確定する ----------
@@ -259,25 +313,19 @@ window.ScreenLoop = (function () {
     var avgSat = Scoring.weightedAvgSatisfaction(customers);
     state.lastAvgSatisfaction = avgSat;
 
-    var monthlyCosts = 0;
-    var chargedBreakdown = { rent: 0, wages: 0 }; // 月次まとめ用に、実際に引き落とされた内訳を週次ログへ残す
-    // v09-3: 「月初」の判定を、週→月の近似(4.333週/月)から、表示上の月が実際に変わったかへ変更。
-    // 週が月をまたいでよくなったため、月の請求は「その週で月が変わったこと」で判定する。
-    var monthCharged = U.monthJustChanged(state.day);
-    if (monthCharged) {
-      chargedBreakdown = monthlyCostBreakdown();
-      monthlyCosts = chargedBreakdown.total;
-      state.money -= monthlyCosts;
-    }
+    // v23(§1-1/§A-5): 家賃・人件費は「月が変わった週」だけの一括請求をやめ、毎週必ず発生させる。
+    // monthJustChangedはもう費用の引き落とし判定には使わない(月次まとめのタイミング判定では
+    // 引き続き使う。下のproceedToMonthlyRecap参照)。
+    var weeklyFixedCosts = weeklyCostBreakdown();
+    var fixedCosts = weeklyFixedCosts.total;
+    state.money -= fixedCosts;
 
     // v13-3/v16-1: 売上(finance.revenue)は丼が客の席に届くごとにonCustomerServed()で既に所持金へ
     // 加算済み。ここで再び足すと二重計上になるため、週末は費用(仕入)だけを引く。表示用のprofit
     // (週の損益)はこれまで通り売上込みの式のまま——週末の収支画面の「残り」の表示内容は変えない指示のため。
     state.money -= finance.foodCost;
-    // STEP7(docs/新設計/07_STEP7_設備_修正版.md §2): 設備の週維持費。月次のまとめ(monthlyCosts、
-    // 上のmonthChargedブロック)とは完全に別枠で、月をまたぐかどうかに関係なく毎週必ず引く
-    // (月初にまとめない)。家賃・給料と二重に引かれないよう、monthlyCostBreakdown()側には
-    // 一切触れていない。
+    // STEP7(docs/新設計/07_STEP7_設備_修正版.md §2): 設備の週維持費。家賃・人件費(weeklyFixedCosts)
+    // とは別枠の計算のまま、引き続き毎週必ず引く。
     var equipUpkeep = Scoring.weeklyEquipUpkeep(state);
     state.money -= equipUpkeep;
     // STEP8(docs/新設計/08_STEP8_複数ラーメンとサイドメニュー_修正版.md §2): サイドメニューの
@@ -286,7 +334,7 @@ window.ScreenLoop = (function () {
     var sideSales = Scoring.computeSideSales(state, customers);
     state.money += sideSales.revenue;
     state.money -= sideSales.cost;
-    var profit = finance.revenue - finance.foodCost - monthlyCosts - equipUpkeep + sideSales.revenue - sideSales.cost;
+    var profit = finance.revenue - finance.foodCost - fixedCosts - equipUpkeep + sideSales.revenue - sideSales.cost;
 
     state.reputation = U.clamp(state.reputation + (avgSat - 50) * 0.04, 0, 100);
     // STEP10(docs/新設計/10_STEP10_広告_認知度_評判_修正版.md §3): 宣伝を止めると毎週1.5%ずつ
@@ -312,12 +360,17 @@ window.ScreenLoop = (function () {
       // (表示するときだけ U.monthSeqToCal で実際の月名に戻す)。
       week: U.weekOfRun(state.day), month: U.monthSeq(state.day), customers: finance.bySegment,
       totalCustomers: finance.totalCustomers, revenue: Math.round(finance.revenue), foodCost: Math.round(finance.foodCost),
-      monthlyCosts: monthlyCosts, rentCost: chargedBreakdown.rent, wageCost: chargedBreakdown.wages,
-      equipUpkeep: equipUpkeep, // STEP7: 設備の週維持費(月次まとめとは別枠)
+      // v23(§E): monthlyCosts→fixedCostsにリネーム(毎週発生する固定費になったため)。
+      fixedCosts: fixedCosts, rentCost: weeklyFixedCosts.rent, wageCost: weeklyFixedCosts.wages,
+      equipUpkeep: equipUpkeep, // STEP7: 設備の週維持費(家賃・人件費とは別枠)
       sideRevenue: sideSales.revenue, sideCost: sideSales.cost, // STEP8: サイドメニューの売上・原価
       profit: Math.round(profit), money: Math.round(state.money),
       avgSatisfaction: Math.round(avgSat), queueLevel: customers.queueLevel
     });
+    // v23(§3-1): 月次成績の集計元となる日別ログ。月次まとめ(proceedToMonthlyRecap)より必ず先に
+    // ここで書き終える(week末シーケンスは全てonDoneの連鎖で後から動くので、この関数の中で
+    // 同期的に書いておけば順序は自動的に保証される)。
+    writeDailyLog(finance);
 
     // 一週限りの効果をリセット
     state.flags.weekRevenueMult = null;
@@ -341,7 +394,7 @@ window.ScreenLoop = (function () {
     // 1. 今週の収支 → 2. イベント(あれば) → 3. 月次まとめ(あれば) → 4. 定休日のアクション、の順で必ず止めて見せる。
     // どの段階も「次へ」を押すまで進まない。state.dayはこの間ずっと今週の最終日のまま動かさない
     // (advanceWeekで初めて次の週の頭に進める)。
-    showWeeklyBalance(finance, customers, chargedBreakdown, monthCharged, equipUpkeep, sideSales, function () {
+    showWeeklyBalance(finance, customers, weeklyFixedCosts, equipUpkeep, sideSales, function () {
       proceedToEvents(finishedWeek, weekStats);
     });
   }
@@ -400,62 +453,68 @@ window.ScreenLoop = (function () {
     resume("weekend"); // pauseReasonsが空になれば(パネル等も閉じていれば)ここで自動的にtickが再開する
   }
 
-  // ---------- 2-2: 月末にまとめを出す ----------
-  function monthAggregate(monthNum) {
-    var agg = { revenue: 0, foodCost: 0, rent: 0, wages: 0, equipUpkeep: 0, sideRevenue: 0, sideCost: 0, profit: 0, customers: 0 };
-    state.history.forEach(function (rec) {
-      if (rec.month !== monthNum) return;
-      agg.revenue += rec.revenue; agg.foodCost += rec.foodCost;
-      agg.rent += rec.rentCost || 0; agg.wages += rec.wageCost || 0;
-      agg.equipUpkeep += rec.equipUpkeep || 0; // STEP7: 週次で引かれた設備維持費を月内ぶん合算(内訳表示用)
-      agg.sideRevenue += rec.sideRevenue || 0; agg.sideCost += rec.sideCost || 0; // STEP8: サイドの月内合算
-      agg.profit += rec.profit; agg.customers += rec.totalCustomers;
-    });
-    return agg;
+  // ---------- v23(§3-2): 月末にまとめを出す ----------
+  // 費用・利益は月次に出さない。費用は週の単位で発生する以上、月をまたぐ週の費用をどちらの月に
+  // 帰属させるか決められないため(指示書§3-2)。集計元はstate.history(週ログ、費用込み)ではなく
+  // state.dailyLog(暦月の初日〜末日をそのまま合計するだけ)に切り替えた。
+  function monthAggregate(seq) {
+    var start = U.monthSeqStartDay(seq);
+    // §B-2: 最終月(3月)のmonthSeqEndDay(12)は365を返しDAYS_PER_RUN(364)を1超過するため、
+    // 実在する最終日(364=3月30日)でクランプする。他の11ヶ月は元々DAYS_PER_RUN以内に収まる。
+    var end = Math.min(U.monthSeqEndDay(seq), window.DAYS_PER_RUN);
+    var customers = 0, revenue = 0;
+    for (var d = start; d <= end; d++) {
+      var rec = state.dailyLog && state.dailyLog[d];
+      if (rec) { customers += rec.customers; revenue += rec.revenue; }
+    }
+    var unitPrice = customers > 0 ? Math.round(revenue / customers) : null; // 客数0のときは「−」表示(呼び出し側)
+    return { seq: seq, start: start, end: end, customers: customers, revenue: revenue, unitPrice: unitPrice };
   }
 
-  function recapRow(label, valueText, diff, diffFmt) {
+  function monthPeriodDayLabel(day) { return U.calMonth(day) + "月" + U.dayOfMonth(day) + "日"; }
+
+  // 前月比(%)。前月データが無い/0(割り算不能)/今月が客数0で単価がnullのときはnullを返す
+  // (呼び出し側で「前月比」行そのものを出さない)。
+  function monthPctDiff(cur, prev) {
+    if (cur == null || !prev) return null;
+    return Math.round((cur - prev) / prev * 100);
+  }
+
+  function recapPctRow(label, valueText, pct) {
     var row = h("div", { className: "recap-row" }, [
       h("span", { className: "recap-label", text: label }),
       h("span", { text: valueText })
     ]);
-    if (diff != null) {
+    if (pct != null) {
       row.appendChild(h("span", {
-        className: "recap-diff " + (diff >= 0 ? "good" : "bad"),
-        text: "前月比 " + (diff >= 0 ? "+" : "") + diffFmt(diff)
+        className: "recap-diff " + (pct >= 0 ? "good" : "bad"),
+        text: "前月比 " + (pct >= 0 ? "+" : "") + pct + "%"
       }));
     }
     return row;
   }
 
-  // seq: 開業から何ヶ月目か(1〜12・巻き戻りなし)。見出しの月名だけ実カレンダー月に変換して出す。
+  // seq: 開業から何ヶ月目か(1〜12・巻き戻りなし)。見出しの月名・期間だけ実カレンダー月に変換して出す。
   function showMonthlyRecap(seq, onDone) {
     var cur = monthAggregate(seq);
     var prev = seq > 1 ? monthAggregate(seq - 1) : null;
-    var fmtCount = function (v) { return Math.round(v) + "人"; };
+    var unitPriceText = cur.unitPrice != null ? U.formatMoney(cur.unitPrice) : "−";
 
     var overlay = document.getElementById("event-modal-overlay");
     var box = document.getElementById("event-modal-box");
     box.className = "modal-box month-recap";
     window.UI.clear(box);
     box.appendChild(h("h2", { text: U.monthSeqToCal(seq) + "月のまとめ" }));
+    // §3-2: 最終月(3月)だけ日数が違う(3/1〜3/30の30日)ことが、期間表示から読み取れるようにする。
+    box.appendChild(h("div", { className: "dim", text: "（" + monthPeriodDayLabel(cur.start) + "〜" + monthPeriodDayLabel(cur.end) + "）" }));
 
     var table = h("div", { className: "recap-table" }, [
-      recapRow("客数", fmtCount(cur.customers), prev ? cur.customers - prev.customers : null, fmtCount),
-      recapRow("売上", U.formatMoney(cur.revenue), prev ? cur.revenue - prev.revenue : null, U.formatMoney),
-      recapRow("仕入", "−" + U.formatMoney(cur.foodCost), prev ? -(cur.foodCost - prev.foodCost) : null, U.formatMoney),
-      recapRow("サイド売上", U.formatMoney(cur.sideRevenue), prev ? cur.sideRevenue - prev.sideRevenue : null, U.formatMoney),
-      recapRow("サイド原価", "−" + U.formatMoney(cur.sideCost), prev ? -(cur.sideCost - prev.sideCost) : null, U.formatMoney),
-      recapRow("設備維持費", "−" + U.formatMoney(cur.equipUpkeep), prev ? -(cur.equipUpkeep - prev.equipUpkeep) : null, U.formatMoney),
-      recapRow("人件費", "−" + U.formatMoney(cur.wages), prev ? -(cur.wages - prev.wages) : null, U.formatMoney),
-      recapRow("家賃", "−" + U.formatMoney(cur.rent), prev ? -(cur.rent - prev.rent) : null, U.formatMoney)
+      recapPctRow("客数", cur.customers + "人", prev ? monthPctDiff(cur.customers, prev.customers) : null),
+      recapPctRow("売上", U.formatMoney(cur.revenue), prev ? monthPctDiff(cur.revenue, prev.revenue) : null),
+      recapPctRow("客単価", unitPriceText, prev ? monthPctDiff(cur.unitPrice, prev.unitPrice) : null)
     ]);
-    var totalRow = recapRow("この月の損益", (cur.profit >= 0 ? "+" : "") + U.formatMoney(cur.profit),
-      prev ? cur.profit - prev.profit : null, U.formatMoney);
-    totalRow.className = "recap-row recap-total";
-    totalRow.querySelector("span:nth-child(2)").classList.add(cur.profit >= 0 ? "good" : "bad"); // 赤字は赤で
-    table.appendChild(totalRow);
     box.appendChild(table);
+    box.appendChild(h("p", { className: "dim", text: "※費用と収支は毎週の画面で確認できます" }));
 
     box.appendChild(h("div", { className: "modal-choices" }, [
       h("button", {
@@ -505,13 +564,12 @@ window.ScreenLoop = (function () {
   }
 
   // 「今週：客52人/満足38・不満14/売上¥46,800」のようなデータをまとめておく。トグル切替の再描画にも使う。
-  // v14-3: 月額費用(家賃・人件費)は「週割りの概算」ではなく、runWeeklyCalcが実際に
-  // 所持金から引いた額(chargedBreakdown)をそのまま使う。月初でない週はここが全て0になるので、
-  // その週は表示側でも「発生しない」として出す(推測で埋め直さない=逆算しない)。
+  // v23(§2-1/§E): 家賃・人件費は毎週発生する固定費になったため、月初かどうかで行の有無を
+  // 切り替える必要が無くなった(weeklyFixedCostsは常に実際に引かれた額そのもの)。
   // v17(§2-3): 返済(loanPay)を撤去した。
-  function buildFlashData(finance, customers, chargedBreakdown, monthCharged, equipUpkeep, sideSales) {
+  function buildFlashData(finance, customers, weeklyFixedCosts, equipUpkeep, sideSales) {
     var s = satSplit(finance, customers);
-    var cb = chargedBreakdown || { rent: 0, wages: 0 };
+    var wfc = weeklyFixedCosts || { rent: 0, wages: 0 };
     var revenue = finance.revenue;
     var upkeep = equipUpkeep || 0;
     var side = sideSales || { revenue: 0, cost: 0 };
@@ -521,20 +579,19 @@ window.ScreenLoop = (function () {
       satGood: s.good, satBad: s.bad,
       revenue: revenue, foodCost: finance.foodCost,
       foodCostPct: revenue > 0 ? Math.round((finance.foodCost / revenue) * 100) : 0,
-      monthCharged: !!monthCharged,
-      wages: cb.wages, rent: cb.rent,
-      // STEP7(§2): 設備維持費は月初かどうかに関係なく毎週発生するので、月次費用とは別の行として持つ。
+      wages: wfc.wages, rent: wfc.rent,
+      // STEP7(§2): 設備維持費は毎週発生するので、家賃・人件費とは別の行として持つ。
       equipUpkeep: upkeep,
       // STEP8(§2): サイドメニューの売上・原価。ラーメンの売上とは別の行として持つ。
       sideRevenue: side.revenue, sideCost: side.cost,
-      net: revenue - finance.foodCost - cb.rent - cb.wages - upkeep + side.revenue - side.cost
+      net: revenue - finance.foodCost - wfc.rent - wfc.wages - upkeep + side.revenue - side.cost
     };
   }
 
   // 週末停止の第1段階。読んでいる間に裏で時間が進むことは絶対にない(タイマーを一切使わない)。
   // 「次へ」を押すまでここで止まる。
-  function showWeeklyBalance(finance, customers, chargedBreakdown, monthCharged, equipUpkeep, sideSales, onDone) {
-    lastFlashData = buildFlashData(finance, customers, chargedBreakdown, monthCharged, equipUpkeep, sideSales);
+  function showWeeklyBalance(finance, customers, weeklyFixedCosts, equipUpkeep, sideSales, onDone) {
+    lastFlashData = buildFlashData(finance, customers, weeklyFixedCosts, equipUpkeep, sideSales);
     renderWeeklyBalanceModal(onDone);
   }
 
@@ -568,28 +625,18 @@ window.ScreenLoop = (function () {
       // STEP8(§2): サイドメニューの売上・原価。ラーメンとは別の行にする(0円の週は出さない)。
       if (d.sideRevenue) rows.push(moneyRow("サイド売上", d.sideRevenue));
       if (d.sideCost) rows.push(moneyRow("サイド原価", -d.sideCost, { tone: "bad" }));
-      // STEP7(§2): 設備維持費は月初かどうかに関係なく毎週発生する固定費。家賃・人件費の
-      // 判定(d.monthCharged)とは別に、毎週この行を出す(0円の週は出さない)。
+      // v23(§2-1): 家賃・人件費は毎週発生する固定費になったため、v14で入っていた「月初の週だけ
+      // 行を出す」条件分岐を撤去した。金額の有無にかかわらず毎週この2行を出す。
+      rows.push(moneyRow("人件費", -d.wages, { tone: "bad" }));
+      rows.push(moneyRow("家賃", -d.rent, { tone: "bad" }));
+      // STEP7(§2): 設備維持費も毎週発生する固定費(0円の週=設備未購入時は出さない)。
       if (d.equipUpkeep) rows.push(moneyRow("設備維持費", -d.equipUpkeep, { tone: "bad" }));
-      // v14-3: 家賃・人件費は月初の週にしか引き落とされない固定費。実際に引かれた週だけ、
-      // 実際に引かれた額をそのまま出す(それ以外の週は行ごと出さない=無かったことにする)。
-      // v17(§2-3): 返済(loanPay)の行を撤去した。
-      if (d.monthCharged) {
-        if (d.wages) rows.push(moneyRow("人件費", -d.wages, { tone: "bad" }));
-        if (d.rent) rows.push(moneyRow("家賃", -d.rent, { tone: "bad" }));
-      }
       rows.push(h("div", { className: "wf-divider" }));
       rows.push(moneyRow("残り", d.net, { sign: true }));
       var table = h("div", { className: "wf-table" }, rows);
       table.lastChild.className = "wf-row wf-net";
       table.lastChild.querySelector(".wf-val").classList.add(d.net >= 0 ? "good" : "bad");
       box.appendChild(table);
-      box.appendChild(h("div", {
-        className: "wf-note",
-        text: d.monthCharged
-          ? "人件費・家賃は月初のこの週にまとめて引き落とし済み。"
-          : "人件費・家賃は月初の週にまとめて引き落とし。今週の引き落としはなし。"
-      }));
     } else {
       box.appendChild(h("p", { text: "売上 " + U.formatMoney(d.revenue) }));
     }
@@ -1504,7 +1551,7 @@ window.ScreenLoop = (function () {
         }, [
           h("div", { className: "emoji emoji-font" }, [def.emoji, " ", window.StatusPanel.rankBadge(Scoring.staffRating(def).rank)]),
           h("div", { className: "name", text: def.name + "（" + def.role + "）" }),
-          h("div", { className: "cost", text: U.formatMoney(def.wage) + "/月" }),
+          h("div", { className: "cost", text: U.formatMoney(def.wage) + "/週" }),
           window.StatusPanel.staffStats(def),
           atStaffCap ? h("div", { className: "locked", text: "これ以上は雇えません" }) : h("div", { className: "blurb", text: G.blurb(def.id) })
         ]));
@@ -1577,8 +1624,8 @@ window.ScreenLoop = (function () {
         "　原価 ", h("span", { text: U.formatMoney(last.foodCost) })]));
       num.appendChild(h("p", {}, ["週の損益 ",
         h("span", { className: last.profit >= 0 ? "good" : "bad", text: U.formatMoney(last.profit) })]));
-      var mc = monthlyCostBreakdown();
-      num.appendChild(h("p", { className: "dim", text: "毎月の固定費: 家賃 " + U.formatMoney(mc.rent) +
+      var mc = weeklyCostBreakdown();
+      num.appendChild(h("p", { className: "dim", text: "毎週の固定費: 家賃 " + U.formatMoney(mc.rent) +
         " / 給与 " + U.formatMoney(mc.wages) }));
     }
     box.appendChild(num);

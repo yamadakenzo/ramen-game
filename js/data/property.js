@@ -6,39 +6,43 @@ window.DATA = window.DATA || {};
 // ほど固定費が重すぎたため(測定の詳細はdocs/設計判断記録.md参照)。initial_cost・seats・
 // segment_flow・funding[].amountは変更していない。既存キャラの給料(js/data/characters.js)は
 // 指示書§3で「調整してはいけない」に明記されているため、一切触れていない。
+// v23(docs/完了/v23_週次費用と月次成績_指示書.md §1-2): rentを月額から週額に換算し直した。
+// 式は「週額 = round(月額 ÷ 4.3333 ÷ 500) × 500」(500円単位丸め)。年間総額(52週×週額 と
+// 12ヶ月×旧月額の比較)の差はどの物件も±¥4,000以内(検算結果はdocs/設計判断記録.md参照)。
+// 割り算を実行時に発生させる実装(v14で不具合の原因になった)はせず、値そのものをここで置き換えた。
 window.DATA.property = {
   "properties": [
     {
       "id": "shotengai", "name": "商店街の空き店舗", "name_en": "Shopping Street Vacancy", "emoji": "🏪",
-      "initial_cost": 3200000, "rent": 63000, "seats_counter": 10, "seats_table": 0, "condition": "居抜き",
+      "initial_cost": 3200000, "rent": 14500, "seats_counter": 10, "seats_table": 0, "condition": "居抜き",
       "segment_flow": { "regular": 1.4, "salaryman": 0.8, "ol": 0.5, "student": 0.6, "family": 0.7, "tourist": 0.3 },
       "traits": ["前の店の設備が使える（初期投資が安い）", "常連文化が根付いている", "商店街の付き合いイベントが多い"],
       "desc": "シャッターが半分閉まった商店街。人通りは多くないが、地元の人が毎日通る。"
     },
     {
       "id": "office", "name": "オフィス街の一階", "name_en": "Office District Ground Floor", "emoji": "🏢",
-      "initial_cost": 7800000, "rent": 147000, "seats_counter": 14, "seats_table": 0, "condition": "スケルトン",
+      "initial_cost": 7800000, "rent": 34000, "seats_counter": 14, "seats_table": 0, "condition": "スケルトン",
       "segment_flow": { "regular": 0.4, "salaryman": 1.6, "ol": 1.5, "student": 0.2, "family": 0.1, "tourist": 0.4 },
       "traits": ["昼のピークが極端（11:30-13:30に集中）", "夜と週末は死ぬ", "回転率が全て"],
       "desc": "ビルの一階。平日の昼だけ人が溢れる。それ以外の時間は誰も通らない。"
     },
     {
       "id": "campus", "name": "大学前", "name_en": "Near Campus", "emoji": "🎓",
-      "initial_cost": 4100000, "rent": 80500, "seats_counter": 12, "seats_table": 2, "condition": "居抜き",
+      "initial_cost": 4100000, "rent": 18500, "seats_counter": 12, "seats_table": 2, "condition": "居抜き",
       "segment_flow": { "regular": 0.6, "salaryman": 0.5, "ol": 0.3, "student": 2.0, "family": 0.4, "tourist": 0.2 },
       "traits": ["長期休暇に客が消える（2月・8月）", "SNS拡散が起きやすい", "単価が上げられない"],
       "desc": "大学の正門から徒歩3分。学生で溢れるが、休みに入ると街ごと静まる。"
     },
     {
       "id": "roadside", "name": "郊外ロードサイド", "name_en": "Suburban Roadside", "emoji": "🛣️",
-      "initial_cost": 9500000, "rent": 108500, "seats_counter": 8, "seats_table": 6, "condition": "スケルトン",
+      "initial_cost": 9500000, "rent": 25000, "seats_counter": 8, "seats_table": 6, "condition": "スケルトン",
       "segment_flow": { "regular": 0.8, "salaryman": 0.7, "ol": 0.3, "student": 0.5, "family": 1.8, "tourist": 0.5 },
       "traits": ["駐車場あり", "テーブル席が最初からある", "週末に売上が集中", "初期投資が重い"],
       "desc": "幹線道路沿い。車で来る家族連れが主。平日は静かで週末に跳ねる。"
     },
     {
       "id": "tourist_spot", "name": "観光地の路地", "name_en": "Tourist Alley", "emoji": "⛩️",
-      "initial_cost": 11000000, "rent": 182000, "seats_counter": 9, "seats_table": 0, "condition": "居抜き",
+      "initial_cost": 11000000, "rent": 42000, "seats_counter": 9, "seats_table": 0, "condition": "居抜き",
       "segment_flow": { "regular": 0.3, "salaryman": 0.2, "ol": 0.2, "student": 0.4, "family": 0.6, "tourist": 2.2 },
       "traits": ["単価を高く設定できる", "リピートしない客が中心", "季節変動が激しい", "多言語対応が必須"],
       "desc": "有名な神社の参道から一本入った路地。人は多いが、みんな一度きり。"

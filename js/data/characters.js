@@ -22,7 +22,7 @@ window.DATA.characters = {
       // 指示書の移行表の値をそのまま採用(四捨五入の式は参考程度で、表の値を正とする指示のため)。
       "newStats": { "cooking": 5, "speed": 6, "service": 3, "development": 3 },
       "maxLevel": 8, // growth:high → 8。ユウタは弱いが最も伸びる
-      "wage": 180000, "growth": "high",
+      "wage": 41500, "growth": "high", // v23: 月額180,000→週額換算(§1-2の式。docs/設計判断記録.md参照)
       "traits": ["濃厚路線で士気が上がる", "あっさり路線だと士気が下がる"],
       "backstory": "工場勤めを辞めてラーメンの世界へ。腕はまだだが伸びしろがある。独立願望が強い。",
       "route_bias": { "independent": 0.5, "stay": 0.3, "betray": 0.15, "retire": 0.05 }
@@ -33,7 +33,7 @@ window.DATA.characters = {
       "stats": { "noodle": 20, "prep": 35, "service": 85, "numbers": 55, "teach": 40 },
       "newStats": { "cooking": 3, "speed": 7, "service": 9, "development": 4 },
       "maxLevel": 5, // growth:mid → 5
-      "wage": 210000, "growth": "mid",
+      "wage": 48500, "growth": "mid", // v23: 月額210,000→週額換算
       "traits": ["OL・家族連れの満足度に補正", "店が汚いと機嫌が悪くなる"],
       "backstory": "カフェ勤務からの転職。接客は完璧だが、ラーメンそのものにはあまり興味がない。",
       "route_bias": { "independent": 0.1, "stay": 0.5, "betray": 0.15, "retire": 0.25 }
@@ -44,7 +44,7 @@ window.DATA.characters = {
       "stats": { "noodle": 55, "prep": 90, "service": 5, "numbers": 20, "teach": 60 },
       "newStats": { "cooking": 7, "speed": 3, "service": 1, "development": 8 },
       "maxLevel": 1, // growth:none → 1。ゴンゾウは最初から強いが成長しない
-      "wage": 260000, "growth": "none",
+      "wage": 60000, "growth": "none", // v23: 月額260,000→週額換算
       "traits": ["スープの質に大補正", "レシピを頻繁に変えると激怒", "若手を育てる"],
       "backstory": "潰れた老舗の元店主。腕は本物だが、プライドが高く扱いが難しい。",
       "route_bias": { "independent": 0.05, "stay": 0.4, "betray": 0.2, "retire": 0.35 }
@@ -55,7 +55,7 @@ window.DATA.characters = {
       "stats": { "noodle": 30, "prep": 20, "service": 60, "numbers": 15, "teach": 5 },
       "newStats": { "cooking": 3, "speed": 7, "service": 6, "development": 2 },
       "maxLevel": 5, // growth:mid → 5
-      "wage": 95000, "growth": "mid",
+      "wage": 22000, "growth": "mid", // v23: 月額95,000→週額換算
       "traits": ["学生・観光客の流入に補正", "SNS拡散イベントを誘発", "無断欠勤あり"],
       "backstory": "近所の大学生。仕事は雑だが、外向きの発信力がある。",
       "route_bias": { "independent": 0.1, "stay": 0.2, "betray": 0.1, "retire": 0.6 }
@@ -66,7 +66,7 @@ window.DATA.characters = {
       "stats": { "noodle": 55, "prep": 55, "service": 50, "numbers": 80, "teach": 45 },
       "newStats": { "cooking": 6, "speed": 6, "service": 5, "development": 5 },
       "maxLevel": 3, // growth:low → 3
-      "wage": 290000, "growth": "low",
+      "wage": 67000, "growth": "low", // v23: 月額290,000→週額換算
       "traits": ["原価と客数の詳細表示を解放", "赤字が続くと見限る"],
       "backstory": "チェーン店の元店長。数字は読めるが、味への情熱は薄い。",
       "route_bias": { "independent": 0.3, "stay": 0.3, "betray": 0.35, "retire": 0.05 }
@@ -130,5 +130,5 @@ window.DATA.newStaffStatShape = {
   development: null, // 開発 1〜10 (各staffの newStats.development を参照。今回は計算に未使用)
   level: null,        // 現在Lv 1〜 (state.staffState[id].level で管理。全員Lv1からスタート)
   maxLevel: null,      // 最大Lv(ポテンシャル) 1〜 (各staffの maxLevel を参照)
-  wage: null           // 給料(円) (各staffの既存 wage を参照。Lvでは変わらない)
+  wage: null           // 週給(円) (各staffの既存 wage を参照。Lvでは変わらない。v23で月額→週額に変更)
 };

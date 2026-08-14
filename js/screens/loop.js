@@ -197,6 +197,14 @@ window.ScreenLoop = (function () {
   // 収支の計算式そのもの(Scoringの中身)は一切変えていない——呼ぶタイミングだけを動かした。
   function stageWeekCustomers() {
     var customers = Scoring.computeWeeklyCustomers(state);
+    // v22実機フィードバック対応: 「開発」チュートリアルを終える(tutorialStep==='done')まで、
+    // まだ何も開発していない=お店に出す品が無いはずなので、客が来ない(売上0)ようにする。
+    // Scoring側の計算式は一切変えず、ここで客層ごとの人数(count)だけを0に上書きする
+    // (以後、computeWeeklyFinance/weeklyBandScheduleはこのcountから金額・湧きを導くだけなので、
+    // 売上・原価・絵の湧きも連動して自動的に0になる。新しい計算経路を増やさない)。
+    if (tutorialSalesLocked()) {
+      Object.keys(customers.results).forEach(function (id) { customers.results[id].count = 0; });
+    }
     var finance = Scoring.computeWeeklyFinance(state, customers);
     lastCustomers = customers;
     lastFinance = finance;
@@ -769,6 +777,9 @@ window.ScreenLoop = (function () {
     state.tutorialStep = v;
     window.GameState.save();
   }
+  // v22実機フィードバック対応(2026-08-14): 「開発」を1回も終えていない間は、まだ何も
+  // 開発していない=お店に出す品が無いはずなので、客を来させない(stageWeekCustomers()参照)。
+  function tutorialSalesLocked() { return tutorialStepVal() !== "done"; }
 
   // §2: リロード後の再開。パネルを開いている最中や完成演出・命名モーダルの最中(いずれも
   // このモジュール内の一時変数(devSelection等)に依存し、stateには残らない)でリロードされたら、
@@ -1014,6 +1025,10 @@ window.ScreenLoop = (function () {
     restoreDevSpeed();
     setTutorialStep("done");
     window.GameState.save();
+    // v22実機フィードバック対応: ここまで(tutorialSalesLocked()がtrueの間)は客数を0に
+    // 上書きしていた(stageWeekCustomers()参照)。完成した直後から実際に売れるようにするため、
+    // 今週ぶんを客数ロック無しで確定し直す(次の週を待たせない)。
+    stageWeekCustomers();
 
     G.say(DEV_LINES.complete.replace("{name}", name));
     renderFabs();

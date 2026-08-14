@@ -49,7 +49,11 @@ window.GameState = (function () {
   // なくし、チュートリアル(選択なし)に置き換えた。それに伴い開業時点の初期状態が変わった
   // (物件・レシピ・従業員が固定、初期所持カードが8枚→3枚)ため19→20に上げた。ramen_metaは
   // 上記のとおりSAVE_VERSIONと無関係のため今回も消えない。
-  var SAVE_VERSION = 20;
+  // v22(docs/指示書/v22_ラーメン開発チュートリアル_修正指示書.md): 営業ループ側に「ラーメン開発」
+  // チュートリアルを追加した。state.tutorialStep(進行状況)とstate.developedRamens(命名して
+  // 完成させたラーメンの不変の記録)が増えたため20→21に上げた。ramen_metaは上記のとおり
+  // SAVE_VERSIONと無関係のため今回も消えない。
+  var SAVE_VERSION = 21;
 
   // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §1): 既存の従業員5人ぶんの
   // staffStateを、js/event-engine.jsのensureStaffState()が作るのと同じ形であらかじめ
@@ -188,7 +192,18 @@ window.GameState = (function () {
       // 別に running フラグは持たない(以前はweekEndActive中にspeedを0へ強制的に書き換えて流用していたが、
       // それだと「選んでいた速度」を覚えていられなかった。v09で廃止)。
       weekEndActive: false, // 週末シーケンス中(「次の週へ」を押すまでtrue)。UIの表示・安全な再開判定に使う
-      gameOverReason: null
+      gameOverReason: null,
+      // v22(docs/指示書/v22_ラーメン開発チュートリアル_修正指示書.md §2): 「ラーメン開発」
+      // チュートリアルの進行状況。'intro'→'showButton'→'selectIngredients'→'pressDevelop'→
+      // 'naming'→'done'。js/screens/loop.jsのtutorialStepVal()/setTutorialStep()で読み書きする。
+      // 2周目以降(MetaState.currentRunNumber() > 1)は最初から'done'にし、誘導演出を出さない
+      // (js/screens/setup.jsのチュートリアルが2周目以降を短縮版にする既存方針と揃えた)。
+      tutorialStep: (window.MetaState && window.MetaState.currentRunNumber() > 1) ? "done" : "intro",
+      // v22 §5: 「開発」で命名して完成させたラーメンの不変の記録({id,name,ingredients,stats,createdAt})。
+      // stats(味/原価/調理時間)は完成した瞬間の値を焼き込み、以後は素材のLv・分岐を変えても書き換えない
+      // (詳細はdocs/設計判断記録.md)。実際に店で出すレシピ(state.recipe/state.extraRamens)とは別物の、
+      // 「これまで開発した一覧」という履歴表示専用のデータ。
+      developedRamens: []
     };
   }
 

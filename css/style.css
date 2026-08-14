@@ -456,7 +456,150 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   .setup-window-next.show { animation: none; opacity: 1; }
   .card-reveal-card.in { animation: none; opacity: 1; transform: none; }
   .card-reveal-sparkle { animation: none; opacity: 0; }
+  .fab-develop-in { animation: none; }
+  .fab-develop-glow { animation: none; }
+  .dev-pointer { animation: none; }
+  .dev-card-fly.flying { animation: none; opacity: 0; }
+  .dev-reveal-steam, .dev-reveal-sparkle-burst { animation: none; opacity: 0; }
+  .dev-reveal-bowl.pop { animation: none; }
 }
+
+/* ================= ラーメン開発(js/screens/loop.js + js/screens/develop-reveal.js) =================
+   v22(docs/指示書/v22_ラーメン開発チュートリアル_修正指示書.md): 右下ボタン列いちばん上の「開発」、
+   チュートリアルの誘導(指アイコン・他要素を暗くする)、素材カードの選択演出、完成演出+命名モーダル。
+   色はv14の4色相のみ・グラデーション/ぼかしは使わない既存方針をそのまま踏襲する。 */
+
+/* 「開発」ボタン。他のfabと同じ土台(.fab)に、丼(🍜)+キラッ(✨の小バッジ)を乗せる。 */
+.fab-develop { position: relative; }
+.fab-develop .fab-icon-badge {
+  position: absolute; top: -2px; right: -2px;
+  font-size: calc(var(--frame-w) * 0.024);
+  line-height: 1;
+}
+/* 出現: scale 0→1のバウンド。1回だけ(js側でクラスを使い回さない)。 */
+@keyframes fabDevelopIn {
+  0%   { transform: scale(0); opacity: 0; }
+  65%  { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.fab-develop-in { animation: fabDevelopIn 0.4s ease-out; }
+/* 出現後の淡い脈動グロー(1.2秒ループ)。ぼかしは使わず、枠色の往復とベタずらし影の伸縮だけで表す。 */
+@keyframes fabDevelopGlow {
+  0%, 100% { border-color: var(--c-ink); box-shadow: 2px 2px 0 var(--c-ink-16); }
+  50%      { border-color: var(--c-accent); box-shadow: 2px 2px 0 var(--c-ink-16), 0 0 0 4px var(--c-ink-08); }
+}
+.fab-develop-glow { animation: fabDevelopGlow 1.2s ease-in-out infinite; }
+
+/* チュートリアル中(手順2): 開発ボタン以外は触れない・薄くする。 */
+.fab-tutorial-dim, .dev-tutorial-dim { opacity: 0.4; pointer-events: none; transition: opacity 0.2s ease; }
+
+/* 指アイコン。左から右へ指す。位置はjs側でtarget要素の実測位置から都度計算する(#app基準の絶対配置)。 */
+.dev-pointer {
+  position: absolute; z-index: 40;
+  font-size: calc(var(--frame-w) * 0.075);
+  line-height: 1;
+  pointer-events: none;
+  filter: none;
+}
+@keyframes devPointerBob {
+  0%, 100% { transform: translateX(0); }
+  50%      { transform: translateX(8px); }
+}
+.dev-pointer { animation: devPointerBob 0.9s ease-in-out infinite; }
+
+/* 手順3: 素材カードの選択。既存.choice-cardを土台に、選んだカードだけ少し浮かせて縁を光らせる。
+   既存の.choice-card.selected(他画面でも使う汎用スタイル)には手を加えず、開発パネル専用の
+   グリッド(.dev-card-grid)配下だけに強めの見た目を追加する形にした(既存画面への影響を避けるため)。 */
+.dev-card-grid .choice-card.selected {
+  transform: translateY(-4px);
+  box-shadow: 0 4px 0 var(--c-ink-16), 0 0 0 3px var(--c-accent);
+}
+.dev-submit-btn { width: 100%; margin-top: 4px; }
+
+/* 手順4: 完成演出のオーバーレイ。.card-reveal-overlayと同じ暗幕・中央寄せの考え方を踏襲。
+   sheet(z-index:30)を閉じてから出すが、念のためsheetより確実に上に来るよう32にしてある。 */
+.dev-reveal-overlay {
+  position: absolute; inset: 0; z-index: 32;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--c-ink-64);
+  cursor: pointer;
+  padding: 12px;
+}
+.dev-reveal-stage { position: relative; width: 100%; height: 100%; }
+.dev-reveal-bowl {
+  position: absolute; left: 50%; top: 38%;
+  transform: translate(-50%, -50%);
+  font-size: calc(var(--frame-w) * 0.14);
+  line-height: 1;
+}
+@keyframes devBowlPop {
+  0%   { transform: translate(-50%, -50%) scale(1); }
+  40%  { transform: translate(-50%, -50%) scale(1.22); }
+  100% { transform: translate(-50%, -50%) scale(1); }
+}
+.dev-reveal-bowl.pop { animation: devBowlPop 0.3s ease-out; }
+.dev-reveal-cards {
+  position: absolute; left: 50%; bottom: 18%;
+  transform: translateX(-50%);
+  display: flex; gap: 10px;
+}
+.dev-reveal-card {
+  background: var(--c-panel);
+  border: 2px solid var(--c-ink);
+  border-radius: var(--r);
+  box-shadow: 0 2px 0 var(--c-ink-16);
+  padding: 8px 10px;
+  text-align: center;
+}
+.dev-reveal-card .emoji { display: block; font-size: 1.6rem; line-height: 1.1; }
+.dev-reveal-card .name { font-size: var(--fs-note); font-weight: 700; margin-top: 2px; }
+/* 弧を描いて丼へ(0.25秒ずつずらして開始)。--dx/--dyはjs側で丼との実測差分を入れる。 */
+@keyframes devCardFly {
+  0%   { transform: translate(0, 0) scale(1) rotate(0deg); opacity: 1; }
+  55%  { transform: translate(calc(var(--dx) * 0.5), calc(var(--dy) * 0.5 - 40px)) scale(0.82) rotate(8deg); opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) scale(0.22) rotate(16deg); opacity: 0; }
+}
+.dev-reveal-card.flying { animation: devCardFly 0.55s ease-in forwards; }
+/* 湯気。既存の♨️(使用実績あり)をそのまま使い、上へ抜けながら消える。 */
+.dev-reveal-steam {
+  position: absolute; left: 50%; top: 30%; transform: translateX(-50%);
+  font-size: calc(var(--frame-w) * 0.06);
+  opacity: 0;
+}
+@keyframes devSteamRise {
+  0%   { opacity: 0; transform: translate(-50%, 6px); }
+  30%  { opacity: 0.8; }
+  100% { opacity: 0; transform: translate(-50%, -30px); }
+}
+.dev-reveal-steam.show { animation: devSteamRise 0.6s ease-out forwards; }
+/* キラッ。card-reveal-sparkleと同じ考え方(単発・回転しながら消える)を複数個ばらまく。 */
+.dev-reveal-sparkle-burst {
+  position: absolute; font-size: calc(var(--frame-w) * 0.05);
+  opacity: 0; pointer-events: none;
+}
+@keyframes devSparkleBurst {
+  0%   { opacity: 0; transform: scale(0.4) rotate(-10deg); }
+  40%  { opacity: 1; transform: scale(1.2) rotate(8deg); }
+  100% { opacity: 0; transform: scale(0.9) rotate(0deg); }
+}
+.dev-reveal-sparkle-burst.show { animation: devSparkleBurst 0.5s ease-out forwards; }
+
+/* 手順5: 命名モーダル(既存.modal-boxを流用)。この画面唯一のテキスト入力。 */
+.dev-name-box { width: 100%; max-width: 320px; text-align: center; }
+.dev-name-input {
+  width: 100%;
+  font-family: inherit;
+  font-size: var(--fs-label);
+  font-weight: 700;
+  color: var(--c-ink);
+  background: var(--c-bg);
+  border: 2px solid var(--c-ink);
+  border-radius: var(--r-s);
+  padding: 8px 10px;
+  margin: 10px 0 12px;
+  text-align: center;
+}
+.dev-name-input:focus { outline: none; border-color: var(--c-accent); }
 
 /* ================= 営業ループ(店の絵を枠いっぱいに) ================= */
 #screen-loop { padding: 0; }

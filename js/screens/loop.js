@@ -30,6 +30,16 @@ window.ScreenLoop = (function () {
   var lastFinance = null, lastCustomers = null, lastSchedule = null;
   var openSheetKey = null, sheetBuilder = null;
   var lastFlashData = null; // 週末の収支表示(詳細/1行トグル用に直近データを保持)
+  // v22(docs/指示書/v22_ラーメン開発チュートリアル_修正指示書.md): 「ラーメン開発」まわりの
+  // 画面専用の状態。state(セーブ)には持たせない一時的な値だけをここに置く
+  // (tutorialStep・developedRamensはstate側。§2「途中でリロードしても再開できる」対象はそちら)。
+  var devSelection = null;      // 開発パネルで今選んでいる{soup,tare,noodle,topping}(idまたはnull)
+  var devPrevSpeed = null;      // 開発パネルを開く直前の速度(閉じたときに戻す用)
+  var devSpeedPaused = false;   // 上のdevPrevSpeedによる一時停止が今かかっているか
+  var devFlowContinuing = false; // 「開発する」を押してsheetを閉じ、完成演出へ続ける途中かどうか
+  var devFabRevealed = false;   // 「開発」ボタンのバウンド出現(handleDevelopSubmit.fab-develop-in)を1回だけ出す
+  var devPointerEl = null;      // 誘導の指アイコン(#app直下)
+  var devIntroTimer = null;
   // v12-3:「今週の客」= 実際に入店した人数を1人ずつ数えるカウンタ。週の開始でリセットする。
   var weekLiveCount = 0;
   // STEP10: 認知度・評判の「今週いくつ動いたか」の表示用。表示専用の値なのでstateには持たせない
@@ -698,6 +708,9 @@ window.ScreenLoop = (function () {
   // ただし止まるのは時間の進行だけで、パネル自体はいつでも操作できる。レシピを変えた瞬間に
   // 上の店で客の反応が変わって見えるのは、時間が止まっていても refreshShop() が反映するので変わらない。
   function openSheet(key, title, builder) {
+    // v22 §1: 開発パネルを開いたまま別のパネルへ直接切り替えた場合も「閉じた」扱いにし、
+    // 速度・チュートリアルの状態を戻す(closeSheet()を経由しないルートのため、ここでも呼ぶ)。
+    if (key !== "develop") abandonDevelopIfNeeded();
     if (openSheetKey === key) { closeSheet(); return; }
     openSheetKey = key;
     sheetBuilder = builder;
@@ -728,6 +741,10 @@ window.ScreenLoop = (function () {
   }
 
   function closeSheet() {
+    // v22 §1: 開発パネルを閉じたら速度を元に戻す(「開発する」を押して完成演出へ続く途中
+    // (devFlowContinuing)は対象外。abandonDevelopIfNeeded()自身がそこを見て判定する)。
+    abandonDevelopIfNeeded();
+    devFlowContinuing = false;
     openSheetKey = null;
     sheetBuilder = null;
     var sheet = document.getElementById("sheet");
@@ -737,6 +754,270 @@ window.ScreenLoop = (function () {
     raiseControls(false);
     renderFabs();
     resume("panel");
+  }
+
+  // ==================== v22: ラーメン開発 ====================
+  // docs/指示書/v22_ラーメン開発チュートリアル_修正指示書.md。
+  // 手順1(セリフ)→2(ボタン出現・誘導)→3(素材カード選択)→4(完成演出)→5(命名)の状態機械。
+  // state.tutorialStep('intro'|'showButton'|'selectIngredients'|'pressDevelop'|'naming'|'done')が
+  // 本体で、ここにあるのは画面(fab・パネル・指アイコン)をその値に同期させるための関数群。
+  var DEV_LINES = window.DATA.guide.develop;
+  var DEV_CATS = [["soup", "スープ"], ["tare", "タレ"], ["noodle", "麺"], ["topping", "トッピング"]];
+
+  function tutorialStepVal() { return state.tutorialStep || "done"; }
+  function setTutorialStep(v) {
+    state.tutorialStep = v;
+    window.GameState.save();
+  }
+
+  // §2: リロード後の再開。パネルを開いている最中や完成演出・命名モーダルの最中(いずれも
+  // このモジュール内の一時変数(devSelection等)に依存し、stateには残らない)でリロードされたら、
+  // 「ボタンが光っていて、押せば開発を始められる」手順2の状態まで戻す。選びかけのカードは
+  // 失われるが、開発ボタンを押し直すだけで同じ場所からやり直せる(安全側の再開)。
+  function ensureDevelopTutorialResume() {
+    var ts = tutorialStepVal();
+    if (ts === "selectIngredients" || ts === "pressDevelop" || ts === "naming") {
+      setTutorialStep("showButton");
+      // 開発パネルを開いていた間の「元の速度」はこの画面の一時変数(devPrevSpeed)にしか無く、
+      // リロードで失われる。速度0(一時停止)のまま保存されていた場合、そのままだと再開後も
+      // 動き出さず「なぜか進まない」に見えてしまうため、既定の×1へ戻す(新規開始時と同じ値)。
+      if (state.speed === 0) state.speed = 1;
+    }
+  }
+
+  function startDevelopIntroIfNeeded() {
+    if (tutorialStepVal() !== "intro") return;
+    if (devIntroTimer) clearTimeout(devIntroTimer);
+    G.say(DEV_LINES.intro);
+    devIntroTimer = setTimeout(function () {
+      setTutorialStep("showButton");
+      renderFabs();
+    }, 2600);
+  }
+
+  // 手順2: 開発ボタン以外を触れなくする(他要素はopacity0.4+pointer-events:none)。
+  function syncTutorialDim() {
+    var dim = tutorialStepVal() === "showButton";
+    ["shop-fill", "top-bar", "speed-dock"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.classList.toggle("dev-tutorial-dim", dim);
+    });
+  }
+
+  // ---- 指アイコン。#app直下に1つだけ持ち、都度位置を計算し直す(sheetの中身が変わっても
+  // 座標を取り直せば追従できるので、要素自体は使い回す) ----
+  function ensureDevPointerEl() {
+    if (devPointerEl) return devPointerEl;
+    devPointerEl = h("span", { className: "dev-pointer emoji-font", text: "👉" });
+    (document.getElementById("app") || document.body).appendChild(devPointerEl);
+    return devPointerEl;
+  }
+  function showDevPointer(targetEl) {
+    if (!targetEl) { hideDevPointer(); return; }
+    var appEl = document.getElementById("app");
+    if (!appEl) return;
+    var el = ensureDevPointerEl();
+    var appRect = appEl.getBoundingClientRect();
+    var tRect = targetEl.getBoundingClientRect();
+    var pw = el.offsetWidth || 28, ph = el.offsetHeight || 28;
+    // §2「画面左側から右に向けて指す(画面端で見切れないように)」。targetの左側、縦位置は中央に
+    // 合わせる。左に寄せきれない(target自体が画面の左端に近い)ときは4pxでクランプする。
+    var left = Math.max(4, (tRect.left - appRect.left) - pw - 4);
+    var top = (tRect.top - appRect.top) + tRect.height / 2 - ph / 2;
+    el.style.left = left + "px";
+    el.style.top = top + "px";
+  }
+  function hideDevPointer() {
+    if (devPointerEl && devPointerEl.parentNode) devPointerEl.parentNode.removeChild(devPointerEl);
+    devPointerEl = null;
+  }
+
+  function devOwnedCategoryItems(cat) {
+    return RECIPES[cat].filter(function (item) { return window.Scoring.isMaterialOwned(state, cat, item.id); });
+  }
+
+  // §3「素材カードを一覧表示(現状は各種1枚ずつ)」。トッピングだけは「なし」しか持っていない
+  // ことが多い(初期所持カードにトッピングは無い)ので、実物の候補が無ければ最初から「なし」を
+  // 選んだ状態にする(§3「全部選ぶまで無効」は満たしたまま、選びようが無いものを無理にタップ
+  // させない)。
+  function freshDevSelection() {
+    var sel = { soup: null, tare: null, noodle: null, topping: null };
+    var realToppings = devOwnedCategoryItems("topping").filter(function (i) { return i.id !== "none"; });
+    if (!realToppings.length) sel.topping = "none";
+    return sel;
+  }
+
+  function devAllSelected() {
+    return !!(devSelection && devSelection.soup && devSelection.tare && devSelection.noodle && devSelection.topping);
+  }
+
+  // 設計判断(docs/設計判断記録.md参照): 最初の開発は必ずラーメン1品目(state.recipe)を対象にする
+  // (チュートリアルが指す相手を1つに固定するため)。2回目以降は、解放済みでまだ埋まっていない
+  // 2・3品目の枠を先頭から探す。空きが無ければnullを返す(呼び出し側は「開発する」を出さず案内する)。
+  function devTargetSlot() {
+    if (!state.developedRamens || !state.developedRamens.length) return "recipe";
+    var slots = window.Scoring.unlockedRamenSlots(state);
+    for (var i = 0; i < slots - 1; i++) {
+      var r = state.extraRamens[i];
+      if (!r || !(r.soup && r.tare && r.noodle && r.topping)) return i;
+    }
+    return null;
+  }
+
+  function defaultDevelopName(tareId) {
+    var prefix = (DEV_LINES.namePrefix && DEV_LINES.namePrefix[tareId]) || DEV_LINES.nameFallback;
+    return prefix + DEV_LINES.nameSuffix;
+  }
+
+  function restoreDevSpeed() {
+    if (devPrevSpeed != null) { setSpeed(devPrevSpeed); devPrevSpeed = null; }
+    devSpeedPaused = false;
+  }
+  // §1「開発パネルを開いたら時間を自動で一時停止...閉じたら元の速度に戻す」。「閉じる」には、
+  // 開発する前に別のパネルへ切り替える・戻る、の両方を含める。devFlowContinuing中
+  // (「開発する」を押してsheetを閉じ、完成演出へ続く途中)は対象外。
+  function abandonDevelopIfNeeded() {
+    if (!devSpeedPaused || devFlowContinuing) return;
+    restoreDevSpeed();
+    hideDevPointer();
+    if (tutorialStepVal() !== "done") setTutorialStep("showButton");
+    renderFabs();
+  }
+
+  function openDevelopPanel() {
+    if (openSheetKey === "develop") { closeSheet(); return; }
+    devSelection = freshDevSelection();
+    devPrevSpeed = state.speed;
+    devSpeedPaused = true;
+    setSpeed(0);
+    hideDevPointer();
+    if (tutorialStepVal() === "showButton") setTutorialStep("selectIngredients");
+    syncTutorialDim();
+    openSheet("develop", "ラーメン開発", panelDevelop);
+  }
+
+  function panelDevelop() {
+    var box = h("div", {});
+    var target = devTargetSlot();
+    if (target === null) {
+      box.appendChild(h("div", { className: "sheet-section status-card" }, [
+        h("h3", { className: "emoji-font", text: "🍜✨ 新しく開発する" }),
+        h("p", { className: "dim", text: DEV_LINES.noSlot })
+      ]));
+      hideDevPointer();
+      return box;
+    }
+    box.appendChild(h("div", { className: "sheet-section" }, [
+      h("p", { className: "dim", text: "手持ちの素材カードから選んで、新しいラーメンを完成させよう。" })
+    ]));
+
+    var ts = tutorialStepVal();
+    var tutorialActive = ts === "selectIngredients" || ts === "pressDevelop";
+    var pointerCatKey = null; // 誘導が次に指すカテゴリ(無ければ「開発する」ボタンを指す)
+
+    DEV_CATS.forEach(function (c) {
+      var key = c[0];
+      var items = devOwnedCategoryItems(key);
+      if (!items.length) return; // 所持カードが1枚も無いカテゴリ(トッピング以外は起こらない)は出さない
+      if (pointerCatKey === null && !devSelection[key]) pointerCatKey = key;
+      var sec = h("div", { className: "sheet-section" }, [h("h3", { text: c[1] })]);
+      var grid = h("div", { className: "choice-grid dev-card-grid", id: "dev-grid-" + key });
+      items.forEach(function (item) {
+        var selected = devSelection[key] === item.id;
+        grid.appendChild(h("div", {
+          className: "choice-card" + (selected ? " selected" : ""),
+          onclick: function () {
+            devSelection[key] = item.id;
+            if (devAllSelected() && tutorialStepVal() === "selectIngredients") setTutorialStep("pressDevelop");
+            refreshSheet();
+          }
+        }, [
+          h("div", { className: "emoji emoji-font", text: item.emoji }),
+          h("div", { className: "name", text: item.name })
+        ]));
+      });
+      sec.appendChild(grid);
+      box.appendChild(sec);
+    });
+
+    var ready = devAllSelected();
+    box.appendChild(h("button", {
+      className: "btn primary dev-submit-btn",
+      id: "dev-submit-btn",
+      text: "開発する",
+      disabled: ready ? null : "disabled",
+      onclick: function () { if (ready) handleDevelopSubmit(target); }
+    }));
+
+    if (tutorialActive) {
+      // .sheetの出現アニメーション(transform 0.22s、初回オープン時だけ発生)が終わってから位置を
+      // 測る。requestAnimationFrame(次のペイント直後)だと初回はまだ画面外の座標を拾ってしまう
+      // (実機Playwrightで実測して発覚。詳細はdocs/設計判断記録.md)。
+      setTimeout(function () {
+        var curTs = tutorialStepVal();
+        if (openSheetKey !== "develop" || (curTs !== "selectIngredients" && curTs !== "pressDevelop")) { hideDevPointer(); return; }
+        var targetEl = pointerCatKey
+          ? (document.getElementById("dev-grid-" + pointerCatKey) || {}).firstElementChild
+          : document.getElementById("dev-submit-btn");
+        showDevPointer(targetEl);
+      }, 260);
+    } else {
+      hideDevPointer();
+    }
+    return box;
+  }
+
+  function handleDevelopSubmit(target) {
+    if (!devAllSelected()) return;
+    var ingredients = {
+      soup: devSelection.soup, tare: devSelection.tare,
+      noodle: devSelection.noodle, topping: devSelection.topping
+    };
+    var agg = Scoring.recipeAggregate(ingredients, state);
+    var defaultName = defaultDevelopName(ingredients.tare);
+
+    devFlowContinuing = true; // 続けてcloseSheet()するが、速度・チュートリアルの状態はまだ戻さない
+    closeSheet();
+    hideDevPointer();
+    if (tutorialStepVal() === "pressDevelop") setTutorialStep("naming");
+
+    var items = [];
+    DEV_CATS.forEach(function (c) {
+      var key = c[0], id = ingredients[key];
+      if (!id || id === "none") return; // §4: 「なし」は飛ばす絵が無いので演出には含めない
+      var def = U.findById(RECIPES[key], id);
+      if (def) items.push({ emoji: def.emoji, name: def.name });
+    });
+
+    window.DevelopReveal.show(items, defaultName, function (finalName) {
+      finalizeDevelop(target, ingredients, agg, finalName);
+    });
+  }
+
+  function finalizeDevelop(target, ingredients, agg, name) {
+    if (target === "recipe") {
+      state.recipe = { soup: ingredients.soup, tare: ingredients.tare, noodle: ingredients.noodle, topping: ingredients.topping };
+      state.recipeChangeLog.push(U.weekOfRun(state.day)); // 既存のレシピ変更ログと同じ扱いにする
+    } else {
+      state.extraRamens[target] = { soup: ingredients.soup, tare: ingredients.tare, noodle: ingredients.noodle, topping: ingredients.topping };
+    }
+    // §5: 生成した瞬間の値を焼き込んだ不変の記録。以後、素材のLv・分岐を変えても書き換えない
+    // (設計判断はdocs/設計判断記録.md参照)。
+    state.developedRamens.push({
+      id: "dev_" + Date.now() + "_" + state.developedRamens.length,
+      name: name,
+      ingredients: ingredients,
+      stats: { taste: Math.round(agg.quality), cost: Math.round(agg.cost), cookTime: Math.round(agg.workload) },
+      createdAt: state.day
+    });
+
+    restoreDevSpeed();
+    setTutorialStep("done");
+    window.GameState.save();
+
+    G.say(DEV_LINES.complete.replace("{name}", name));
+    renderFabs();
+    if (openSheetKey) refreshSheet(); // 他のパネルが開いていれば(メニュー構成の数字等)反映する
   }
 
   // ---------- パネルの中身 ----------
@@ -872,6 +1153,10 @@ window.ScreenLoop = (function () {
   function panelRecipe() {
     var box = h("div", {});
     box.appendChild(menuOverviewSection());
+    // v22 §1「レシピ画面の中にも「＋ 新しく開発する」を置いて導線を二重化する」。
+    box.appendChild(h("div", { className: "sheet-section" }, [
+      h("button", { className: "btn primary", text: "＋ 新しく開発する", onclick: openDevelopPanel })
+    ]));
     if (state.flags.recipeLockWeeksLeft > 0) {
       box.appendChild(h("p", { className: "bad", text: "ゴンゾウとの約束で、あと" + state.flags.recipeLockWeeksLeft + "週はレシピを変更できない。" }));
     }
@@ -1199,9 +1484,30 @@ window.ScreenLoop = (function () {
     return box;
   }
 
+  // v22 §5: 「開発」で完成させたラーメンの一覧(不変の記録、state.developedRamens)。
+  // 実際に店に出ているレシピ(state.recipe/extraRamens、素材のLv・分岐で今も動く値)とは別に、
+  // 完成した瞬間の味・原価・調理時間を焼き込んだまま並べる(履歴としての表示専用)。
+  function developedRamensSection() {
+    var sec = h("div", { className: "sheet-section status-card" }, [h("h3", { className: "emoji-font", text: "🍜✨ 開発したラーメン" })]);
+    var list = state.developedRamens || [];
+    if (!list.length) {
+      sec.appendChild(h("p", { className: "dim", text: "まだ何も開発していない。右下の「開発」から作れる。" }));
+      return sec;
+    }
+    list.slice().reverse().forEach(function (r) {
+      sec.appendChild(h("div", { className: "dim" }, [
+        h("span", { className: "money", text: r.name }),
+        "　味" + r.stats.taste + "・原価" + r.stats.cost + "円・調理時間" + r.stats.cookTime +
+        "　(" + U.weekOfRun(r.createdAt) + "週目に開発)"
+      ]));
+    });
+    return sec;
+  }
+
   function panelData() {
     var box = h("div", {});
     box.appendChild(h("div", { className: "sheet-section" }, [window.StatusPanel.renderRamen(state)]));
+    box.appendChild(developedRamensSection());
 
     var last = state.history.length ? state.history[state.history.length - 1] : null;
     var num = h("div", { className: "sheet-section status-card" }, [h("h3", { className: "emoji-font", text: "📊 直近の週" })]);
@@ -1240,6 +1546,26 @@ window.ScreenLoop = (function () {
     var col = document.getElementById("fab-col");
     if (!col) return;
     window.UI.clear(col);
+    var ts = tutorialStepVal();
+    var dimOthers = ts === "showButton";
+
+    // v22 §1「ホーム画面右下のボタン列の最上段(レシピの上)に「開発」ボタンを追加」。
+    // 手順1(セリフ)が終わるまで(tutorialStep==='intro')は非表示、出現はscale0→1のバウンド
+    // (1回だけ。devFabRevealedで使い回しを防ぐ)、出現後(showButton)は淡い脈動グロー。
+    if (ts !== "intro") {
+      var bounceCls = devFabRevealed ? "" : " fab-develop-in";
+      devFabRevealed = true;
+      col.appendChild(h("button", {
+        className: "fab fab-develop" + (openSheetKey === "develop" ? " active" : "") +
+          (dimOthers ? " fab-develop-glow" : "") + bounceCls,
+        onclick: openDevelopPanel
+      }, [
+        h("span", { className: "fab-icon emoji-font", text: "🍜" }),
+        h("span", { className: "fab-label", text: "開発" }),
+        h("span", { className: "fab-icon-badge emoji-font", text: "✨" })
+      ]));
+    }
+
     // v17(docs/新設計/v17_ラーメン屋_修正指示書.md §1-5): 営業時間の選択が無くなったので
     // 「⏰時間」パネルとそのFABを削除した(6個→5個)。
     [
@@ -1250,13 +1576,23 @@ window.ScreenLoop = (function () {
       ["data", "📊", "データ", "データ", panelData]
     ].forEach(function (f) {
       col.appendChild(h("button", {
-        className: "fab" + (openSheetKey === f[0] ? " active" : ""),
-        onclick: function () { openSheet(f[0], f[3], f[4]); }
+        className: "fab" + (openSheetKey === f[0] ? " active" : "") + (dimOthers ? " fab-tutorial-dim" : ""),
+        onclick: function () { if (dimOthers) return; openSheet(f[0], f[3], f[4]); }
       }, [
         h("span", { className: "fab-icon emoji-font", text: f[1] }),
         h("span", { className: "fab-label", text: f[2] })
       ]));
     });
+
+    syncTutorialDim();
+    if (dimOthers) {
+      requestAnimationFrame(function () {
+        if (tutorialStepVal() !== "showButton") return; // 待っている間に押されて先へ進んでいたら何もしない
+        showDevPointer(col.querySelector(".fab-develop"));
+      });
+    } else if (!openSheetKey) {
+      hideDevPointer();
+    }
   }
 
   // ---------- 組み立て ----------
@@ -1288,6 +1624,18 @@ window.ScreenLoop = (function () {
     sheetBuilder = null;
     pauseReasons.clear(); // 前回のプレイの一時停止理由を持ち越さない(念のため)
 
+    // v22: 「ラーメン開発」まわりの一時状態も持ち越さない。devPointerEl・完成演出オーバーレイは
+    // #app直下(rootの外)に付くため、上のwindow.UI.clear(root)では消えない。念のためここで畳む。
+    devSelection = null;
+    devPrevSpeed = null;
+    devSpeedPaused = false;
+    devFlowContinuing = false;
+    devFabRevealed = false;
+    if (devIntroTimer) { clearTimeout(devIntroTimer); devIntroTimer = null; }
+    hideDevPointer();
+    if (window.DevelopReveal) window.DevelopReveal.cancel();
+    ensureDevelopTutorialResume(); // リロード等でパネル操作の途中だった場合、手順2の状態まで戻す
+
     // 中断からの再開で万一「週末シーケンス中」のまま保存されていたら、安全側(次の週の頭)に倒す。
     // 今週分の収支(money・historyなど)はrunWeeklyCalcの時点で既に確定・保存済みなので、
     // 同じ週をもう一度計算し直すのではなく、日付だけ次の週の頭へ進める。
@@ -1311,6 +1659,7 @@ window.ScreenLoop = (function () {
     onVisibilityChange(); // 開いた時点でタブが非表示なら最初からpauseしておく
     // 保存されていた速度を引き継ぐ(新規ゲームはfreshState()通り×1から。速度自体は「翌週以降も引き継ぐ」)。
     setSpeed([0, 1, 2, 4].indexOf(state.speed) >= 0 ? state.speed : 1);
+    startDevelopIntroIfNeeded(); // v22 手順1: 初回だけどんぶりちゃんが話し、手順2(ボタン出現)へ進む
   }
 
   return { render: render, setSpeed: setSpeed };

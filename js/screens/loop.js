@@ -815,19 +815,44 @@ window.ScreenLoop = (function () {
     });
   }
 
-  // ---- 指アイコン。#app直下に1つだけ持ち、都度位置を計算し直す(sheetの中身が変わっても
-  // 座標を取り直せば追従できるので、要素自体は使い回す) ----
-  function ensureDevPointerEl() {
-    if (devPointerEl) return devPointerEl;
-    devPointerEl = h("span", { className: "dev-pointer emoji-font", text: "👉" });
-    (document.getElementById("app") || document.body).appendChild(devPointerEl);
+  // ---- 指アイコン ----
+  // 実機フィードバック対応(2026-08-14、Android Chrome): 開発パネル内の指アイコンが、
+  // #app基準のビューポート相対座標を一度だけ計算して固定していたため、#sheet-body
+  // (素材カードの一覧、overflow-y:autoでスクロールする)をスクロールすると追従しなかった。
+  // 対応として、置き場所を呼び出し側で選べるようにした:
+  //   - ホーム画面(開発ボタンを指す。#appはスクロールしない)→ #app直下、ビューポート相対
+  //   - 開発パネル内(カード・「開発する」ボタンを指す)→ #sheet-body の**内側**の子要素として
+  //     配置し、targetのoffsetTop/offsetLeft(スクロール量に依存しない、offsetParent基準の値)
+  //     で位置を決める。ブラウザの通常のスクロール処理でコンテンツと一緒に動くため、scroll
+  //     イベントでの再計算が要らない(offsetTop/LeftはCSSのtransform・スクロール位置の
+  //     影響を受けない値なので、.sheetの出現アニメーション中に測っても安全)。
+  //     #sheet-bodyには position: relative を付けてあり(css/style.css)、間にある
+  //     .sheet-section/.choice-grid/.choice-cardはいずれもposition指定が無いため、
+  //     targetのoffsetParentは必ず#sheet-bodyになる。
+  var devPointerContainer = null; // 今どちらの置き場所に付いているか("app" | "panel" | null)
+
+  function ensureDevPointerEl(container, key) {
+    if (!devPointerEl || devPointerContainer !== key) {
+      hideDevPointer(); // 置き場所が変わるときは前の要素を畳んでから作り直す
+      devPointerEl = h("span", { className: "dev-pointer emoji-font", text: "👉" });
+      devPointerContainer = key;
+    }
+    // 実機フィードバック対応(2026-08-14): カードを1枚選ぶたびにrefreshSheet()が
+    // window.UI.clear(#sheet-body)で中身を全部消してから作り直すため、containerが
+    // 変わっていなくても#sheet-bodyの子だった.dev-pointerはDOMから外れてしまっている
+    // (devPointerElという参照自体は生きたまま「消えた」状態になり、指が見えなくなる不具合の
+    // 原因だった)。同じ要素の使い回しでも、呼ばれるたびに必ず付け直す(既にcontainerの子なら
+    // 実質何もしないのと同じで、外れていれば再接続される)。
+    container.appendChild(devPointerEl);
     return devPointerEl;
   }
-  function showDevPointer(targetEl) {
+
+  // ホーム画面用: 「開発」ボタンを指す。#appはスクロールしないビューポート相対の座標でよい。
+  function showDevPointerAtHome(targetEl) {
     if (!targetEl) { hideDevPointer(); return; }
     var appEl = document.getElementById("app");
     if (!appEl) return;
-    var el = ensureDevPointerEl();
+    var el = ensureDevPointerEl(appEl, "app");
     var appRect = appEl.getBoundingClientRect();
     var tRect = targetEl.getBoundingClientRect();
     var pw = el.offsetWidth || 28, ph = el.offsetHeight || 28;
@@ -838,9 +863,25 @@ window.ScreenLoop = (function () {
     el.style.left = left + "px";
     el.style.top = top + "px";
   }
+
+  // 開発パネル用: カード・「開発する」ボタンを指す。#sheet-bodyの内側に置き、
+  // targetのoffsetTop/offsetLeftで位置を決める(スクロールに自動で追従する)。
+  function showDevPointerInPanel(targetEl) {
+    if (!targetEl) { hideDevPointer(); return; }
+    var body = document.getElementById("sheet-body");
+    if (!body) return;
+    var el = ensureDevPointerEl(body, "panel");
+    var pw = el.offsetWidth || 28, ph = el.offsetHeight || 28;
+    var left = Math.max(4, targetEl.offsetLeft - pw - 4);
+    var top = targetEl.offsetTop + targetEl.offsetHeight / 2 - ph / 2;
+    el.style.left = left + "px";
+    el.style.top = top + "px";
+  }
+
   function hideDevPointer() {
     if (devPointerEl && devPointerEl.parentNode) devPointerEl.parentNode.removeChild(devPointerEl);
     devPointerEl = null;
+    devPointerContainer = null;
   }
 
   function devOwnedCategoryItems(cat) {
@@ -961,17 +1002,18 @@ window.ScreenLoop = (function () {
     }));
 
     if (tutorialActive) {
-      // .sheetの出現アニメーション(transform 0.22s、初回オープン時だけ発生)が終わってから位置を
-      // 測る。requestAnimationFrame(次のペイント直後)だと初回はまだ画面外の座標を拾ってしまう
-      // (実機Playwrightで実測して発覚。詳細はdocs/設計判断記録.md)。
-      setTimeout(function () {
+      // showDevPointerInPanel()はoffsetTop/offsetLeft(スクロール位置・.sheetの出現transformの
+      // 影響を受けない値)で位置を決めるため、DOMに実際に繋がった直後(次のフレーム)に測れば
+      // 十分安全(以前はgetBoundingClientRect基準だったため.sheetの出現アニメーションが
+      // 終わるまで待つ必要があったが、その制約はもう無い)。
+      requestAnimationFrame(function () {
         var curTs = tutorialStepVal();
         if (openSheetKey !== "develop" || (curTs !== "selectIngredients" && curTs !== "pressDevelop")) { hideDevPointer(); return; }
         var targetEl = pointerCatKey
           ? (document.getElementById("dev-grid-" + pointerCatKey) || {}).firstElementChild
           : document.getElementById("dev-submit-btn");
-        showDevPointer(targetEl);
-      }, 260);
+        showDevPointerInPanel(targetEl);
+      });
     } else {
       hideDevPointer();
     }
@@ -1603,7 +1645,7 @@ window.ScreenLoop = (function () {
     if (dimOthers) {
       requestAnimationFrame(function () {
         if (tutorialStepVal() !== "showButton") return; // 待っている間に押されて先へ進んでいたら何もしない
-        showDevPointer(col.querySelector(".fab-develop"));
+        showDevPointerAtHome(col.querySelector(".fab-develop"));
       });
     } else if (!openSheetKey) {
       hideDevPointer();

@@ -457,7 +457,13 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   .card-reveal-card.in { animation: none; opacity: 1; transform: none; }
   .card-reveal-sparkle { animation: none; opacity: 0; }
   .fab-develop-in { animation: none; }
-  .fab-develop-glow { animation: none; }
+  /* 実機フィードバック対応(2026-08-14): .fab-develop-glow(脈動グロー)はここでは止めない。
+     出現バウンス(.fab-develop-in、拡大縮小を伴う動き)は他の項目と同様reduced-motionで止めるが、
+     グローは位置・大きさが動かない色/枠線の変化だけなので、動きに弱い人への配慮(vestibular
+     disorder等、prefers-reduced-motionが本来配慮する対象)には当たらないと判断した。むしろ
+     ここで一緒に止めてしまうと、バウンスも無い環境では「開発」ボタンを示す誘導が何も残らず、
+     Android端末の「アニメーションを減らす」設定を入れているプレイヤーがボタンに気づけなく
+     なる(実機フィードバックで指摘された不具合)。 */
   .dev-pointer { animation: none; }
   .dev-card-fly.flying { animation: none; opacity: 0; }
   .dev-reveal-steam, .dev-reveal-sparkle-burst { animation: none; opacity: 0; }
@@ -770,7 +776,12 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   border-bottom: 2px solid var(--c-ink-16);
 }
 .sheet-title { margin-bottom: 0; }
-.sheet-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 8px 10px 16px; }
+/* position: relative は実機フィードバック対応(2026-08-14)で追加。.dev-pointer(開発パネル内の
+   指アイコン、js/screens/loop.jsのshowDevPointerInPanel())をこの内側の子要素として配置し、
+   offsetTop/offsetLeft基準で位置を決めるための土台(スクロールに自動で追従させるため)。
+   間にある.sheet-section/.choice-grid/.choice-cardはposition指定が無いので、targetの
+   offsetParentは必ずここになる。 */
+.sheet-body { position: relative; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 8px 10px 16px; }
 .sheet-section { margin-bottom: 12px; }
 .sheet-section:last-child { margin-bottom: 0; }
 

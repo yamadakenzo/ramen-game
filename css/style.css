@@ -128,7 +128,7 @@ body { display: flex; justify-content: center; align-items: center; }
    touch-action: manipulation でダブルタップズーム等のジェスチャー判定待ちを無くし、
    タップした瞬間にそのままクリックとして処理させる(スマホでタップが反応しない/遅れる対策)。 */
 .btn, .choice-card, .fab, .detail-btn, .sheet-backdrop, .guide-bubble,
-.setup-window, .card-reveal-overlay {
+.setup-panel, .card-reveal-overlay {
   touch-action: manipulation;
 }
 
@@ -262,29 +262,53 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    念のためjs側でsetPaused(true)も掛けている(js/screens/setup.js)。 */
 .setup-bg { position: absolute; inset: 0; z-index: 1; overflow: hidden; }
 
-/* §3-1: 上半分にどんぶりちゃんを、今までの案内バーより明確に大きく置く */
-.setup-char-wrap {
-  position: absolute; left: 0; right: 0; top: 4%; height: 46%;
-  z-index: 2; pointer-events: none;
-  display: flex; align-items: flex-end; justify-content: center;
-}
-.setup-char { font-size: calc(var(--frame-w) * 0.34); line-height: 1; display: block; }
-/* §3-4: 文字を送っている間だけ上下に小さく揺れる(周期0.4秒)。svEat(css内の既存アニメ)と
-   同じ ease-in-out 系に速さを揃える(指示: 新しい動きは既存の速さの感じに揃えること)。 */
-@keyframes setupCharBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
-.setup-char.talking { animation: setupCharBob 0.4s ease-in-out infinite; }
-
-/* §3-1: 下半分の会話ウインドウ。枠線・角丸・背景・影はすべて指示どおりの指定値そのまま。 */
-.setup-window {
-  position: absolute; left: 8px; right: 8px; bottom: 8px; height: 46%;
+/* v21(docs/指示書/v21_ラーメン屋_修正指示書.md §3-1): どんぶりちゃんの絵と会話ウインドウを
+   1枚の外枠(.setup-panel)にまとめる。枠線・角丸・影はv20の.setup-windowが使っていた実値を
+   そのまま流用(§2-2で読み取った値、新しい値は作っていない)。背景は透明
+   (transparentは色ではないため4色パレット制約の対象外。半透明rgba()/opacityは使わない)。
+   z-indexはCardRevealのオーバーレイ(z-index:15、#app直下のフルスクリーン)より下、
+   .setup-skip(z-index:30)より下になるよう、旧.setup-windowと同じ10のまま据え置く
+   (ユーザー指示)。 */
+.setup-panel {
+  position: absolute; left: 8px; right: 8px; top: 4%; bottom: 8px;
   z-index: 10;
   display: flex; flex-direction: column;
-  padding: 10px 12px;
-  background: var(--c-panel);
+  background: transparent;
   border: 2px solid var(--c-ink);
   border-radius: var(--r);
   box-shadow: 0 2px 0 var(--c-ink-16);
   cursor: pointer;
+}
+/* 上段: 背景透過(店の断面図が透けて見える)。どんぶりちゃんの絵だけが乗る。
+   残りの高さを全部取る(flex: 1 1 auto、下段は次項で固定高さにする)。 */
+.setup-panel-top {
+  flex: 1 1 auto; min-height: 0;
+  background: transparent;
+  display: flex; align-items: flex-end; justify-content: center;
+}
+/* v20時点は上半分(画面高46%)に対する比率(0.34)だったが、下段を2行固定で大幅に縮めた分だけ
+   上段が広がったため、その広さに対して自然に見えるよう比率を調整した(実装者裁量、
+   ユーザー指示どおり)。固定ビューポートを超えないことは§5で実測確認する。 */
+.setup-char { font-size: calc(var(--frame-w) * 0.4); line-height: 1; display: block; }
+/* §3-4(v20由来、v21でも維持): 文字を送っている間だけ上下に小さく揺れる(周期0.4秒)。svEatと
+   同じease-in-out系に速さを揃える。v21 §2-1の調査で既に.setup-char本体に付いていたことを
+   確認済みのため、適用先の変更は不要(外枠.setup-panelごと揺れることはない)。 */
+@keyframes setupCharBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+.setup-char.talking { animation: setupCharBob 0.4s ease-in-out infinite; }
+
+/* 下段: 不透明。セリフの可読性はここで確保する。区切り線は外枠と同じ太さ・色のborder-topで引く。
+   v21 §2-4: 高さは内容に応じて伸縮させず固定する(文字送り中に1→2行と増えて区切り線が動くのを
+   防ぐため)。実測(scratchpad配下のPlaywrightで.setup-window-name/-body/-nextを実フォント・
+   実CSSで計測): name行19.19px + margin-bottom4px + 本文2行44.78px + next行25.59px = 93.56px、
+   + padding上下20px = 113.56px。環境差の安全マージンを見て118pxに固定した。全9行(2周目5行)で
+   本文が2行を超えないことは§5で実測確認する。 */
+.setup-panel-body {
+  flex: 0 0 118px;
+  display: flex; flex-direction: column;
+  padding: 10px 12px;
+  background: var(--c-panel);
+  border-top: 2px solid var(--c-ink);
+  border-radius: 0 0 calc(var(--r) - 2px) calc(var(--r) - 2px);
 }
 .setup-window-name {
   flex: 0 0 auto;

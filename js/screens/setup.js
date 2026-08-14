@@ -96,6 +96,11 @@ window.ScreenSetup = (function () {
     window.ShopView.setPaused(true);
   }
 
+  // ---------- v21 §3-4: カード演出中だけ上段を不透明にする ----------
+  // §2-3の調査どおりCardRevealは#app直下のフルスクリーンオーバーレイ(暗幕付き、z-index:15)
+  // であり、.setup-panel(z-index:10)の透過状態とは無関係に背面が確保される。そのためこの節は
+  // 実施しない(ユーザー承認済み)。
+
   // ---------- §4-4: カード演出に出す中身。文字列に直接書かず、必ずデータから読む ----------
   function materialCardItems() {
     function pick(list, id, sub) {
@@ -189,6 +194,8 @@ window.ScreenSetup = (function () {
   }
 
   // ---------- 画面構築(render()につき1回) ----------
+  // v21 §3-1: どんぶりちゃんの絵と会話ウインドウを1枚の外枠(.setup-panel)にまとめる。
+  // .setup-panel-top(透過・絵)と.setup-panel-body(不透明・セリフ)はその内側の2区画。
   function build() {
     var root = document.getElementById("screen-setup");
     window.UI.clear(root);
@@ -196,17 +203,21 @@ window.ScreenSetup = (function () {
     var bg = h("div", { className: "setup-bg" });
     root.appendChild(bg);
 
-    var charEl = h("span", { className: "setup-char emoji-font", text: DONBURI.emoji });
-    root.appendChild(h("div", { className: "setup-char-wrap" }, [charEl]));
-
     root.appendChild(h("button", {
       className: "btn small setup-skip", text: "スキップ", onclick: onSkip
     }));
 
+    var charEl = h("span", { className: "setup-char emoji-font", text: DONBURI.emoji });
+    var topEl = h("div", { className: "setup-panel-top" }, [charEl]);
+
     var nameEl = h("div", { className: "setup-window-name", text: DONBURI.name });
     var bodyEl = h("div", { className: "setup-window-body" });
     var nextEl = h("div", { className: "setup-window-next emoji-font", text: "▶" });
-    root.appendChild(h("div", { className: "setup-window", onclick: onTapWindow }, [nameEl, bodyEl, nextEl]));
+    var bottomEl = h("div", { className: "setup-panel-body" }, [nameEl, bodyEl, nextEl]);
+
+    // v21 追加指示: 透過した上段をタップしてもセリフが進むよう、onclickは外枠全体(.setup-panel)に
+    // 付ける(モバイルでのタップ範囲を広げる意図的な変更)。.setup-skipはpanelの外なので影響を受けない。
+    root.appendChild(h("div", { className: "setup-panel", onclick: onTapWindow }, [topEl, bottomEl]));
 
     els = { bg: bg, char: charEl, body: bodyEl, next: nextEl };
     mountShopBackground();

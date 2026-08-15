@@ -58,7 +58,10 @@ window.GameState = (function () {
   // 変更したため、旧セーブとの互換性が無くなった。21→22に上げた(SAVE_VERSIONの数字とvNNの
   // 数字はもともと一致していないので揃えていない)。ramen_metaは上記のとおり無関係のため
   // 今回も消えない。
-  var SAVE_VERSION = 22;
+  // v24(docs/指示書/v24_席の設備化とプレゼント演出_指示書.md §2-5): 席が物件の固定値から
+  // state.seats(持ち物)へ移り、stateの形が変わったため22→23に上げた。ramen_metaは上記の
+  // とおり無関係のため今回も消えない。
+  var SAVE_VERSION = 23;
 
   // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §1): 既存の従業員5人ぶんの
   // staffStateを、js/event-engine.jsのensureStaffState()が作るのと同じ形であらかじめ
@@ -146,6 +149,11 @@ window.GameState = (function () {
       // ただしこのフィールド自体(state.ramenStats)へ計算結果を書き戻す配線はまだ無く、
       // 今も値は既定値のまま動かない(recipeAggregate()はstateを介さず毎回その場で計算して返す)。
       ramenStats: { quality: 20, richness: 10, volume: 20, uniqueness: 10, cost: 0, workload: 0 },
+      // v24(docs/指示書/v24_席の設備化とプレゼント演出_指示書.md §2-2): 席はプレイヤーの持ち物。
+      // キー名はjs/data/seats.jsのidと一致させる(将来table/privateが増えたときにそのまま足せる形)。
+      // 初期値は0(何も持っていない)。開業チュートリアルが6を書き込む
+      // (js/screens/setup.jsのcommitTutorialAndStart())。
+      seats: { counter: 0 },
       equipment: [],
       staffHired: [], // staff id 配列
       // STEP6(docs/新設計/06_STEP6_従業員スカウト_修正版.md §5): 「求人を出す」で雇った従業員の

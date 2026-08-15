@@ -319,11 +319,19 @@ window.Scoring = (function () {
 
   function getProperty(state) { return U.findById(PROPERTIES, state.property); }
 
+  // v24(docs/指示書/v24_席の設備化とプレゼント演出_指示書.md §2-4、
+  // docs/指示書/v24_追補_調査への回答と追加指示.md §3): 席は物件の固定値から state.seats
+  // (持ち物)へ移った。この関数は新設ではなく既存関数(STEP7由来)の中身の書き換え——
+  // シグネチャ・返り値の意味は変えていない。変えたのは「カウンター席の数をどこから読むか」だけ
+  // (p.seats_counter → state.seats.counter)。table_seats設備の+4は現状の実装をそのまま移した
+  // (加算量は変えていない。js/screens/shop-view.js側の描画にも同じ+4が別に書かれている二重管理が
+  // あるが、今回は直さない。理由・記録はPROGRESS.md参照)。
   function totalSeats(state) {
     var p = getProperty(state);
     if (!p) return 0;
     var tableBonus = state.equipment.indexOf("table_seats") >= 0 ? 4 : 0;
-    return p.seats_counter + p.seats_table + tableBonus;
+    var counter = (state.seats && state.seats.counter) || 0;
+    return counter + p.seats_table + tableBonus;
   }
 
   // STEP7(docs/新設計/07_STEP7_設備_修正版.md §1〜2): 所持している設備の週維持費の合計。
@@ -335,6 +343,12 @@ window.Scoring = (function () {
       var eq = U.findById(EQUIPMENT, id);
       if (eq && eq.weekly_upkeep) total += eq.weekly_upkeep;
     });
+    // v24(指示書§5-2): カウンター席の週維持費も、既存の設備週維持費と同じ枠でまとめて引く
+    // (新しい行は作らない。週次収支表示の「設備維持費」にそのまま合算される)。
+    var seatDef = window.DATA.seats && U.findById(window.DATA.seats, "counter");
+    if (seatDef && seatDef.weekly_upkeep && state.seats) {
+      total += (state.seats.counter || 0) * seatDef.weekly_upkeep;
+    }
     return total;
   }
 

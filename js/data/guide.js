@@ -18,9 +18,14 @@ window.DATA.guide = {
   // ここでは行を削除するのではなくrepeatOk:falseで飛ばす対象を示す形にした)。
   // {cost}/{rent}はjs/screens/setup.jsがjs/data/property.jsの実際の値に置き換える
   // (§3-3「金額を文字列に直接書かない」)。
+  // v24(docs/指示書/v24_席の設備化とプレゼント演出_指示書.md §3-1): 物件の行の直後に
+  // 「seat」を追加。席数の6はここに直書きせず、{seatCount}をjs/screens/setup.jsが
+  // 実際に配置する数(TUTORIAL_SEAT_GIFT)へ置き換える。repeatOk:trueで2周目以降も残す
+  // (席が無いと店が成立しないため)。
   tutorial: [
     { id: "intro",    repeatOk: false, text: "僕はどんぶりちゃん。一緒に日本一のラーメン屋を作ろう。" },
     { id: "property", repeatOk: true,  text: "商店街に、ちょうどいい空き店舗を見つけたよ。" },
+    { id: "seat",     repeatOk: true,  text: "お客さんが座るところが無いと始まらないよね。カウンター席を{seatCount}つ、置いておいた" },
     { id: "money",    repeatOk: true,  text: "初期費用は{cost}、家賃は週{rent}。ここからのスタートだ。" },
     { id: "future",   repeatOk: false, text: "お店が育てば、他の場所も選べるようになる。楽しみにしてて。" },
     { id: "material", repeatOk: true,  text: "素材をプレゼントするよ。鶏ガラ・醤油・細麺の3つ。" },

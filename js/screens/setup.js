@@ -17,6 +17,13 @@ window.ScreenSetup = (function () {
 
   var TYPE_MS = 30; // §3-3: 1文字ずつ、30ms/文字
 
+  // v24(docs/指示書/v24_席の設備化とプレゼント演出_指示書.md §3-1): チュートリアルでプレゼント
+  // するカウンター席の数。セリフの{seatCount}にも、実際にstate.seats.counterへ書き込む数にも
+  // この1つの定数だけを使う(数値をセリフへ直書きしない指示への対応)。
+  var TUTORIAL_SEAT_GIFT = 6;
+  var SEAT_POP_STAGGER_MS = 150; // js/screens/shop-view.jsのSTOOL_POP_STAGGER_MSと揃える
+  var SEAT_POP_SETTLE_MS = 500;  // 最後の1席が跳ね(0.45s)+✨(0.5s)を出し終えるまでの尺
+
   var state, onDone;
 
   // 画面のDOM要素。build()で1回だけ作り、以後はセリフが変わるたびに中身だけ書き換える
@@ -26,6 +33,8 @@ window.ScreenSetup = (function () {
   var typedText = "";
   var typedLen = 0;
   var lineReady = false; // 全文表示済みか(true でタップすると次のセリフへ進む)
+  // v24 §3-2: 席プレゼント演出の進行中状態。nullなら演出していない。
+  var seatReveal = null; // { layerEl, tapEl, done, next, promptTimer }
 
   // ---------- セリフ ----------
   // §3-4: 2周目以降はrepeatOk:falseの行を飛ばした短縮版にする(自己紹介・説明は初回だけ)。
@@ -39,7 +48,8 @@ window.ScreenSetup = (function () {
       // §3-3: セリフ中の金額は文字列に直接書かず、js/data/property.jsの実際の値を差し込む。
       var text = line.text
         .replace("{cost}", U.formatMoney(prop.initial_cost))
-        .replace("{rent}", U.formatMoney(prop.rent));
+        .replace("{rent}", U.formatMoney(prop.rent))
+        .replace("{seatCount}", TUTORIAL_SEAT_GIFT);
       return { id: line.id, text: text };
     });
     if (!isRepeatRun()) return all;
@@ -65,6 +75,10 @@ window.ScreenSetup = (function () {
     state.property = FIXED_PROPERTY_ID;
     state.equipment = []; // §4-1: 設備なし
     state.recipe = { soup: FIXED_RECIPE.soup, tare: FIXED_RECIPE.tare, noodle: FIXED_RECIPE.noodle, topping: FIXED_RECIPE.topping };
+    // v24 §3-4: runSeatReveal()側で既に書き込んでいるが、v20で state.property に対して行った
+    // のと同じ判断(先出しがあっても、ここでの代入は消さず二重代入のままにする)に揃える。
+    // スキップされて演出自体が走らなかった場合でも、ここで必ず1回書き込まれる。
+    state.seats = { counter: TUTORIAL_SEAT_GIFT };
     if (state.staffHired.indexOf(FIXED_STAFF_ID) < 0) state.staffHired.push(FIXED_STAFF_ID);
 
     // §2-3: 雇用時にお金は引かれていない(元のcommitAndStart()も物件初期費用と設備購入費だけを
@@ -119,6 +133,68 @@ window.ScreenSetup = (function () {
     return [{ emoji: d ? d.emoji : "", name: d ? d.name : "" }];
   }
 
+  // ---------- v24 §3-2: 席プレゼント演出 ----------
+  // 1. 会話パネルを消す(半透明は使わない。hiddenクラスでdisplay:noneにする)。
+  // 2. state.seats.counterを書き込み、断面図を再描画する(ポップ演出自体はjs/screens/
+  //    shop-view.jsの共通の仕組み<§3-3>がbuildScenery()の中で担う。ここでは呼ぶだけでよい)。
+  // 3. 6席すべて出終わるまでの尺だけ待ってから「▼ タップして続ける」を出す。
+  // 4. タップされるまで待つ。演出中のタップは残りを即座に配置するだけ(閉じない)。
+  function startSeatReveal(next) {
+    els.panel.classList.add("hidden");
+    var prevCount = state.seats.counter || 0;
+    state.seats.counter = TUTORIAL_SEAT_GIFT;
+    if (window.ShopView) window.ShopView.update(state, null, null, null);
+    var addedCount = TUTORIAL_SEAT_GIFT - prevCount;
+
+    var tapEl = h("div", { className: "tap-continue emoji-font", text: "▼ タップして続ける" });
+    var layerEl = h("div", { className: "seat-reveal-layer", onclick: onSeatRevealTap }, [tapEl]);
+    document.getElementById("screen-setup").appendChild(layerEl);
+    seatReveal = { layerEl: layerEl, tapEl: tapEl, done: false, next: next, promptTimer: null };
+
+    if (reducedMotion() || addedCount <= 0) {
+      showSeatPrompt();
+    } else {
+      var totalMs = (addedCount - 1) * SEAT_POP_STAGGER_MS + SEAT_POP_SETTLE_MS;
+      seatReveal.promptTimer = setTimeout(showSeatPrompt, totalMs);
+    }
+  }
+
+  function showSeatPrompt() {
+    if (!seatReveal) return;
+    seatReveal.done = true;
+    seatReveal.tapEl.classList.add("show");
+  }
+
+  function onSeatRevealTap() {
+    if (!seatReveal) return;
+    if (seatReveal.done) { finishSeatReveal(); return; }
+    // §3-2「演出中にタップされた場合」: 残りの席を即座に全部配置して4の状態にする(閉じない)。
+    if (seatReveal.promptTimer) clearTimeout(seatReveal.promptTimer);
+    if (window.ShopView && window.ShopView.skipSeatPop) window.ShopView.skipSeatPop();
+    showSeatPrompt();
+  }
+
+  function finishSeatReveal() {
+    if (!seatReveal) return;
+    if (seatReveal.promptTimer) clearTimeout(seatReveal.promptTimer);
+    if (seatReveal.layerEl.parentNode) seatReveal.layerEl.parentNode.removeChild(seatReveal.layerEl);
+    els.panel.classList.remove("hidden");
+    var next = seatReveal.next;
+    seatReveal = null;
+    next();
+  }
+
+  // §3-2スキップボタン: 演出用の要素・.setup-panelのhiddenが残らないよう後片付けしてから
+  // commitTutorialAndStart()へ直行する(呼び出し側でnext()は呼ばない)。
+  function cleanupSeatReveal() {
+    if (!seatReveal) return;
+    if (seatReveal.promptTimer) clearTimeout(seatReveal.promptTimer);
+    if (seatReveal.layerEl.parentNode) seatReveal.layerEl.parentNode.removeChild(seatReveal.layerEl);
+    if (window.ShopView && window.ShopView.skipSeatPop) window.ShopView.skipSeatPop();
+    els.panel.classList.remove("hidden");
+    seatReveal = null;
+  }
+
   // ---------- 文字送り(§3-3) ----------
   function stopTyping() {
     if (typeTimer) { clearInterval(typeTimer); typeTimer = null; }
@@ -164,6 +240,8 @@ window.ScreenSetup = (function () {
       window.CardReveal.show(materialCardItems(), next);
     } else if (lineId === "staff" && window.CardReveal) {
       window.CardReveal.show(staffCardItems(), next);
+    } else if (lineId === "seat") {
+      startSeatReveal(next);
     } else {
       next();
     }
@@ -190,6 +268,7 @@ window.ScreenSetup = (function () {
   function onSkip() {
     stopTyping();
     if (window.CardReveal) window.CardReveal.cancel();
+    cleanupSeatReveal();
     commitTutorialAndStart();
   }
 
@@ -217,9 +296,10 @@ window.ScreenSetup = (function () {
 
     // v21 追加指示: 透過した上段をタップしてもセリフが進むよう、onclickは外枠全体(.setup-panel)に
     // 付ける(モバイルでのタップ範囲を広げる意図的な変更)。.setup-skipはpanelの外なので影響を受けない。
-    root.appendChild(h("div", { className: "setup-panel", onclick: onTapWindow }, [topEl, bottomEl]));
+    var panelEl = h("div", { className: "setup-panel", onclick: onTapWindow }, [topEl, bottomEl]);
+    root.appendChild(panelEl);
 
-    els = { bg: bg, char: charEl, body: bodyEl, next: nextEl };
+    els = { bg: bg, char: charEl, body: bodyEl, next: nextEl, panel: panelEl };
     mountShopBackground();
   }
 

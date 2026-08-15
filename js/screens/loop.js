@@ -1472,6 +1472,40 @@ window.ScreenLoop = (function () {
       ]));
     });
     box.appendChild(grid);
+
+    // v24(docs/指示書/v24_席の設備化とプレゼント演出_指示書.md §5、
+    // docs/指示書/v24_追補_調査への回答と追加指示.md §5): カウンター席を1席ずつ買い足す。
+    // 新しいパネル・新しいボタンは作らず、既存の設備購入パネルに1項目足すだけ。
+    var seatDef = window.DATA.seats && U.findById(window.DATA.seats, "counter");
+    var prop = Scoring.getProperty(state);
+    if (seatDef && prop) {
+      var slots = prop.counterSlots;
+      var owned = state.seats.counter || 0;
+      var atSeatCap = owned >= slots;
+      var affordSeat = state.money >= seatDef.price;
+      box.appendChild(h("h3", { text: "席" }));
+      var seatGrid = h("div", { className: "choice-grid wide" });
+      seatGrid.appendChild(h("div", {
+        className: "choice-card" + (atSeatCap || !affordSeat ? " disabled" : ""),
+        onclick: function () {
+          if (atSeatCap || !affordSeat) return;
+          state.money -= seatDef.price;
+          state.seats.counter = (state.seats.counter || 0) + 1;
+          window.UI.toast(seatDef.name + "を1つ置いた（" + state.seats.counter + "/" + slots + "）");
+          refreshShop(); // §3-3の共通の仕組みで、買った瞬間に断面図へポップして現れる
+          renderTopBar();
+          refreshSheet();
+        }
+      }, [
+        h("div", { className: "emoji emoji-font", text: seatDef.emoji }),
+        h("div", { className: "name", text: seatDef.name + "（" + owned + "/" + slots + "）" }),
+        h("div", { className: "cost", text: U.formatMoney(seatDef.price) + " / 週" + U.formatMoney(seatDef.weekly_upkeep) }),
+        h("div", { className: "blurb", text: "1つ置くと" + seatDef.capacity + "人座れる" }),
+        atSeatCap ? h("div", { className: "locked", text: "これ以上は置けません" }) : null
+      ]));
+      box.appendChild(seatGrid);
+    }
+
     return box;
   }
 

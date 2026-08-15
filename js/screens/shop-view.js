@@ -20,8 +20,11 @@ window.ShopView = (function () {
     // v16-3: 行列は最大6人(指示書どおり)。縦長の枠で6人ぶんの間隔を確保するため、間隔をv15までより詰めた
     queueX0: 84, queueGap: 4, queueMax: 6,
     offX: 112,               // 画面外(%)
-    // 縦長では横に並べられる席数が限られる。実際の席数より多くは描かない(絵は代表表示)
-    drawMaxCounter: 8, drawMaxTable: 4
+    // 縦長では横に並べられる席数が限られる。テーブル側は実際の席数より多くは描かない(絵は代表表示)。
+    // v24(docs/指示書/v24_追補_調査への回答と追加指示.md §2): drawMaxCounterは廃止した
+    // (全物件へ一律8席の頭打ちが掛かっていたのは描画都合の制約で、物件ごとの差別化を潰していた)。
+    // カウンター席は物件のcounterSlots(js/data/property.js)ぶんを枠として描く。
+    drawMaxTable: 4
   };
 
   // v12-1: 各フェーズの尺は「ゲーム内で何分か」で持ち、gm()でwindow.BASE_HOUR_MS(js/utils.js の
@@ -71,6 +74,14 @@ window.ShopView = (function () {
   var orderPileEl = null;  // 積まれた丼を表示するDOM
   var timers = [];       // {fn, remaining(ms), id, startedAt} v09: 残り時間を持たせ、凍結中は完全に止める
   var builtSig = "";
+  // v24(指示書§3-3): 前回buildScenery()時点で描いていたカウンター席の所持数。nullは
+  // 「まだ一度も描いていない」(=初回描画では席をポップさせない。読み込み直後の6席が
+  // いきなり跳ねて出るのを防ぐため)。
+  var prevDrawnCounter = null;
+  var STOOL_POP_STAGGER_MS = 150; // §3-2手順3: 1席あたり0.15秒間隔(card-reveal.jsのSTAGGER_MSと揃える)
+  function reducedMotionSV() {
+    return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
   // v10-3: 週次のcomputeWeeklyCustomersの結果を「曜日×帯」へ配分したもの(js/scoring.jsの
   // weeklyBandSchedule)。openBand()がここから今日・その帯ぶんを取り出して実数だけ湧かせる。
   // 以前あった traffic.pool/occupancy(Math.pow で稼働率を持ち上げる演出)は廃止した
@@ -208,12 +219,18 @@ window.ShopView = (function () {
   // ---------- 静物(店の躯体・設備) ----------
   function has(id) { return state.equipment.indexOf(id) >= 0; }
 
+  // v24(docs/指示書/v24_席の設備化とプレゼント演出_指示書.md §2-4、
+  // docs/指示書/v24_追補_調査への回答と追加指示.md §2): カウンター席は物件の固定値ではなく
+  // 持ち物(state.seats.counter)。counterSlotsは物件が持つ「置ける上限」(枠の数)、
+  // counterは実際に描く丸椅子の数(所持数、上限で頭打ち)。テーブル側は既存のまま変更していない。
   function seatCounts() {
     var p = window.Scoring.getProperty(state);
-    if (!p) return { counter: 8, table: 0 };
+    if (!p) return { counter: 0, counterSlots: 0, table: 0 };
     var table = p.seats_table + (has("table_seats") ? 4 : 0);
+    var owned = (state.seats && state.seats.counter) || 0;
     return {
-      counter: Math.min(GEO.drawMaxCounter, p.seats_counter),
+      counter: Math.min(p.counterSlots, owned),
+      counterSlots: p.counterSlots,
       table: Math.min(GEO.drawMaxTable, table)
     };
   }
@@ -284,12 +301,33 @@ window.ShopView = (function () {
     // カウンター
     stage.appendChild(block("sv-counter", {}));
 
-    // カウンター席の丸椅子
-    var cx = spread(counts.counter, GEO.inMinX + 2, GEO.inMaxX - 2);
-    cx.forEach(function (x) {
-      stage.appendChild(block("sv-stool", { left: x + "%", top: GEO.stoolY + "%" }));
+    // カウンター席の丸椅子。
+    // v24(指示書§3-5、追補§2): 枠(物件のcounterSlots)を先に等間隔で確保し、所持している席
+    // (counts.counter)だけを左から順に埋める。空き枠には席を描かない(カウンターだけが見える)。
+    // こうすると席を1つ足しても既にある席は動かない(spread()は枠の数=counterSlotsで固定して
+    // いるため、所持数が変わっても各枠のx座標自体は変わらない)。
+    // §3-3: 前回描画時より所持数が増えていたら、増えた席にだけポップ用のクラス+✨を付ける
+    // (チュートリアルのプレゼント演出・§5の購入演出、どちらもこの1つの仕組みで賄う)。
+    var slotXs = spread(counts.counterSlots, GEO.inMinX + 2, GEO.inMaxX - 2);
+    var isFirstBuild = prevDrawnCounter == null;
+    var rm = reducedMotionSV();
+    var popIndex = 0;
+    for (var si = 0; si < counts.counter; si++) {
+      var x = slotXs[si];
+      var isNew = !isFirstBuild && si >= prevDrawnCounter && !rm;
+      var stoolEl = block("sv-stool" + (isNew ? " sv-stool-pop" : ""), { left: x + "%", top: GEO.stoolY + "%" });
+      if (isNew) {
+        var delay = (popIndex * STOOL_POP_STAGGER_MS) + "ms";
+        stoolEl.style.animationDelay = delay;
+        var sparkleEl = h("span", { className: "sv-stool-sparkle emoji-font", text: "✨" });
+        sparkleEl.style.animationDelay = delay;
+        stoolEl.appendChild(sparkleEl);
+        popIndex++;
+      }
+      stage.appendChild(stoolEl);
       seats.push({ x: x, sitY: GEO.counterSitY, kind: "counter", occupant: null });
-    });
+    }
+    prevDrawnCounter = counts.counter;
 
     // テーブル席(2席ごとに卓を1つ置く)
     if (counts.table > 0) {
@@ -969,6 +1007,7 @@ window.ShopView = (function () {
     orderPileEl = null;
     activePopups = 0;
     builtSig = "";
+    prevDrawnCounter = null;
     frozen = false;
     onEnterCb = null;
     onServeCb = null;
@@ -978,9 +1017,26 @@ window.ShopView = (function () {
   // v09-1: 中央のpauseReasons(js/screens/loop.js)から呼ばれる、唯一の一時停止スイッチ。
   function setPaused(on) { if (on) freeze(); else unfreeze(); }
 
+  // v24(指示書§3-2「演出中にタップされた場合: 残りの席を即座に全部配置」): まだアニメーション
+  // 待ち(delay中)のポップ演出を全部即座に最終状態へ進める。sv-stool-popクラスを外すと
+  // (.sv-stoolの素の見た目=不透明・アニメーション無しへ戻るだけなので)即座に確定表示になる。
+  // ✨はもう出す意味が無いので取り除く。js/screens/setup.jsの演出中タップから呼ばれる。
+  function skipSeatPop() {
+    if (!stage) return;
+    var pops = stage.querySelectorAll(".sv-stool-pop");
+    for (var i = 0; i < pops.length; i++) {
+      pops[i].classList.remove("sv-stool-pop");
+      pops[i].style.animationDelay = "";
+    }
+    var sparkles = stage.querySelectorAll(".sv-stool-sparkle");
+    for (var i = 0; i < sparkles.length; i++) {
+      if (sparkles[i].parentNode) sparkles[i].parentNode.removeChild(sparkles[i]);
+    }
+  }
+
   return {
     mount: mount, update: update, syncSpeed: syncSpeed, destroy: destroy, setPaused: setPaused,
-    openBand: openBand, closeBand: closeBand,
+    openBand: openBand, closeBand: closeBand, skipSeatPop: skipSeatPop,
     getLifecycleLog: function () { return lifecycleLog; } // v15-6: 確認用(客ごとの着席/注文/丼受取/食事開始/退店ログ)
   };
 })();

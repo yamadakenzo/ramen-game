@@ -887,35 +887,40 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   /* 絵の中の大きさの基準。縦長の枠に対して人が小さく見えないよう枠幅の 8.5% に取る */
   font-size: calc(var(--frame-w) * 0.085);
 }
+/* v25(§4-3/追補§D-2): 通り(店の外)を広げるため、店内⇔通りの境界を80%→72%へ動かした
+   (壁は68〜72%)。js/screens/shop-view.jsのGEO(inMaxX/doorX/queueX0等)と必ず揃えること。
+   v25確認フィードバック対応: 行列4列(GEO.queueRowY0〜)を「通り(.sv-street)」の地面の
+   上に乗せるため、通りの開始線を81%→60%へ引き上げた(向かいの建物.sv-outwallはその分
+   薄くなる)。GEO.queueRowY0/queueRowGapと必ず揃えること(4列とも60%以降に収める)。 */
 .sv-sky {
-  position: absolute; left: 80%; right: 0; top: 0; height: 42%;
+  position: absolute; left: 72%; right: 0; top: 0; height: 42%;
   background: var(--c-bg);
 }
 .sv-outwall {
-  position: absolute; left: 80%; right: 0; top: 42%; height: 39%;
+  position: absolute; left: 72%; right: 0; top: 42%; height: 18%;
   background: var(--c-ink-16);
   border-top: 2px solid var(--c-ink);
 }
 .sv-street {
-  position: absolute; left: 80%; right: 0; top: 81%; bottom: 0;
+  position: absolute; left: 72%; right: 0; top: 60%; bottom: 0;
   background: var(--c-ink-32); border-top: 2px solid var(--c-ink);
 }
 .sv-room {
-  position: absolute; left: 0; width: 76%; top: 0; bottom: 0;
+  position: absolute; left: 0; width: 68%; top: 0; bottom: 0;
   background: var(--c-panel);
   box-shadow: inset 0 0 0 999px var(--c-ink-08); /* 「暗い」既定状態。明るい照明でこの沈みを外す */
 }
 .shop-stage.bright .sv-room { box-shadow: none; }
 .sv-ceiling {
-  position: absolute; left: 0; width: 80%; top: 0; height: 5%;
+  position: absolute; left: 0; width: 72%; top: 0; height: 5%;
   background: var(--c-ink-16); border-bottom: 2px solid var(--c-ink);
 }
 .sv-floor {
-  position: absolute; left: 0; width: 80%; top: 81%; bottom: 0;
+  position: absolute; left: 0; width: 72%; top: 81%; bottom: 0;
   background: var(--c-ink-16); border-top: 2px solid var(--c-ink);
 }
 .sv-wall-right {
-  position: absolute; left: 76%; width: 4%; top: 0; height: 52%;
+  position: absolute; left: 68%; width: 4%; top: 0; height: 52%;
   background: var(--c-ink-16); border-left: 2px solid var(--c-ink); border-right: 2px solid var(--c-ink);
   border-bottom: 2px solid var(--c-ink);
 }
@@ -936,7 +941,7 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 }
 .sv-noren-text { font-size: 0.26em; color: var(--c-panel); font-weight: 700; letter-spacing: -1px; }
 .sv-signboard {
-  position: absolute; left: 82%; top: 9%;
+  position: absolute; left: 74%; top: 9%;
   background: var(--c-panel); border: 2px solid var(--c-ink); color: var(--c-ink);
   padding: 2px 4px; font-size: 0.26em; max-width: 17%;
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
@@ -946,7 +951,7 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .sv-lamp-bulb { font-size: 0.56em; }
 .sv-duct { position: absolute; top: 6.5%; transform: translateX(-50%); font-size: 0.6em; }
 .sv-kitchen-counter {
-  position: absolute; left: 4%; width: 62%; top: 28%; height: 2.5%;
+  position: absolute; left: 4%; width: 55%; top: 28%; height: 2.5%;
   background: var(--c-ink-16); border-top: 2px solid var(--c-ink);
 }
 .sv-kit-item { position: absolute; top: 21%; transform: translateX(-50%); font-size: 0.82em; }
@@ -955,7 +960,7 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   font-size: 0.28em; background: var(--c-panel); border: 1px solid var(--c-ink); padding: 2px 4px;
 }
 .sv-counter {
-  position: absolute; left: 3%; width: 70%; top: 39.5%; height: 3.5%; z-index: 4;
+  position: absolute; left: 3%; width: 63%; top: 39.5%; height: 3.5%; z-index: 4;
   background: var(--c-ink-16);
   border: 2px solid var(--c-ink);
 }

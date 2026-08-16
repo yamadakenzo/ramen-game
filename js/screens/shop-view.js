@@ -8,6 +8,12 @@ window.ShopView = (function () {
   var STAFF = window.DATA.characters.staff;
   var EQUIP = window.DATA.property.equipment;
 
+  // v25(§4-3/追補§D-2): 店の外(通り)を広げるため、店内と通りの境界(壁)を80%→68〜72%へ
+  // 動かした。壁・出入口(doorX)・暖簾・看板(.sv-signboardはCSS側)・店内可動域(inMaxX)は
+  // すべてこの境界と連動させてある(片方だけ動かさない。v13以来の既知の罠)。
+  // 厨房カウンター・カウンター(cashier)・券売機・テーブル席の範囲・盛り付け台(PLATE_X)・
+  // 各station座標も、旧境界(76)→新境界(68)の比率(68/76)でまとめて縮小した
+  // (個々に据え置くと新しい壁と干渉するため)。
   var GEO = {
     kitchenY: 15,      // 厨房で働く店員の立ち位置(上端)
     counterSitY: 43.5, // カウンター席に座った客(天板のすぐ下から頭が出る)
@@ -15,11 +21,20 @@ window.ShopView = (function () {
     tableSitY: 62,     // テーブル席に座った客
     tableY: 67,        // テーブルの天板
     walkY: 76,         // 床を歩いている客(足元が床の線に乗る)
-    inMinX: 5, inMaxX: 71,   // 店内の可動範囲(%)
-    doorX: 78,               // 出入口(%)
-    // v16-3: 行列は最大6人(指示書どおり)。縦長の枠で6人ぶんの間隔を確保するため、間隔をv15までより詰めた
-    queueX0: 84, queueGap: 4, queueMax: 6,
-    offX: 112,               // 画面外(%)
+    inMinX: 5, inMaxX: 63,   // 店内の可動範囲(%)。旧71→63(壁の移動に連動)
+    doorX: 70,               // 出入口(%)。旧78→70
+    // v25(§4-2/追補§D-1): 行列の上限(旧6人・turnAwayFull)を廃止し、並びたい客は全員並べる。
+    // 1列6人(旧v16と同じ間隔queueGap=4)で埋まったら次の列へ折り返す(queueSlot参照)。
+    // 実測worst15人に対し、席・従業員の上限まで育つ将来を見て24人(4列)が画面内に収まることを
+    // 設計の基準にした(追補§D-1)。24人を超えても同じ折り返し規則をそのまま延長するので
+    // 描画自体は続く。列を8人×3列ではなく6人×4列にしたのは、間隔を旧v16と同じ4%に保って
+    // (詰めすぎて客同士が重なり判別できなくなるのを避けるため)、通りの幅(72〜100%)に
+    // 無理なく収めるため。
+    // v25確認フィードバック対応: queueRowY0は「通り(.sv-street、CSS側でtop:60%に変更済み)」の
+    // 地面の内側に収まる値にすること(0〜100%の範囲内というだけでは、向かいの建物
+    // .sv-outwallに重なって浮いて見える場合がある。4列とも60%以降に収める)。
+    queueX0: 75, queueGap: 4, queueCols: 6, queueRowY0: 62, queueRowGap: 10,
+    offX: 112,               // 画面外(%)。ここだけは意図的に0〜100%の範囲外(退場先)
     // 縦長では横に並べられる席数が限られる。テーブル側は実際の席数より多くは描かない(絵は代表表示)。
     // v24(docs/指示書/v24_追補_調査への回答と追加指示.md §2): drawMaxCounterは廃止した
     // (全物件へ一律8席の頭打ちが掛かっていたのは描画都合の制約で、物件ごとの差別化を潰していた)。
@@ -86,7 +101,9 @@ window.ShopView = (function () {
   // weeklyBandSchedule)。openBand()がここから今日・その帯ぶんを取り出して実数だけ湧かせる。
   // 以前あった traffic.pool/occupancy(Math.pow で稼働率を持ち上げる演出)は廃止した
   // (客数と絵が一致しない原因そのものだったため。v10指示3)。
-  var traffic = { schedule: null, queueLevel: 0, satBySeg: {}, pricePerCustomer: 0 };
+  // v26(追補§B-2): weekは客が湧いた時点の週番号(a.spawnWeekへ渡す元)。priceOwedと同じ経路で
+  // traffic経由に1キー足すだけ(新しい仕組みは増やさない)。
+  var traffic = { schedule: null, queueLevel: 0, satBySeg: {}, pricePerCustomer: 0, week: 0 };
   // v09-1: 中央の pauseReasons(js/screens/loop.js)から setPaused() で渡される、唯一の一時停止フラグ。
   // 以前は state.speed===0 を「止まっている」の代用にしていたが、v09で速度の選択と一時停止を
   // 分離したため(停止中でも「選んでいる速度」自体は保持し続ける)、ここでは専用のフラグを持つ。
@@ -94,8 +111,6 @@ window.ShopView = (function () {
   // v12-1: 直近にsyncSpeed()した時点の速度。これと今のspd()がズレていたら「速度が変わった瞬間」と
   // 判定し、画面上の客の残り時間・移動もその場で新しい速度に追随させる(retime())。
   var curSpd = 1;
-  // v12-3:「今週の客」カウンタ用。客が実際に入店した瞬間(enterAndSit)にloop.js側へ知らせる。
-  var onEnterCb = null;
   // v13-3/v16-1: 丼が客の席に届いた瞬間(deliverToSeat)にloop.js側へ知らせる。その客のpriceOwedを渡す。
   // (v15まではfinishMeal=食べ終わった瞬間だった。v16でタイミングを配膳の瞬間に変更)
   var onServeCb = null;
@@ -282,20 +297,20 @@ window.ShopView = (function () {
     var kit = [{ x: 8, e: "🍥" }];
     if (has("big_pot")) kit.push({ x: 20, e: "🍲" }); else kit.push({ x: 20, e: "🥘" });
     if (has("noodle_boiler")) kit.push({ x: 32, e: "♨️" });
-    if (has("extra_boiler")) kit.push({ x: 44, e: "♨️" }); // 増設した茹で麺器
+    if (has("extra_boiler")) kit.push({ x: 39, e: "♨️" }); // 増設した茹で麺器。v25で壁移動に合わせ44→39
     kit.forEach(function (k) {
       stage.appendChild(block("sv-kit-item", { left: k.x + "%" }, [h("span", { text: k.e })]));
     });
     // v13-1/v14-5: 盛り付け済みでホールが運ぶのを待っている丼が積まれて見える場所。
-    // 「受け渡し口」の座標(PLATE_X=56、既存の盛り付け位置)を起点に、新しい座標系を作らず
+    // 「受け渡し口」の座標(PLATE_X、既存の盛り付け位置)を起点に、新しい座標系を作らず
     // 既存の厨房カウンター上へ並べる(位置づけ直しの経緯はrenderReadyPile()のコメント参照)。
-    orderPileEl = block("sv-order-pile", { left: "56%", top: "9%" });
+    orderPileEl = block("sv-order-pile", { left: PLATE_X + "%", top: "9%" });
     stage.appendChild(orderPileEl);
     if (has("multilingual")) {
-      stage.appendChild(block("sv-wall-sign", { left: "50%" }, [h("span", { text: "🌏 MENU" })]));
+      stage.appendChild(block("sv-wall-sign", { left: "45%" }, [h("span", { text: "🌏 MENU" })]));
     }
     if (has("pos")) {
-      stage.appendChild(block("sv-kit-item", { left: "62%" }, [h("span", { text: "🖥️" })]));
+      stage.appendChild(block("sv-kit-item", { left: "55%" }, [h("span", { text: "🖥️" })]));
     }
 
     // カウンター
@@ -331,7 +346,7 @@ window.ShopView = (function () {
 
     // テーブル席(2席ごとに卓を1つ置く)
     if (counts.table > 0) {
-      var tx = spread(counts.table, 12, 66);
+      var tx = spread(counts.table, 10, 58); // v25で壁移動に合わせ(12,66)→(10,58)
       for (var i = 0; i < tx.length; i += 2) {
         var cxx = tx[i + 1] != null ? (tx[i] + tx[i + 1]) / 2 : tx[i];
         stage.appendChild(block("sv-table", { left: cxx + "%", top: GEO.tableY + "%" }));
@@ -341,9 +356,9 @@ window.ShopView = (function () {
       });
     }
 
-    // 券売機は入口の内側
+    // 券売機は入口の内側。v25で壁移動に合わせ72%→64%(doorX=70の6%内側、旧比率のまま)
     if (has("ticket_machine")) {
-      stage.appendChild(block("sv-ticket", { left: "72%" }, [h("span", { text: "🎫" })]));
+      stage.appendChild(block("sv-ticket", { left: "64%" }, [h("span", { text: "🎫" })]));
     }
 
     // 入口・暖簾
@@ -428,9 +443,9 @@ window.ShopView = (function () {
   // 取る→客席へ運ぶ→戻る)に分けた。1人だけの店は兼任(runSoloCycle。v13までと同じ、作って自分で
   // 運んで戻るの一続き)。厨房・ホールで別々に動くのは2人以上のときだけ(runKitchenCycle/runHallCycle、
   // orderQueue=厨房が未着手の注文/readyQueue=盛り付け済みでホール待ちの丼、の2段構え)。
-  function soupStationX() { return 20; }             // 既存: 寸胴/鍋の座標(buildScenery)
-  function noodleStationX() { return has("noodle_boiler") ? 32 : 8; } // 既存: 茹で麺器、無ければ既存の別の厨房座標で代用
-  var PLATE_X = 56;      // 既存: 盛り付け台=受け渡し口の座標(旧svPaceキーフレームの右端を踏襲)
+  function soupStationX() { return 18; }             // 既存: 寸胴/鍋の座標(buildScenery)。v25で壁移動に合わせ20→18
+  function noodleStationX() { return has("noodle_boiler") ? 29 : 7; } // 既存: 茹で麺器、無ければ既存の別の厨房座標で代用。v25で32/8→29/7
+  var PLATE_X = 50;      // 既存: 盛り付け台=受け渡し口の座標(旧svPaceキーフレームの右端を踏襲)。v25で壁移動に合わせ56→50
   var KITCHEN_PILE_MAX = 6; // 積める丼アイコンの表示上限(それ以上は「+N」で表す)
   // v15-2: 「待機中(丼がまだ届いていない)」の我慢の限界。v14-5にあった60分の安全弁は
   // 「強制的に食べさせる」処理だったため、丼を受け取っていない客が満足顔で帰る不具合の原因に
@@ -516,7 +531,10 @@ window.ShopView = (function () {
     var seat = order.seat, a = order.actor;
     if (!a || a.gone || seat.occupant !== a) return;
     a.deliveredAt = nowLabel();
-    if (onServeCb) onServeCb(a.segId, a.priceOwed);
+    // v26(追補§B-2): spawnWeekも渡す。loop.js側で今週の週番号と比較し、週をまたいで配膳された
+    // 客(厨房が調理着手済みでclearSeatedWaiters()の安全弁が効かなかったケース)は金銭の加算だけ
+    // スキップする。絵の配膳シーケンス(このあとのstartEating等)はそのまま完走させる。
+    if (onServeCb) onServeCb(a.segId, a.priceOwed, a.spawnWeek);
     startEating(a);
   }
 
@@ -689,6 +707,8 @@ window.ShopView = (function () {
       // (v12で分かった、帯の終盤に来た客がまれに週をまたいで完食するケース)、この客が本来属していた
       // 週の額のまま計上されるようにするため、退店時ではなく湧いた時点の値を握らせておく。
       priceOwed: traffic.pricePerCustomer || 0,
+      // v26(追補§B-2): 同じ理由で、湧いた時点の週番号も固定で持たせる(priceOwedと同じ経路)。
+      spawnWeek: traffic.week || 0,
       body: el.querySelector(".sv-body"),
       bowl: el.querySelector(".sv-bowl"),
       bubble: el.querySelector(".sv-bubble")
@@ -739,19 +759,28 @@ window.ShopView = (function () {
 
   // v10-3: 実数だけ湧かせるようになったので、「席が空いていても行列を作る」演出上の水増しは廃止。
   // 満席なら並ぶ・空いていれば座る、という素直な判定にした。行列は実際の混雑から自然に生まれる。
-  // v16-3: 行列がGEO.queueMax(6人)に達していたら、並ばずにその場で諦めて去る。
+  // v25(§4-2/追補§D-1): 行列の上限とturnAwayFull()を廃止した。並びたい客は全員並べる
+  // (queueSlot()が列を折り返して座標を割り当てるので、人数がいくつでも破綻しない)。
   function arriveDoor(a) {
     if (a.gone) return;
     var seat = freeSeat();
     if (seat) { enterAndSit(a, seat); return; }
-    if (queue.length >= GEO.queueMax) { turnAwayFull(a); return; }
     joinQueue(a);
   }
 
-  function queueSlot(i) { return GEO.queueX0 + i * GEO.queueGap; }
+  // v25(§4-2): 行列に並んだ順(0始まり)から、列(row)・その中の位置(col)を求めて座標にする。
+  // GEO.queueCols人ぶん埋まったら次の列へ折り返す(奥へ1列ぶんGEO.queueRowGapだけ下げる)。
+  function queueSlot(i) {
+    var row = Math.floor(i / GEO.queueCols);
+    var col = i % GEO.queueCols;
+    return { x: GEO.queueX0 + col * GEO.queueGap, y: GEO.queueRowY0 + row * GEO.queueRowGap };
+  }
 
   function layoutQueue() {
-    queue.forEach(function (a, i) { move(a, queueSlot(i), GEO.walkY, gm(QUEUE_REFLOW_MIN)); });
+    queue.forEach(function (a, i) {
+      var slot = queueSlot(i);
+      move(a, slot.x, slot.y, gm(QUEUE_REFLOW_MIN));
+    });
   }
 
   // v16-3: 行列に並ぶ判断も、着席後に丼を待つ判断も、同じ我慢の限界(patienceMs)を使う
@@ -774,24 +803,11 @@ window.ShopView = (function () {
     a.exitAt = nowLabel();
     a.exitReason = "待ちきれず(行列)";
     logLifecycle(a);
-    a.bubble.textContent = "😠"; // v15-4: 待ちきれず帰るのは怒った表情に統一(隠さずはっきり見せる)
+    a.bubble.textContent = "😡"; // v15-4: 待ちきれず帰るのは怒った表情に統一(隠さずはっきり見せる)。v25§5で😠→😡(より赤く、視認性を上げる)
     a.bubble.className = "sv-bubble mood-bad";
     a.el.classList.add("show-bubble");
-    var ms = walkMs(queueSlot(i < 0 ? 0 : i), GEO.offX);
-    move(a, GEO.offX, GEO.walkY, ms);
-    later(function () { removeActor(a); }, ms);
-  }
-
-  // v16-3: 行列が満杯(6人)のときに来た客は、並ばずにその場(店の前)で諦めて去る。
-  // 満足度・評判には触れない(既存のleaveQueueと同じく書き戻しなし)。
-  function turnAwayFull(a) {
-    a.exitAt = nowLabel();
-    a.exitReason = "待ちきれず(満列で入れず)";
-    logLifecycle(a);
-    a.bubble.textContent = "😠";
-    a.bubble.className = "sv-bubble mood-bad";
-    a.el.classList.add("show-bubble");
-    var ms = walkMs(GEO.doorX, GEO.offX);
+    var slot = queueSlot(i < 0 ? 0 : i);
+    var ms = walkMs(slot.x, GEO.offX);
     move(a, GEO.offX, GEO.walkY, ms);
     later(function () { removeActor(a); }, ms);
   }
@@ -809,9 +825,8 @@ window.ShopView = (function () {
   function enterAndSit(a, seat) {
     seat.occupant = a;
     a.seat = seat;
-    // v12-3:「今週の客」は実際に入店した(=席へ向かい始めた)瞬間に+1する。諦めて帰った行列客は
-    // ここを通らないので数えない。
-    if (onEnterCb) onEnterCb(a.segId);
+    // v26(指示書§3-1、追補§C-1):「今週の客」はweeklyBandSchedule由来の理論値から都度計算する
+    // 方式に変わったため、着席イベントを数えるコールバック(onEnterCb)は廃止した。
     a.orderedAt = nowLabel(); // v15-1: 着席が決まった瞬間=注文発生(既存のplaceOrderと同じ瞬間)
     placeOrder(seat, a); // v13-1: 入店=注文発生。手が空いている厨房担当がいなければ席で待ったままになる
     var fromX = parseFloat(a.el.dataset.x || GEO.doorX);
@@ -826,12 +841,10 @@ window.ShopView = (function () {
         a.bubble.textContent = "🕐";
         a.bubble.className = "sv-bubble mood-neutral";
         a.el.classList.add("show-bubble");
+        // v25(指示書§2): 着席した客は丼が届くまで必ず待つ(待ちきれずに席を立つ経路を廃止)。
+        // a.waitingは「まだ丼を受け取っていない着席客」の目印として残す
+        // (startEating()でfalseになる。週の境界の片付け=clearSeatedWaiters()がこれを見て使う)。
         a.waiting = true;
-        // v15-2/v16-2: 丼が届くまで待つ。我慢の限界(patienceMs、行列と共通)を超えたら怒って帰る
-        // (leaveSeatImpatient)。従業員0人・注文ロストといった異常系でも、この一本だけで必ず
-        // 時間切れになる(v14-5にあった「0人なら即座に食べ始める」特例は廃止——丼が無いのに
-        // 食べ始めないため)。
-        later(function () { leaveSeatImpatient(a); }, patienceMs(a.segId));
       }, gm(SIT_MIN));
     }, ms);
   }
@@ -850,29 +863,35 @@ window.ShopView = (function () {
     later(function () { finishMeal(a); }, gm(U.rand(MEAL_MIN_MIN, MEAL_MIN_MAX)));
   }
 
-  // v15-2: 待機中(丼がまだ届いていない)客が我慢の限界を超えたら、怒って帰る。
-  // 客が退店できるのはここと finishMeal() の2箇所だけ(指示書2番)。
-  function leaveSeatImpatient(a) {
-    if (a.gone || !a.waiting) return; // 既に食べ始めた/既にいない場合は何もしない
-    a.waiting = false;
-    cancelOrderFor(a); // 厨房・ホールはこの客ぶんを作り続けない
-    a.exitAt = nowLabel();
-    a.exitReason = "待ちきれず(着席後)";
-    logLifecycle(a);
-    a.bubble.textContent = "😠";
-    a.bubble.className = "sv-bubble mood-bad";
-    a.el.classList.add("show-bubble");
-    var seat = a.seat;
-    move(a, seat.x, GEO.walkY, gm(SIT_MIN)); // 席を立つ
-    later(function () {
-      if (a.gone) return;
-      seat.occupant = null;
-      a.seat = null;
-      var ms = walkMs(seat.x, GEO.offX, SEAT_WALK_MIN_PER_PCT);
-      move(a, GEO.offX, GEO.walkY, ms);
-      later(function () { removeActor(a); }, ms);
-      pullFromQueue();
-    }, gm(LEAVE_WAIT_MIN));
+  // v25(指示書§2/追補§B-2): 週の切り替わりの安全弁。着席していてまだ丼を受け取っていない客
+  // (a.waiting===true)だけを片付ける。食事中の客(a.waiting===false)には触れない。
+  // 「我慢の限界」の復活ではない——客ごとのタイマーでは判定せず、週の境界という構造的な
+  // 区切りで一律に片付けるだけ(新しい数値・定数は作らない)。見た目は行列で諦めた客と同じ扱い。
+  // 客が退店できるのはここ・finishMeal()・leaveQueue()(行列側)だけ。
+  // 数値(逃した客数・満足度・評判)には一切影響させない(§Aの数字は週次計算から出る)。
+  function clearSeatedWaiters() {
+    actors.slice().forEach(function (a) {
+      if (a.gone || !a.waiting) return;
+      a.waiting = false;
+      cancelOrderFor(a); // 厨房・ホールはこの客ぶんを作り続けない(未処理の注文も同時に取り除く)
+      a.exitAt = nowLabel();
+      a.exitReason = "待ちきれず(週の切り替わり)";
+      logLifecycle(a);
+      a.bubble.textContent = "😡"; // v25§5で😠→😡(より赤く、視認性を上げる)
+      a.bubble.className = "sv-bubble mood-bad";
+      a.el.classList.add("show-bubble");
+      var seat = a.seat;
+      move(a, seat.x, GEO.walkY, gm(SIT_MIN)); // 席を立つ
+      later(function () {
+        if (a.gone) return;
+        seat.occupant = null;
+        a.seat = null;
+        var ms = walkMs(seat.x, GEO.offX, SEAT_WALK_MIN_PER_PCT);
+        move(a, GEO.offX, GEO.walkY, ms);
+        later(function () { removeActor(a); }, ms);
+        pullFromQueue();
+      }, gm(LEAVE_WAIT_MIN));
+    });
   }
 
   function finishMeal(a) {
@@ -944,11 +963,10 @@ window.ShopView = (function () {
   }
 
   // ---------- 外部API ----------
-  // callbacks: { onEnter(segId) v12-3(客が入店した瞬間), onServe(segId, price) v13-3/v16-1(丼が
-  // 客の席に届いた瞬間。その客ぶんの売価=priceOwedを渡す) }
+  // callbacks: { onServe(segId, price, spawnWeek) v13-3/v16-1(丼が客の席に届いた瞬間。
+  // その客ぶんの売価=priceOwedと、湧いた時点の週番号=spawnWeekを渡す。v26追補§B-2でspawnWeekを追加) }
   function mount(container, gameState, callbacks) {
     state = gameState;
-    onEnterCb = (callbacks && callbacks.onEnter) || null;
     onServeCb = (callbacks && callbacks.onServe) || null;
     clearTimers();
     stage = h("div", { className: "shop-stage" });
@@ -983,6 +1001,9 @@ window.ShopView = (function () {
     // v13-3: 1杯あたり所持金へ加算する額。既存の週次収支(finance.revenue)を今週の客数で均等割り
     // しているだけで、新しい金額は作っていない(全客層とも同じ価格setで支払う前提は既存の計算と同じ)。
     traffic.pricePerCustomer = (finance && finance.totalCustomers > 0) ? finance.revenue / finance.totalCustomers : 0;
+    // v26(追補§B-2): 湧かせる客に持たせる週番号。state.weekRevenue.week(loop.jsのstageWeekCustomers
+    // が確定させる、既存の週番号)をそのまま使う。新しい通し番号は作らない。
+    traffic.week = (state.weekRevenue && state.weekRevenue.week) || 0;
 
     traffic.satBySeg = {};
     if (customers) {
@@ -1009,9 +1030,8 @@ window.ShopView = (function () {
     builtSig = "";
     prevDrawnCounter = null;
     frozen = false;
-    onEnterCb = null;
     onServeCb = null;
-    traffic = { schedule: null, queueLevel: 0, satBySeg: {}, pricePerCustomer: 0 };
+    traffic = { schedule: null, queueLevel: 0, satBySeg: {}, pricePerCustomer: 0, week: 0 };
   }
 
   // v09-1: 中央のpauseReasons(js/screens/loop.js)から呼ばれる、唯一の一時停止スイッチ。
@@ -1037,6 +1057,7 @@ window.ShopView = (function () {
   return {
     mount: mount, update: update, syncSpeed: syncSpeed, destroy: destroy, setPaused: setPaused,
     openBand: openBand, closeBand: closeBand, skipSeatPop: skipSeatPop,
+    clearSeatedWaiters: clearSeatedWaiters, // v25(追補§B-2): 週の切り替わりの安全弁
     getLifecycleLog: function () { return lifecycleLog; } // v15-6: 確認用(客ごとの着席/注文/丼受取/食事開始/退店ログ)
   };
 })();

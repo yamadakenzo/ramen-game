@@ -488,7 +488,7 @@ window.Scoring = (function () {
 
     SEGMENTS.forEach(function (seg) {
       if (!meetsRequires(seg, state)) {
-        results[seg.id] = { count: 0, satisfaction: null, blocked: true };
+        results[seg.id] = { count: 0, satisfaction: null, blocked: true, potential: 0 };
         return;
       }
       // STEP9(§1): 客層ごとに、置いてある全ラーメンの満足度から選択確率を求め、期待値
@@ -513,7 +513,10 @@ window.Scoring = (function () {
       var potential = Math.max(0, flow * BASE_CUSTOMERS * repMult * seasonMult * repeatMult * boost * rivalMult * hoursMult * awarenessMult);
       // ramenProbsは「今週の客数がどれだけ増減したか」の影響を受けない比率のまま持つ(§で人数の
       // 変動と選択比率は独立)。computeWeeklyFinance側でcount×確率として使う。
-      results[seg.id] = { count: potential, satisfaction: expectedSat, blocked: false, ramenProbs: choice.probs };
+      // v25(§F): potentialは天井を一切通す前の客層ごとの生の潜在需要。表示・演出専用
+      // (js/screens/shop-view.jsの湧き人数、週次画面の「逃した客」の内訳)にだけ使い、
+      // countの計算経路(収支・満足度)には一切混ぜない。
+      results[seg.id] = { count: potential, satisfaction: expectedSat, blocked: false, ramenProbs: choice.probs, potential: potential };
       totalDemand += potential;
     });
 
@@ -546,6 +549,9 @@ window.Scoring = (function () {
     // 物理的な席数キャップ(それでも溢れる分は演出上の行列として扱い、客数はキャパで頭打ち)
     var finalTotal = 0;
     Object.keys(results).forEach(function (id) { finalTotal += results[id].count; });
+    // v25(§A/§F): D'(②のqueue_tolerance足切りを通した後の合計)。この時点の値をそのまま
+    // 通過点として持ち出す(新しい計算はしない。finalTotalは既存のまま)。
+    var demandAfterQueuePushout = finalTotal;
     if (finalTotal > weeklyCapacity && weeklyCapacity > 0) {
       var scale = weeklyCapacity / finalTotal;
       Object.keys(results).forEach(function (id) { results[id].count *= scale; });
@@ -557,17 +563,50 @@ window.Scoring = (function () {
     var staffCapacity = staffProcessingCapacity(state, avgSatForCapacity);
     var afterSeatTotal = 0;
     Object.keys(results).forEach(function (id) { afterSeatTotal += results[id].count; });
+    // v25(§A/§F): T1(③の座席キャパ適用後の合計)。同じく既存の値をそのまま持ち出すだけ。
+    var demandAfterSeatCap = afterSeatTotal;
     if (afterSeatTotal > staffCapacity && staffCapacity > 0) {
       var staffScale = staffCapacity / afterSeatTotal;
       Object.keys(results).forEach(function (id) { results[id].count *= staffScale; });
     }
+
+    // v25(§A/§F): A(④の処理可能人数キャパ適用後の合計=実客数)。D'・T1と同じく、丸める前の
+    // 値をそのまま持ち出す(客層ごとにMath.roundした後の合計を使うと、客層数ぶんの端数が
+    // 積み上がってD'/T1よりわずかに大きくなることがあり、D≧D'≧T1≧Aが崩れるため)。
+    var actualCustomers = 0;
+    Object.keys(results).forEach(function (id) { actualCustomers += results[id].count; });
 
     Object.keys(results).forEach(function (id) { results[id].count = Math.max(0, Math.round(results[id].count)); });
 
     // STEP9: ramensをそのまま返す。computeWeeklyFinance側がresults[id].ramenProbsと組み合わせて
     // 「客層ごとにどのラーメンが何人ぶん売れたか」を復元する(availableRamens()を呼び直さない
     // ことで、万一この間にstateが変わっても計算に使った一覧とズレない)。
-    return { results: results, totalDemand: totalDemand, weeklyCapacity: weeklyCapacity, queueLevel: queueLevel, staffCapacity: staffCapacity, ramens: ramens };
+    return {
+      results: results, totalDemand: totalDemand, weeklyCapacity: weeklyCapacity, queueLevel: queueLevel,
+      staffCapacity: staffCapacity, ramens: ramens,
+      // v25(§A/§F): 逃した客の内訳表示・絵の湧き人数専用の通過点(D/D'/T1/A)。
+      // D=totalDemand(既存)。ここでは新規に増えた3つだけを持ち出す。
+      demandAfterQueuePushout: demandAfterQueuePushout, demandAfterSeatCap: demandAfterSeatCap,
+      actualCustomers: actualCustomers
+    };
+  }
+
+  // v25(指示書§3・追補§A): 逃した客の内訳。computeWeeklyCustomers()が返したD/D'/T1/Aの
+  // 4つの通過点を、指示された順序で引き算するだけ(新しい計算式を足さない)。
+  //   席が足りず逃した = D  − T1   (②queue_tolerance足切り + ③座席キャパの合計)
+  //   手が足りず逃した = T1 − A    (④処理可能人数キャパの分)
+  // (D − T1) + (T1 − A) = D − A は恒等式なので、二重計上・取りこぼしは構造上あり得ない。
+  function missedCustomersBreakdown(customersResult) {
+    var D = customersResult.totalDemand;
+    var T1 = customersResult.demandAfterSeatCap;
+    var A = customersResult.actualCustomers;
+    // 先に合計(total)を丸めてから、席側だけ丸めて求め、手側は「合計−席側」で残りとして出す。
+    // 内訳を別々に丸めて足すと(半端な値が両方切り上がる等で)合計とズレる場合があるため、
+    // 「足すと必ずtotalに一致する」ことを丸め方の時点で保証する。
+    var total = Math.max(0, Math.round(D - A));
+    var seatShort = U.clamp(Math.round(D - T1), 0, total);
+    var staffShort = total - seatShort;
+    return { total: total, seatShort: seatShort, staffShort: staffShort };
   }
 
   // STEP9(§1): 原価は「客がどのラーメンを選んだか」で決まる(値段は今もラーメンによらず
@@ -763,6 +802,7 @@ window.Scoring = (function () {
     computeSatisfaction: computeSatisfaction,
     computeWeeklyCustomers: computeWeeklyCustomers,
     computeWeeklyFinance: computeWeeklyFinance,
+    missedCustomersBreakdown: missedCustomersBreakdown,
     hourCoverageMultiplier: hourCoverageMultiplier,
     hoursCostMultiplier: hoursCostMultiplier,
     weeklyBandSchedule: weeklyBandSchedule,

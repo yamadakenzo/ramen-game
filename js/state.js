@@ -61,7 +61,15 @@ window.GameState = (function () {
   // v24(docs/指示書/v24_席の設備化とプレゼント演出_指示書.md §2-5): 席が物件の固定値から
   // state.seats(持ち物)へ移り、stateの形が変わったため22→23に上げた。ramen_metaは上記の
   // とおり無関係のため今回も消えない。
-  var SAVE_VERSION = 23;
+  // v25(docs/完了/v25_行列への一本化と逃した客の可視化_指示書.md §3-5): 週ログ(history)に
+  // 逃した客の内訳(missedCustomers: {total, seatShort, staffShort})を記録するようになり、
+  // stateの形が変わったため23→24に上げた。ramen_metaは上記のとおり無関係のため今回も消えない。
+  // v26(docs/指示書/v26_売上のA基準への統一と上部帯カウンタの是正_指示書.md §2-1、
+  // 追補§D-2): 売上をA基準の確定額へ揃えるため、state.weekRevenue({week, planned, paid})を
+  // 新設した。週の途中でリロードしても既払い額(paid)を失わない=二重計上しないために
+  // stateへ持たせる必要があり、モジュール変数のままでは持たせられない。stateの形が変わった
+  // ため24→25に上げた。ramen_metaは上記のとおり無関係のため今回も消えない。
+  var SAVE_VERSION = 25;
 
   // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §1): 既存の従業員5人ぶんの
   // staffStateを、js/event-engine.jsのensureStaffState()が作るのと同じ形であらかじめ
@@ -201,6 +209,13 @@ window.GameState = (function () {
       // v23(docs/完了/v23_週次費用と月次成績_指示書.md §3-1): day(開業からの通算日数) -> {customers, revenue}。
       // 週末処理(runWeeklyCalc)で7日ぶんまとめて書く。暦月ベースの月次成績(showMonthlyRecap)の集計元。
       dailyLog: {},
+      // v26(docs/指示書/v26_売上のA基準への統一と上部帯カウンタの是正_指示書.md §2-1、
+      // 追補§D-2): その週の売上の確定額(planned=A基準のfinance.revenue、イベント効果適用後)と
+      // 既払い額(paid=onCustomerServedで配膳のたびに積み上げた額)。week==0は「まだ一度も
+      // 確定していない」の目印(開業直後の1週目でstageWeekCustomers()が必ず上書きする)。
+      // モジュール変数ではなくstateに持たせる理由: 週の途中でセーブして再開したとき、
+      // paidが失われると週末精算(残り=planned-paid)で二重計上になるため。
+      weekRevenue: { week: 0, planned: 0, paid: 0 },
       eventLog: [], // {week, id, title}
       pendingEvents: [], // このtickで表示すべきイベントのキュー
       currentEvent: null,

@@ -40,11 +40,17 @@ window.ScreenLoop = (function () {
   var devFabRevealed = false;   // 「開発」ボタンのバウンド出現(handleDevelopSubmit.fab-develop-in)を1回だけ出す
   var devPointerEl = null;      // 誘導の指アイコン(#app直下)
   var devIntroTimer = null;
-  // v12-3:「今週の客」= 実際に入店した人数を1人ずつ数えるカウンタ。週の開始でリセットする。
-  var weekLiveCount = 0;
   // STEP10: 認知度・評判の「今週いくつ動いたか」の表示用。表示専用の値なのでstateには持たせない
   // (セーブする必要が無い上、renderTopBarは週次計算以外のタイミングでも何度も呼ばれるため)。
   var lastAwarenessDelta = 0, lastReputationDelta = 0;
+  // v26(指示書§3-1、追補§C-1):「今週の客」は、以前は着席イベントを1人ずつ数えるアキュムレータ
+  // (weekLiveCount)だったが、それをやめてweeklyBandSchedule由来の理論値から都度計算する
+  // (weekCustomerProgress()、下記)。lastRenderedWeekCustomerCountは.tv-pulse(値が変わった
+  // 瞬間の演出)を出すためだけの表示専用の記憶値で、stateには持たせない。
+  var lastRenderedWeekCustomerCount = 0;
+  // v26(追補§B-2): 週またぎでスキップした配膳の件数(診断用、コンソールに情報として出すだけ)。
+  // stateには持たせない(数値計算に一切使わない、確認用のカウンタ)。
+  var weekRevenueSkipCount = 0;
 
   function findStaffDef(id) { return window.Scoring.findStaffDef(state, id); } // STEP6: スカウト勢も対象に含める
 
@@ -225,6 +231,71 @@ window.ScreenLoop = (function () {
     return totals;
   }
 
+  // v26(指示書§3-1、追補§C-4): schedule[dow][bandKey]の客層別内訳を合計するだけの、
+  // dailyCustomerTotals()の帯単位版。既存のdailyCustomerTotalsは壊さず、同じ形の小関数を
+  // 横に置く(同じ計算を2箇所に書かない原則には反するが、「曜日単位」と「帯単位」は別の
+  // 粒度なので、片方をもう片方の内部実装として書き換えることはしない=既存の挙動を変えない)。
+  function bandCustomerTotal(schedule, dow, bandKey) {
+    var segObj = (schedule[dow] && schedule[dow][bandKey]) || {};
+    var sum = 0;
+    Object.keys(segObj).forEach(function (id) { sum += segObj[id]; });
+    return sum;
+  }
+
+  // v26(指示書§3-1、追補§C-2/§C-3): 「今週の客」を、着席イベントを1人ずつ数えるアキュムレータ
+  // (旧weekLiveCount)ではなく、weeklyBandSchedule由来の理論値から都度計算する。
+  // 追補§C-2の訂正: lastScheduleはv25(§4)以降D(潜在需要=r.potential)ベースなので、マス目の
+  // 絶対値をそのまま合計するとAではなくDに揃ってしまう(D>Aの週でカウンタがAを上回る、
+  // 今回直したかったのと同種の乖離が新しく生まれる)。scheduleは「曜日×帯の配分比率」を
+  // 取るためだけに使い、その比率をA(lastCustomers.actualCustomers)に掛け直すことで、
+  // Dベースだろうと結果は必ずAへ揃う(v23のwriteDailyLogがscheduleの比で週の客数・売上を
+  // 7日へ配分しているのと同じ手口。新しい発想を持ち込まない)。
+  // 案(b)(帯内線形補間、追補§C-1で承認): 現在の帯の内側もstate.clockMinから進行率を出して按分する。
+  function weekCustomerProgress() {
+    if (!lastSchedule || !lastCustomers) return 0;
+    var A = lastCustomers.actualCustomers || 0;
+    if (A <= 0) return 0;
+    var bands = activeBandDefs();
+    if (!bands.length) return 0;
+
+    var grandTotal = 0;
+    for (var d = 0; d < 7; d++) {
+      bands.forEach(function (b) { grandTotal += bandCustomerTotal(lastSchedule, d, b.key); });
+    }
+    if (grandTotal <= 0) return 0;
+
+    var dowNow = U.dow(state.day); // 0(月)〜6(日)。state.weekDayは存在しないため。
+    var cur = bandAt(state.clockMin, bands);
+    var lastBandEndMin = bands[bands.length - 1].end * 60;
+
+    var cumulative = 0;
+    for (var dd = 0; dd < dowNow; dd++) {
+      bands.forEach(function (b) { cumulative += bandCustomerTotal(lastSchedule, dd, b.key); });
+    }
+    if (cur) {
+      // 今日ぶん: 現在の帯より前は満額、現在の帯は帯内の進行率で按分する。
+      for (var i = 0; i < bands.length; i++) {
+        var b = bands[i];
+        if (b.key === cur.key) {
+          var frac = U.clamp((state.clockMin - b.start * 60) / ((b.end - b.start) * 60), 0, 1);
+          cumulative += bandCustomerTotal(lastSchedule, dowNow, b.key) * frac;
+          break;
+        }
+        cumulative += bandCustomerTotal(lastSchedule, dowNow, b.key);
+      }
+    } else if (state.clockMin >= lastBandEndMin) {
+      // 追補§C-3: 最終帯(23:00)より後は「帯が無いから0」にせず、今日ぶんを満額計上する
+      // (0扱いにすると23:00を跨いだ瞬間にカウンタが大きく逆行するため)。
+      bands.forEach(function (b) { cumulative += bandCustomerTotal(lastSchedule, dowNow, b.key); });
+    }
+    // 最初の帯(11:00)より前は今日ぶん0のまま(cumulativeに何も足さない)。
+
+    var progress = Math.round(A * (cumulative / grandTotal));
+    // 追補§C-2: 週の最終帯(dow=6の夜)が閉じた時点は、丸め誤差を許さずAちょうどにクランプする。
+    if (dowNow === 6 && !cur && state.clockMin >= lastBandEndMin) progress = Math.round(A);
+    return U.clamp(progress, 0, Math.round(A));
+  }
+
   // v23(§3-1): 週末処理でその週7日ぶんのdailyLogをまとめて書く(1杯ごとの書き足しはしない。
   // 売上のstate.moneyへの加算は「丼が客の席に届いた瞬間」に起きるため、バックグラウンドタブの
   // アニメーション遅延で実績値が理論値からズレることがあり、それを月次の集計元にすると週次画面の
@@ -256,33 +327,77 @@ window.ScreenLoop = (function () {
     // Scoring側の計算式は一切変えず、ここで客層ごとの人数(count)だけを0に上書きする
     // (以後、computeWeeklyFinance/weeklyBandScheduleはこのcountから金額・湧きを導くだけなので、
     // 売上・原価・絵の湧きも連動して自動的に0になる。新しい計算経路を増やさない)。
+    // v25(§F): potential(絵の湧き人数の元)とD/D'/T1/A(逃した客の内訳の元)も同時に0にする
+    // (ロック中に「品がまだ無い」以外の理由(席・人手)で客を逃したように見せない・出さないため)。
     if (tutorialSalesLocked()) {
-      Object.keys(customers.results).forEach(function (id) { customers.results[id].count = 0; });
+      Object.keys(customers.results).forEach(function (id) {
+        customers.results[id].count = 0;
+        customers.results[id].potential = 0;
+      });
+      customers.totalDemand = 0;
+      customers.demandAfterQueuePushout = 0;
+      customers.demandAfterSeatCap = 0;
+      customers.actualCustomers = 0;
     }
     var finance = Scoring.computeWeeklyFinance(state, customers);
     lastCustomers = customers;
     lastFinance = finance;
     // v10-3: この週、実際に絵の上へ湧かせる「曜日×帯」の内訳。計算(売上・満足度)には一切使わない、
     // 可視化専用のデータ。ShopView.openBand()がここから今日・今の帯ぶんを取り出して湧かせる。
-    lastSchedule = Scoring.weeklyBandSchedule(state, customers);
-    weekLiveCount = 0; // v12-3:「今週の客」は来店ごとに数える。週替わりで0に戻す
+    // v25(§4-1/追補§F): 湧かせる総数は実客数(A)ではなく潜在需要(D)ぶんにする(行列が実際に
+    // 伸びて見えるようにするため)。weeklyBandScheduleに渡すのは新しく組み立てた別オブジェクトで、
+    // lastCustomers(収支・週次表示・満足度バブルが参照する元のcustomers、A基準)は書き換えない
+    // (絵が計算より多く見えるようになるが、絵から計算への書き戻しは引き続き一切しない。§4-4)。
+    // 帯への配分ロジック(weeklyBandScheduleの重み3/1)自体は変更しない。
+    var displayCustomers = { results: {} };
+    Object.keys(customers.results).forEach(function (id) {
+      var r = customers.results[id];
+      displayCustomers.results[id] = { count: r.potential || 0, satisfaction: r.satisfaction, blocked: r.blocked };
+    });
+    lastSchedule = Scoring.weeklyBandSchedule(state, displayCustomers);
+    // v26(指示書§2-1、追補§D-2): 週の売上確定額(planned)と既払い額(paid)。
+    // state.weekRevenue.weekが今週の週番号と一致する場合(=週の途中でのリロード)は、
+    // 保存済みのplanned/paidをそのまま使う(上書きするとpaidが0に戻り、二重計上になる)。
+    // 一致しない場合(=本当に新しい週が始まった)だけ、新しく確定してpaidを0にする。
+    var wk = U.weekOfRun(state.day);
+    var plannedNow = finance.revenue; // §1-2で確認済み: weekRevenueMultは既にfinance.revenueに適用済み
+    if (!state.weekRevenue || state.weekRevenue.week !== wk) {
+      state.weekRevenue = { week: wk, planned: plannedNow, paid: 0 };
+      lastRenderedWeekCustomerCount = 0; // v26(追補§C-1):「今週の客」表示も週替わりで0に戻す
+      weekRevenueSkipCount = 0; // v26(追補§B-2): 週またぎスキップの計測もここでリセット
+    } else if (Math.abs(state.weekRevenue.planned - plannedNow) > 0.5) {
+      // v26(追補§D-2): §D-1で決定性を確認済みなので、ここに来るのは想定外(バグの証拠)。
+      // 保存値を正としつつ、見逃さないよう警告を出す。
+      console.warn("[v26] weekRevenue.plannedがリロード後の再計算と食い違っています(保存値="
+        + state.weekRevenue.planned + ", 再計算=" + plannedNow + ")。保存値を優先します。");
+    }
     refreshShop();
     renderTopBar();
   }
 
-  // v12-3: 客が実際に入店した瞬間(暖簾をくぐって席へ向かう瞬間)にShopViewから呼ばれる。
-  function onCustomerEnter() {
-    weekLiveCount++;
-    renderTopBar(true); // trueで数字が変わった合図(軽い強調)を出す
-  }
-
-  // v13-3/v16-1: 丼が客の席に届いた瞬間にShopViewから呼ばれる(以前は食べ終わって退店した瞬間
-  // だった。「丼が届いた瞬間にだけ増える」という指示への対応)。その1杯の売価(price)を所持金へ
-  // 加算する。週末(runWeeklyCalc)側は費用だけを引く形に変えてあるので、ここが売上を反映する唯一の
-  // 場所になる(二重計上防止)。待ちきれず帰った客はここへ来ないので、自動的に売上に乗らない。
-  function onCustomerServed(segId, price) {
+  // v26(指示書§2-2、追補§B-2): 週の確定額(state.weekRevenue.planned)から配膳のたびに分割して
+  // 払い出す。paid+priceOwedがplannedを超える場合はクランプし、絵が計算を追い越さないようにする。
+  // spawnWeekは客が湧いた時点の週番号(ShopView.makeActor()のtraffic.week経由、priceOwedと同じ
+  // 経路)。今週の週番号と一致しない場合(週境界をまたいで配膳された客、追補§1-3で確認した
+  // 「厨房が調理着手済みで安全弁が効かない」ケース)は、二重計上・過少計上のどちらも避けるため
+  // 金銭処理を丸ごとスキップする(絵の配膳シーケンス自体はshop-view.js側で最後まで完走させる。
+  // ここで止めるのは所持金への加算だけ)。
+  function onCustomerServed(segId, price, spawnWeek) {
     if (!price) return;
-    state.money += price;
+    if (state.weekRevenue && spawnWeek != null && spawnWeek !== state.weekRevenue.week) {
+      weekRevenueSkipCount++;
+      console.info("[v26] 週またぎの客の売上加算をスキップしました(spawnWeek=" + spawnWeek +
+        ", 現在週=" + state.weekRevenue.week + ", 通算" + weekRevenueSkipCount + "件目)");
+      return;
+    }
+    var owed = price;
+    if (state.weekRevenue) {
+      var room = Math.max(0, state.weekRevenue.planned - state.weekRevenue.paid);
+      owed = Math.min(price, room);
+      state.weekRevenue.paid += owed;
+    }
+    if (owed <= 0) return; // クランプで加算分が無くなった場合、renderTopBar等も呼ばない
+    state.money += owed;
     renderTopBar();
     window.GameState.save();
   }
@@ -321,8 +436,9 @@ window.ScreenLoop = (function () {
     state.money -= fixedCosts;
 
     // v13-3/v16-1: 売上(finance.revenue)は丼が客の席に届くごとにonCustomerServed()で既に所持金へ
-    // 加算済み。ここで再び足すと二重計上になるため、週末は費用(仕入)だけを引く。表示用のprofit
-    // (週の損益)はこれまで通り売上込みの式のまま——週末の収支画面の「残り」の表示内容は変えない指示のため。
+    // 一部加算済み(v26以降はstate.weekRevenue.plannedからの分割払い出し。§2-2)。ここでは
+    // 費用(仕入)だけを引く。表示用のprofit(週の損益)はこれまで通り売上込みの式のまま
+    // ——週末の収支画面の「残り」の表示内容は変えない指示のため。
     state.money -= finance.foodCost;
     // STEP7(docs/新設計/07_STEP7_設備_修正版.md §2): 設備の週維持費。家賃・人件費(weeklyFixedCosts)
     // とは別枠の計算のまま、引き続き毎週必ず引く。
@@ -334,6 +450,21 @@ window.ScreenLoop = (function () {
     var sideSales = Scoring.computeSideSales(state, customers);
     state.money += sideSales.revenue;
     state.money -= sideSales.cost;
+    // v26(指示書§2-3): 週の確定額(planned)の残り(=絵の配膳が追いつかなかった分)を、ここで
+    // 一括精算する。これにより「週を通じてstate.moneyへ加算された売上の合計は必ずplannedと
+    // 一致する」——絵の実給仕数がAを下回っても、従業員0人で丼が1杯も届かなくても同じ。
+    // §2-2のクランプにより残りが負になることは無いはずだが、念のため負ならクランプし、
+    // 実装のバグを見逃さないようコンソールに警告を出す。
+    if (state.weekRevenue) {
+      var remaining = state.weekRevenue.planned - state.weekRevenue.paid;
+      if (remaining < 0) {
+        console.warn("[v26] weekRevenue残りが負になりました(planned=" + state.weekRevenue.planned +
+          ", paid=" + state.weekRevenue.paid + ")。0にクランプします。");
+        remaining = 0;
+      }
+      state.money += remaining;
+      state.weekRevenue.paid += remaining; // 精算後はpaid===plannedになる(次週のstageWeekCustomersで作り直す)
+    }
     var profit = finance.revenue - finance.foodCost - fixedCosts - equipUpkeep + sideSales.revenue - sideSales.cost;
 
     state.reputation = U.clamp(state.reputation + (avgSat - 50) * 0.04, 0, 100);
@@ -365,7 +496,10 @@ window.ScreenLoop = (function () {
       equipUpkeep: equipUpkeep, // STEP7: 設備の週維持費(家賃・人件費とは別枠)
       sideRevenue: sideSales.revenue, sideCost: sideSales.cost, // STEP8: サイドメニューの売上・原価
       profit: Math.round(profit), money: Math.round(state.money),
-      avgSatisfaction: Math.round(avgSat), queueLevel: customers.queueLevel
+      avgSatisfaction: Math.round(avgSat), queueLevel: customers.queueLevel,
+      // v25(§3-5): 逃した客の内訳({total, seatShort, staffShort})。今回は週次画面にしか
+      // 出さないが、月次まとめ・結果画面で使えるよう記録だけしておく(§8先送り)。
+      missedCustomers: Scoring.missedCustomersBreakdown(customers)
     });
     // v23(§3-1): 月次成績の集計元となる日別ログ。月次まとめ(proceedToMonthlyRecap)より必ず先に
     // ここで書き終える(week末シーケンスは全てonDoneの連鎖で後から動くので、この関数の中で
@@ -446,6 +580,11 @@ window.ScreenLoop = (function () {
     state.clockMin = bands.length ? bands[0].start * 60 : 0;
     if (state.day > window.DAYS_PER_RUN) { window.GameState.save(); finishGame(); return; }
     window.GameState.save();
+    // v25(§2/追補§B-2): 新しい週の客を仕込む直前に、前の週から着席したまま丼を待っていた客を
+    // 片付ける安全弁。「我慢の限界」の復活ではなく、週の境界で一律に片付けるだけ(数値には
+    // 一切影響しない、見た目専用の処理)。stageWeekCustomers()は開発完了時の再計算等、週の境界
+    // 以外からも呼ばれるため、ここ(実際に週が切り替わる箇所)でだけ呼ぶ。
+    window.ShopView.clearSeatedWaiters();
     // v12-2: 新しい週の客数・湧きスケジュールをここで確定する(内部でrenderTopBar/refreshShopも行う)。
     stageWeekCustomers();
     renderSpeedDock();
@@ -563,6 +702,17 @@ window.ScreenLoop = (function () {
     ]);
   }
 
+  // v25(§3-3): moneyRowの人数版(円ではなく「N人」で出す)。既存のwf-row/wf-label/wf-valの
+  // クラスをそのまま流用するだけで、新しいCSSは足さない。
+  function peopleRow(label, val, opts) {
+    opts = opts || {};
+    var cls = "wf-row" + (opts.tone === "bad" ? " wf-bad" : (opts.tone === "good" ? " wf-good" : ""));
+    return h("div", { className: cls }, [
+      h("span", { className: "wf-label", text: label }),
+      h("span", { className: "wf-val", text: val + "人" })
+    ]);
+  }
+
   // 「今週：客52人/満足38・不満14/売上¥46,800」のようなデータをまとめておく。トグル切替の再描画にも使う。
   // v23(§2-1/§E): 家賃・人件費は毎週発生する固定費になったため、月初かどうかで行の有無を
   // 切り替える必要が無くなった(weeklyFixedCostsは常に実際に引かれた額そのもの)。
@@ -584,7 +734,10 @@ window.ScreenLoop = (function () {
       equipUpkeep: upkeep,
       // STEP8(§2): サイドメニューの売上・原価。ラーメンの売上とは別の行として持つ。
       sideRevenue: side.revenue, sideCost: side.cost,
-      net: revenue - finance.foodCost - wfc.rent - wfc.wages - upkeep + side.revenue - side.cost
+      net: revenue - finance.foodCost - wfc.rent - wfc.wages - upkeep + side.revenue - side.cost,
+      // v25(§3-3): 逃した客の内訳({total, seatShort, staffShort})。週次計算(Scoring)側から
+      // そのまま取り出すだけ(絵の実数はカウントしない。§3-1)。
+      missed: Scoring.missedCustomersBreakdown(customers)
     };
   }
 
@@ -631,6 +784,15 @@ window.ScreenLoop = (function () {
       rows.push(moneyRow("家賃", -d.rent, { tone: "bad" }));
       // STEP7(§2): 設備維持費も毎週発生する固定費(0円の週=設備未購入時は出さない)。
       if (d.equipUpkeep) rows.push(moneyRow("設備維持費", -d.equipUpkeep, { tone: "bad" }));
+      // v25(§3-3): 逃した客が0人の週は行自体を出さない(v23の「発生する週にその額を出し、
+      // 発生しない週には出さない」方針に揃える)。表示順は常に「席が足りず」→「手が足りず」で
+      // 固定(追補§A-2。計算の通過順=先に効いている天井→あとに効いている天井、と一致させる)。
+      if (d.missed && d.missed.total > 0) {
+        rows.push(h("div", { className: "wf-divider" }));
+        rows.push(peopleRow("逃した客", d.missed.total, { tone: "bad" }));
+        if (d.missed.seatShort) rows.push(peopleRow("　席が足りず", d.missed.seatShort, { tone: "bad" }));
+        if (d.missed.staffShort) rows.push(peopleRow("　手が足りず", d.missed.staffShort, { tone: "bad" }));
+      }
       rows.push(h("div", { className: "wf-divider" }));
       rows.push(moneyRow("残り", d.net, { sign: true }));
       var table = h("div", { className: "wf-table" }, rows);
@@ -692,7 +854,7 @@ window.ScreenLoop = (function () {
   // v12-4: 上帯は固定グリッド(2行)。1行目=日時+所持金、2行目=今週の客/評判/疲労(+行列)。
   // 要素同士が重ならないことは幅(グリッド列+ellipsis)で保証する(CSSの.top-bar側)。
   // pulse: trueなら「今週の客」の数字が今変わったことを軽く強調する(v12-3)。
-  function renderTopBar(pulse) {
+  function renderTopBar() {
     var root = document.getElementById("top-bar");
     if (!root) return;
     window.UI.clear(root);
@@ -710,8 +872,13 @@ window.ScreenLoop = (function () {
       item("日時", dateLabel()),
       item("所持金", U.formatMoneyShort(state.money), "money")
     ]);
-    // v12-3:「今週の客」は週の初めからの合計ではなく、実際に入店した人数を1人ずつ数えるカウンタ。
-    var custCls = pulse ? "tv-pulse" : null;
+    // v26(指示書§3-1、追補§C-1):「今週の客」は着席イベントのアキュムレータではなく、
+    // weekCustomerProgress()でその都度計算する(理由は同関数のコメント参照)。値が前回の描画から
+    // 変わった瞬間だけ.tv-pulse(v12由来の演出)を出す——以前は「着席イベントが来た」ことそのものが
+    // 合図だったが、都度計算に変えたことで「前回描画との差分」が同じ役目を果たす。
+    var custCount = weekCustomerProgress();
+    var custCls = (custCount !== lastRenderedWeekCustomerCount) ? "tv-pulse" : null;
+    lastRenderedWeekCustomerCount = custCount;
     // STEP10(docs/新設計/10_STEP10_広告_認知度_評判_修正版.md §5): 認知度と評判を並べて表示する。
     // 別物であることが分かるよう、それぞれ「今週の変化」(直近のrunWeeklyCalcで動いた分。認知度は
     // 放置による1.5%減、評判はその週の満足度による増減)をカッコ添えで見せる。
@@ -721,7 +888,7 @@ window.ScreenLoop = (function () {
       return Math.round(v) + "(" + (r > 0 ? "+" : "") + r + ")";
     }
     var subRow = h("div", { className: "tb-row tb-row-sub" }, [
-      item("今週の客", weekLiveCount + "人", custCls),
+      item("今週の客", custCount + "人", custCls),
       item("認知度", withDelta(state.awareness, lastAwarenessDelta)),
       item("評判", withDelta(state.reputation, lastReputationDelta)),
       item("疲労", String(fatigue), fatigueCls)
@@ -1758,6 +1925,8 @@ window.ScreenLoop = (function () {
 
     lastFinance = null;
     lastCustomers = null;
+    lastRenderedWeekCustomerCount = 0; // v26: 前回プレイの表示値を持ち越さない
+    weekRevenueSkipCount = 0;
     openSheetKey = null;
     sheetBuilder = null;
     pauseReasons.clear(); // 前回のプレイの一時停止理由を持ち越さない(念のため)
@@ -1785,7 +1954,8 @@ window.ScreenLoop = (function () {
     }
 
     window.ShopView.destroy();
-    window.ShopView.mount(document.getElementById("shop-fill"), state, { onEnter: onCustomerEnter, onServe: onCustomerServed });
+    // v26(追補§C-1): onEnterコールバック(weekLiveCountの加算専用だった)は削除済みなので渡さない。
+    window.ShopView.mount(document.getElementById("shop-fill"), state, { onServe: onCustomerServed });
     // v12-2: 新規開始・セーブからの再開のどちらでも、この時点で「今この瞬間の状態」を使って
     // 今週ぶんの客数・湧きスケジュールを確定させる(内部でrenderTopBar/refreshShopも行う)。
     // これで1週目から(セーブ再開なら週の途中からでも)絵に客が出るようになる。

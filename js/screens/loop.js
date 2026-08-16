@@ -870,7 +870,7 @@ window.ScreenLoop = (function () {
     }
     var mainRow = h("div", { className: "tb-row tb-row-main" }, [
       item("日時", dateLabel()),
-      item("所持金", U.formatMoneyShort(state.money), "money")
+      item("所持金", U.formatMoney(state.money), "money")
     ]);
     // v26(指示書§3-1、追補§C-1):「今週の客」は着席イベントのアキュムレータではなく、
     // weekCustomerProgress()でその都度計算する(理由は同関数のコメント参照)。値が前回の描画から
@@ -1613,7 +1613,7 @@ window.ScreenLoop = (function () {
 
   function panelEquipment() {
     var box = h("div", {});
-    box.appendChild(h("p", {}, ["所持金: ", h("span", { className: "money", text: U.formatMoneyShort(state.money) })]));
+    box.appendChild(h("p", {}, ["所持金: ", h("span", { className: "money", text: U.formatMoney(state.money) })]));
     var grid = h("div", { className: "choice-grid" });
     PROPERTY_DATA.equipment.forEach(function (eq) {
       var owned = state.equipment.indexOf(eq.id) >= 0;

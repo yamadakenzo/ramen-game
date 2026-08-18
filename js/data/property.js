@@ -22,7 +22,7 @@ window.DATA.property = {
   "properties": [
     {
       "id": "shotengai", "name": "商店街の空き店舗", "name_en": "Shopping Street Vacancy", "emoji": "🏪",
-      "initial_cost": 3200000, "rent": 14500, "counterSlots": 10, "seats_table": 0, "condition": "居抜き",
+      "initial_cost": 0, "rent": 14500, "counterSlots": 10, "seats_table": 0, "condition": "居抜き",
       "segment_flow": { "regular": 1.4, "salaryman": 0.8, "ol": 0.5, "student": 0.6, "family": 0.7, "tourist": 0.3 },
       "traits": ["前の店の設備が使える（初期投資が安い）", "常連文化が根付いている", "商店街の付き合いイベントが多い"],
       "desc": "シャッターが半分閉まった商店街。人通りは多くないが、地元の人が毎日通る。"
@@ -76,5 +76,10 @@ window.DATA.property = {
   // 開業資金を単一の固定額(自己資金のみ)にした。金額の根拠はdocs/設計判断記録.md参照
   // (安い方から2件=商店街3,200,000・大学前4,100,000は買える/3件目以降のオフィス街7,800,000以上は
   // 買えない/大学前を買っても設備1つ+従業員1人+初回の固定費を払える残額がある、の3条件を満たす)。
-  "startingCapital": 5500000
+  // v29(docs/完了/v29_開業資金の変更_指示書.md §1-1): startingCapitalを500000に変更し、
+  // 商店街(shotengai)のinitial_costを0にした。開業直後の所持金は500,000−0=¥500,000になる。
+  // バランス実験のための暫定値であり、v17で検算した4条件(§0のコメント参照)は
+  // v19の物件固定で既に前提が崩れていたため、今回も再検算していない
+  // (詳細はdocs/設計判断記録.md参照)。
+  "startingCapital": 500000
 };

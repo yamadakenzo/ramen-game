@@ -901,13 +901,15 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .card-item { border: 2px solid var(--c-ink-16); border-radius: var(--r-s); padding: 5px 8px; text-align: center; font-size: var(--fs-note); background: var(--c-panel); }
 .card-item .emoji { font-size: 1.3rem; }
 
-/* ================= 店舗の断面図 =================
-   画像は一切使わず CSS ブロック + 絵文字だけ。
-   縦位置(%)は js/screens/shop-view.js の GEO と揃えること(v14では位置・寸法に一切触れていない)。
-   絵の中の大きさは .shop-stage の font-size(枠幅比例)に対する em で書く。
-   v14-2: 色は4色相+濃茶の透過だけで塗り直した。グラデーションは使わない(既存のグラデーションは
-   全て単色のベタ塗りへ置き換えた)。「明るい照明を買ったときの.shop-stage.bright」は色を変えず、
-   .sv-roomに重ねていた--c-ink-08の沈みを外すことで表現する。 */
+/* ================= 店舗の斜め上視点 =================
+   v32(docs/指示書/v32_斜め上視点_指示書.md §3-1、docs/設計判断記録.md §42): 座標は
+   js/screens/shop-view.js の GEO だけが出典。ここ(CSS)には top/left/width/height の
+   数値を一切持たせない(v02から続いていた二重管理を解消。位置はすべてJSがインラインstyle
+   で書き、CSSに残すのは色・枠線・角丸・トランジション・アニメーション・em単位の相対的な
+   大きさだけ)。z-indexも同様——奥行きの重なり順はJS側のzForY()が動的に付けるので、
+   ここでは書かない(唯一の例外は俳優自身の子要素<丼・吹き出し・評判ポップ>のように、
+   親要素の中だけで完結するローカルな重なりで、部屋の奥行きとは無関係なもの)。
+   絵の中の大きさは .shop-stage の font-size(枠幅比例)に対する em で書く(v14以来の方針を継続)。 */
 .shop-stage {
   position: absolute; inset: 0;
   overflow: hidden;
@@ -917,95 +919,42 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   /* 絵の中の大きさの基準。縦長の枠に対して人が小さく見えないよう枠幅の 8.5% に取る */
   font-size: calc(var(--frame-w) * 0.085);
 }
-/* v25(§4-3/追補§D-2): 通り(店の外)を広げるため、店内⇔通りの境界を80%→72%へ動かした
-   (壁は68〜72%)。js/screens/shop-view.jsのGEO(inMaxX/doorX/queueX0等)と必ず揃えること。
-   v25確認フィードバック対応: 行列4列(GEO.queueRowY0〜)を「通り(.sv-street)」の地面の
-   上に乗せるため、通りの開始線を81%→60%へ引き上げた(向かいの建物.sv-outwallはその分
-   薄くなる)。GEO.queueRowY0/queueRowGapと必ず揃えること(4列とも60%以降に収める)。 */
-.sv-sky {
-  position: absolute; left: 72%; right: 0; top: 0; height: 42%;
-  background: var(--c-bg);
-}
-.sv-outwall {
-  position: absolute; left: 72%; right: 0; top: 42%; height: 18%;
-  background: var(--c-ink-16);
-  border-top: 2px solid var(--c-ink);
-}
-.sv-street {
-  position: absolute; left: 72%; right: 0; top: 60%; bottom: 0;
-  background: var(--c-ink-32); border-top: 2px solid var(--c-ink);
-}
-.sv-room {
-  position: absolute; left: 0; width: 68%; top: 0; bottom: 0;
-  background: var(--c-panel);
-  box-shadow: inset 0 0 0 999px var(--c-ink-08); /* 「暗い」既定状態。明るい照明でこの沈みを外す */
-}
-.shop-stage.bright .sv-room { box-shadow: none; }
-.sv-ceiling {
-  position: absolute; left: 0; width: 72%; top: 0; height: 5%;
-  background: var(--c-ink-16); border-bottom: 2px solid var(--c-ink);
-}
-.sv-floor {
-  position: absolute; left: 0; width: 72%; top: 81%; bottom: 0;
-  background: var(--c-ink-16); border-top: 2px solid var(--c-ink);
-}
-.sv-wall-right {
-  position: absolute; left: 68%; width: 4%; top: 0; height: 52%;
-  background: var(--c-ink-16); border-left: 2px solid var(--c-ink); border-right: 2px solid var(--c-ink);
-  border-bottom: 2px solid var(--c-ink);
-}
-.sv-doorway {
-  position: absolute; width: 4%; transform: translateX(-50%);
-  top: 52%; height: 29%;
-  background: var(--c-ink-32);
-  border-left: 2px solid var(--c-ink); border-right: 2px solid var(--c-ink);
-}
-/* v14-2: 暖簾は元々「朱地に生成りの縦縞」だったが縞はrepeating-gradientなので廃止し、
-   見出し帯と同じ朱のベタへ寄せた(装飾は画面に1種類、という指示に合わせて見出し帯と統一)。 */
-.sv-noren {
-  position: absolute; width: 9%; transform: translateX(-50%);
-  top: 42%; height: 10%; z-index: 8;
-  background: var(--c-accent);
-  border-top: 2px solid var(--c-ink);
-  display: flex; align-items: center; justify-content: center;
-}
-.sv-noren-text { font-size: 0.26em; color: var(--c-panel); font-weight: 700; letter-spacing: -1px; }
+/* v32: 店内画像(img/stage/*)は絵文字と同じ「1文字ぶんの正方形」の考え方をそのまま流用する
+   (v31の.emoji-font imgと同じ形だが、.shop-stage配下はfont-familyをNotoEmojiGameへ直接
+   指定しており個々の要素にemoji-fontクラスを付けていないため、別に定義する)。 */
+.shop-stage img { width: 1em; height: 1em; object-fit: contain; vertical-align: middle; display: inline-block; }
+
+/* 下地(img/stage/floor.webp)。壁・床・出入口はすべてこの1枚絵の中に描かれている。
+   明るい照明を導入していると絵全体を少し明るくする(旧版は.sv-roomの沈みを外す実装だったが、
+   下地が1枚絵になったのでfilterで代える)。 */
+/* img.(タグ+クラス)にして.shop-stage img(同じ強さ)より後に書くことで、1em指定より優先させる */
+img.sv-floor-img { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; object-fit: cover; }
+.shop-stage.bright .sv-floor-img { filter: brightness(1.12); }
+
 .sv-signboard {
-  position: absolute; left: 74%; top: 9%;
+  position: absolute; transform: translate(-50%, -50%);
+  display: flex; align-items: center; gap: 3px;
   background: var(--c-panel); border: 2px solid var(--c-ink); color: var(--c-ink);
-  padding: 2px 4px; font-size: 0.26em; max-width: 17%;
+  padding: 2px 4px; font-size: 0.24em; max-width: 30%;
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
-.sv-lamp { position: absolute; top: 5%; transform: translateX(-50%); text-align: center; }
-.sv-lamp-cord { width: 2px; height: 0.5em; background: var(--c-ink-32); margin: 0 auto; }
-.sv-lamp-bulb { font-size: 0.56em; }
-.sv-duct { position: absolute; top: 6.5%; transform: translateX(-50%); font-size: 0.6em; }
-.sv-kitchen-counter {
-  position: absolute; left: 4%; width: 55%; top: 28%; height: 2.5%;
-  background: var(--c-ink-16); border-top: 2px solid var(--c-ink);
-}
-.sv-kit-item { position: absolute; top: 21%; transform: translateX(-50%); font-size: 0.82em; }
+.sv-lamp { position: absolute; transform: translate(-50%, -50%); font-size: 0.56em; }
+.sv-duct { position: absolute; transform: translate(-50%, -50%); font-size: 0.6em; }
+.sv-kit-item { position: absolute; transform: translate(-50%, -50%); font-size: 1.1em; }
 .sv-wall-sign {
-  position: absolute; top: 32%; transform: translateX(-50%);
+  position: absolute; transform: translate(-50%, -50%);
   font-size: 0.28em; background: var(--c-panel); border: 1px solid var(--c-ink); padding: 2px 4px;
 }
-.sv-counter {
-  position: absolute; left: 3%; width: 63%; top: 39.5%; height: 3.5%; z-index: 4;
-  background: var(--c-ink-16);
-  border: 2px solid var(--c-ink);
-}
-.sv-stool {
-  position: absolute; transform: translateX(-50%); width: 0.7em; height: 0.62em; z-index: 2;
-  background: var(--c-ink-16); border: 2px solid var(--c-ink); border-radius: 3px 3px 0 0;
-}
+.sv-counter-img { position: absolute; transform: translate(-50%, -50%); font-size: 3.6em; }
+.sv-stool { position: absolute; transform: translate(-50%, -50%); font-size: 1.6em; }
 /* v24(指示書§3-3): 「前回描画時より席が増えていたら、増えた席にだけポップ用のクラスを付けて
    描く」共通の仕組み。数値・イージングはjs/screens/card-reveal.jsのcardRevealPop/Sparkleと揃える
    (0.45秒ease-out・0.5秒ease-out、ease-inは使わない)。stagger(0.15秒/席)はJS側で
    animation-delayとして個別に入れる(js/screens/shop-view.js)。 */
 @keyframes svStoolPop {
-  0%   { opacity: 0; transform: translateX(-50%) translateY(10px) scale(0.85); }
-  60%  { opacity: 1; transform: translateX(-50%) translateY(-3px) scale(1.05); }
-  100% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+  0%   { opacity: 0; transform: translate(-50%, -50%) translateY(10px) scale(0.85); }
+  60%  { opacity: 1; transform: translate(-50%, -50%) translateY(-3px) scale(1.05); }
+  100% { opacity: 1; transform: translate(-50%, -50%) translateY(0) scale(1); }
 }
 .sv-stool-pop {
   opacity: 0;
@@ -1016,17 +965,10 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   font-size: 0.6em; opacity: 0; pointer-events: none;
   animation: cardRevealSparkle 0.5s ease-out forwards;
 }
-.sv-table {
-  position: absolute; transform: translateX(-50%); width: 11%; height: 2.5%; z-index: 3;
-  background: var(--c-ink-16); border: 2px solid var(--c-ink);
-}
-.sv-ticket {
-  position: absolute; transform: translateX(-50%); top: 57%; width: 0.95em; height: 24%; z-index: 3;
-  background: var(--c-panel); border: 2px solid var(--c-ink);
-  display: flex; align-items: center; justify-content: center; font-size: 0.55em;
-}
+.sv-table-img { position: absolute; transform: translate(-50%, -50%); font-size: 3em; }
+.sv-ticket { position: absolute; transform: translate(-50%, -50%); font-size: 1.3em; }
 
-.sv-actors { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
+.sv-actors { position: absolute; inset: 0; pointer-events: none; } /* z-indexは付けない(俳優はstageの他の子と同じ層で、zForY()が個別に競わせる) */
 .sv-cust {
   position: absolute; transform: translateX(-50%);
   transition: left 600ms linear, top 400ms ease-in-out;
@@ -1036,7 +978,7 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .sv-cust.flip .sv-body { transform: scaleX(-1); }
 .sv-cust .sv-bowl {
   position: absolute; left: 50%; top: -0.85em; font-size: 0.65em;
-  color: var(--c-down); /* v14-2: 厨房に積まれた丼と同じ「注文を抱えている」印象で揃える */
+  color: var(--c-down); /* 画像読み込み失敗時の絵文字フォールバック用。「注文を抱えている」印象で厨房の丼の山と揃える */
   transform: translateX(-50%) scale(0); transition: transform 200ms ease;
 }
 .sv-cust.eating .sv-bowl { transform: translateX(-50%) scale(1); }
@@ -1045,16 +987,19 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .sv-cust .sv-bubble {
   position: absolute; left: 92%; top: -0.6em; font-size: 0.62em;
   opacity: 0; transition: opacity 200ms ease;
-  color: var(--c-ink-64); /* v14-2: 既定(普通の表情)。satisfaction別の色は.mood-*で上書きする */
+  color: var(--c-ink-64); /* v14-2: 既定(普通の表情)。🕐/😡の色は.mood-*で上書きする */
 }
 .sv-cust.show-bubble .sv-bubble { opacity: 1; }
-/* v14-2: 絵文字の表情は単色フォントになったので区別が付きにくい。満足/普通/不満を色で分ける。 */
+/* v14-2: 🕐(丼待ち)・😡(退店)は絵文字のまま(v32でも画像化していない)なので、単色フォントでも
+   区別が付くよう満足/普通/不満を色で分ける。満足度3種の表情自体はv32で画像化した(img/stage/
+   face_*.webp)ため、この色分けは主に🕐/😡向けに残す。 */
 .sv-bubble.mood-good { color: var(--c-up); }
 .sv-bubble.mood-neutral { color: var(--c-ink-64); }
 .sv-bubble.mood-bad { color: var(--c-down); }
 
 /* v13-2: 退店時の「評判 +1」ポップアップ。指示どおり実秒0.8sで固定(ゲーム速度に連動させない)。
-   数字と記号だけの短い文字列なので、翻訳が伸びても崩れにくい white-space: nowrap にしておく。 */
+   数字と記号だけの短い文字列なので、翻訳が伸びても崩れにくい white-space: nowrap にしておく。
+   z-index:6は俳優自身(親要素)の中だけのローカルな重なり(部屋の奥行きとは無関係)。 */
 .sv-rep-pop {
   position: absolute; left: 50%; top: -1.9em; transform: translateX(-50%);
   font-size: 0.48em; white-space: nowrap; font-weight: 700; z-index: 6;
@@ -1072,7 +1017,7 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 /* v13-1: 店員は客と同じくmove()(JS)が left/top を直接動かす。旧・往復専用のCSSキーフレーム
    (svPace)は、実際の作業動線(寸胴→茹で麺器→盛り付け→客席→厨房)に置き換えたため廃止した。 */
 .sv-staff {
-  position: absolute; transform: translateX(-50%); font-size: 0.9em; line-height: 1; z-index: 4;
+  position: absolute; transform: translateX(-50%); font-size: 0.9em; line-height: 1;
   transition: left 600ms linear, top 500ms ease-in-out; will-change: left, top;
 }
 .sv-staff .sv-bowl {
@@ -1081,10 +1026,9 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 }
 .sv-staff.carrying .sv-bowl { transform: translateX(-50%) scale(1); }
 
-/* v13-1: 誰も取っていない注文(丼)が厨房に積まれて見える列。v14-2: 溜まっているのが
-   危険信号だと分かるよう--c-downで色を付ける(指示どおり)。 */
-.sv-order-pile { position: absolute; display: flex; gap: 2px; z-index: 4; }
-.sv-pile-bowl { font-size: 0.55em; color: var(--c-down); }
+/* v13-1: 誰も取っていない注文(丼)が厨房に積まれて見える列。 */
+.sv-order-pile { position: absolute; transform: translate(-50%, -50%); display: flex; gap: 2px; }
+.sv-pile-bowl { font-size: 0.55em; color: var(--c-down); } /* colorは画像読み込み失敗時の絵文字フォールバック用 */
 .sv-pile-more { font-size: 0.4em; color: var(--c-down); align-self: center; }
 
 /* v09-1: 一時停止中は食事の弾みアニメーションも止める */

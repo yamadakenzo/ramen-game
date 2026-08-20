@@ -323,15 +323,23 @@ window.Scoring = (function () {
   // docs/指示書/v24_追補_調査への回答と追加指示.md §3): 席は物件の固定値から state.seats
   // (持ち物)へ移った。この関数は新設ではなく既存関数(STEP7由来)の中身の書き換え——
   // シグネチャ・返り値の意味は変えていない。変えたのは「カウンター席の数をどこから読むか」だけ
-  // (p.seats_counter → state.seats.counter)。table_seats設備の+4は現状の実装をそのまま移した
-  // (加算量は変えていない。js/screens/shop-view.js側の描画にも同じ+4が別に書かれている二重管理が
-  // あるが、今回は直さない。理由・記録はPROGRESS.md参照)。
+  // (p.seats_counter → state.seats.counter)。
+  // v32(docs/指示書/v32_斜め上視点_指示書.md §1・§3-2): table_seats設備の+4が、この関数と
+  // js/screens/shop-view.js側の描画とで別々に書かれている二重管理だったため(懸念11)、
+  // tableSeats()へ1箇所に寄せた。shop-view.jsはtotalSeats()ではなくtableSeats()を読む
+  // (totalSeats()はカウンター込みの合計で、描画側はカウンター・テーブルを別々の絵で
+  // 描き分ける必要があるため、テーブルだけの数が要る)。加算量そのものは変えていない。
+  function tableSeats(state) {
+    var p = getProperty(state);
+    if (!p) return 0;
+    var bonus = state.equipment.indexOf("table_seats") >= 0 ? 4 : 0;
+    return p.seats_table + bonus;
+  }
   function totalSeats(state) {
     var p = getProperty(state);
     if (!p) return 0;
-    var tableBonus = state.equipment.indexOf("table_seats") >= 0 ? 4 : 0;
     var counter = (state.seats && state.seats.counter) || 0;
-    return counter + p.seats_table + tableBonus;
+    return counter + tableSeats(state);
   }
 
   // STEP7(docs/新設計/07_STEP7_設備_修正版.md §1〜2): 所持している設備の週維持費の合計。
@@ -796,6 +804,7 @@ window.Scoring = (function () {
     unownedStartMaterials: unownedStartMaterials,
     getProperty: getProperty,
     totalSeats: totalSeats,
+    tableSeats: tableSeats,
     computeShopStats: computeShopStats,
     smellEffective: smellEffective,
     meetsRequires: meetsRequires,

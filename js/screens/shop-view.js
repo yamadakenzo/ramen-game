@@ -1,45 +1,46 @@
-// 店舗の断面図とアニメーション。画像は一切使わず CSS ブロック + 絵文字だけで作る。
-// v05: 舞台を固定枠いっぱい(9:16)に広げたので、縦位置も px ではなく舞台高さに対する % で持つ。
-// 座標系: x は舞台幅に対する %、y は舞台高さに対する %。CSS の .sv-* と同じ数値を二重に持っている。
+// 店舗の斜め上視点(アイソメトリック)とアニメーション。
+// v32(docs/指示書/v32_斜め上視点_指示書.md): 横から見た断面図(枠線+ベタ塗り+絵文字)から、
+// img/stage/(floor.webp下地 + 家具・人・丼を画像で重ねる)へ作り直した。
+// 客・従業員・設備・物件の絵は v31 で img/ に入れたものをそのまま使う(新しく作らない)。
+//
+// 座標系: x は舞台幅に対する%、y は舞台高さに対する%。斜め上視点なので「奥へ進む」動きは
+// x・yが同時に動く(横から見た旧版のように一方向だけの移動ではない)。
+// v32(§3-1): 座標は GEO の1箇所だけが出典。CSS(css/style.css の .sv-*)には座標(top/left/
+// width/height)を一切持たせない。壁・床・カウンター・券売機も含め、位置はすべてここから
+// JSがインラインstyleで書く。CSSに残すのは色・枠線・角丸・トランジション・アニメーションだけ
+// (v02から続いていた「GEOとCSSの座標二重管理」はこれで解消。詳細はdocs/設計判断記録.md §42)。
 window.ShopView = (function () {
   var h = window.UI.h;
   var U = window.Utils;
+  var AI = window.AssetImage;
   var SEGMENTS = window.DATA.segments.segments;
   var STAFF = window.DATA.characters.staff;
   var EQUIP = window.DATA.property.equipment;
 
-  // v25(§4-3/追補§D-2): 店の外(通り)を広げるため、店内と通りの境界(壁)を80%→68〜72%へ
-  // 動かした。壁・出入口(doorX)・暖簾・看板(.sv-signboardはCSS側)・店内可動域(inMaxX)は
-  // すべてこの境界と連動させてある(片方だけ動かさない。v13以来の既知の罠)。
-  // 厨房カウンター・カウンター(cashier)・券売機・テーブル席の範囲・盛り付け台(PLATE_X)・
-  // 各station座標も、旧境界(76)→新境界(68)の比率(68/76)でまとめて縮小した
-  // (個々に据え置くと新しい壁と干渉するため)。
+  // v32: 斜め上視点の間取り(img/stage/floor.webpの絵に合わせて実測した座標)。
+  // 各地点は{x,y}(舞台%)。線状に並べる場所(カウンター・テーブル・行列)は始点/終点の
+  // 2点だけを持ち、isoSpread()で等間隔に割り付ける(旧spread()の2D版)。
   var GEO = {
-    kitchenY: 15,      // 厨房で働く店員の立ち位置(上端)
-    counterSitY: 43.5, // カウンター席に座った客(天板のすぐ下から頭が出る)
-    stoolY: 48.5,      // 丸椅子(座った客の足元)
-    tableSitY: 62,     // テーブル席に座った客
-    tableY: 67,        // テーブルの天板
-    walkY: 76,         // 床を歩いている客(足元が床の線に乗る)
-    inMinX: 5, inMaxX: 63,   // 店内の可動範囲(%)。旧71→63(壁の移動に連動)
-    doorX: 70,               // 出入口(%)。旧78→70
-    // v25(§4-2/追補§D-1): 行列の上限(旧6人・turnAwayFull)を廃止し、並びたい客は全員並べる。
-    // 1列6人(旧v16と同じ間隔queueGap=4)で埋まったら次の列へ折り返す(queueSlot参照)。
-    // 実測worst15人に対し、席・従業員の上限まで育つ将来を見て24人(4列)が画面内に収まることを
-    // 設計の基準にした(追補§D-1)。24人を超えても同じ折り返し規則をそのまま延長するので
-    // 描画自体は続く。列を8人×3列ではなく6人×4列にしたのは、間隔を旧v16と同じ4%に保って
-    // (詰めすぎて客同士が重なり判別できなくなるのを避けるため)、通りの幅(72〜100%)に
-    // 無理なく収めるため。
-    // v25確認フィードバック対応: queueRowY0は「通り(.sv-street、CSS側でtop:60%に変更済み)」の
-    // 地面の内側に収まる値にすること(0〜100%の範囲内というだけでは、向かいの建物
-    // .sv-outwallに重なって浮いて見える場合がある。4列とも60%以降に収める)。
-    queueX0: 75, queueGap: 4, queueCols: 6, queueRowY0: 62, queueRowGap: 10,
-    offX: 112,               // 画面外(%)。ここだけは意図的に0〜100%の範囲外(退場先)
-    // 縦長では横に並べられる席数が限られる。テーブル側は実際の席数より多くは描かない(絵は代表表示)。
-    // v24(docs/指示書/v24_追補_調査への回答と追加指示.md §2): drawMaxCounterは廃止した
-    // (全物件へ一律8席の頭打ちが掛かっていたのは描画都合の制約で、物件ごとの差別化を潰していた)。
-    // カウンター席は物件のcounterSlots(js/data/property.js)ぶんを枠として描く。
-    drawMaxTable: 4
+    door: { x: 23, y: 53 },   // 入口(暖簾の足元、床の切れ目)
+    off: { x: 23, y: 107 },   // 画面外(退場・湧き出し先)。入口の真下(overflow:hiddenで隠れる)
+    kitchenHome: { x: 72, y: 36 }, // 厨房担当の定位置の基準(タイル側、奥の壁寄り。カウンターより
+                                    // 十分奥<yが小さい>に置き、カウンターの絵と重なって隠れないようにする)
+    soup: { x: 88, y: 34 },        // 寸胴/鍋
+    noodle: { x: 78, y: 31 },      // 茹で麺器(無い場合の代役も同じ位置を使う)
+    plate: { x: 62, y: 43 },       // 盛り付け台=受け渡し口(カウンター客はここが受け取り場所そのもの)
+    hallHome: { x: 48, y: 50 },    // ホール担当の定位置(受け渡し口のすぐ手前)
+    // カウンター客席は受け渡し口の手前(ウッド床側)に並べる。線の始点/終点は
+    // 実測(img/stage/floor.webpの木目床とタイルの境界に沿わせた)。
+    counterLine: { x0: 42, y0: 53, x1: 80, y1: 60 },
+    counterSeatOffset: { dx: 0, dy: 2 },  // カウンター本体(絵)に対する客の座り位置の微調整(手前へ)
+    // テーブル席(img/equipment/table_seats.webpを1卓ぶんの絵として使う)は手前の板張り床に置く。
+    tableLine: { x0: 10, y0: 60, x1: 32, y1: 67 },
+    // 行列: 入口のすぐ内側から、壁沿い(手前)へ短い列を作る。GEO.queueColsで折り返す。
+    queueOrigin: { x: 13, y: 54 },
+    queueColStep: { dx: -1.8, dy: 2.6 },  // 列の中で1人ずつ進む方向(手前へ)
+    queueRowStep: { dx: 6, dy: 1 },       // 列が埋まったら次列(奥側へ少し戻ってずらす)
+    queueCols: 4,
+    drawMaxTable: 4 // テーブル側は実際の卓数より多くは描かない(絵は代表表示。v24からの既存方針)
   };
 
   // v12-1: 各フェーズの尺は「ゲーム内で何分か」で持ち、gm()でwindow.BASE_HOUR_MS(js/utils.js の
@@ -49,10 +50,10 @@ window.ShopView = (function () {
   // 何ゲーム内分だったか」に換算しただけで、体感の尺そのものは変えていない
   // (BASE_HOUR_MSを変えても客の動きが速すぎ/遅すぎにならないようにするための書き換え)。
   var OLD_MS_PER_MIN = 5000 / 60; // 換算の物差し。以後この値そのものを直接使うことはない
-  var WALK_MIN_PER_PCT = 22 / OLD_MS_PER_MIN;        // 通常の歩行、横1%あたりの分
+  var WALK_MIN_PER_PCT = 22 / OLD_MS_PER_MIN;        // 通常の歩行、距離1%あたりの分
   var SEAT_WALK_MIN_PER_PCT = 20 / OLD_MS_PER_MIN;   // 席へ向かう/席から出るときの歩行
   var ENTER_EXTRA_MIN = 200 / OLD_MS_PER_MIN;        // 席へ向かう前の一拍
-  var SIT_MIN = 420 / OLD_MS_PER_MIN;                // 席に着く/席を立つ
+  var SIT_MIN = 420 / OLD_MS_PER_MIN;                // 席に着く/席を立つ(間合いの一拍)
   var LEAVE_WAIT_MIN = 460 / OLD_MS_PER_MIN;         // 席を立ってから実際に歩き出すまでの間
   var QUEUE_REFLOW_MIN = 500 / OLD_MS_PER_MIN;       // 行列の詰め直し
   // v16-2/3: 我慢の限界。「並んで待つ」「着席して丼を待つ」の両方でこの1本だけを使う
@@ -87,14 +88,15 @@ window.ShopView = (function () {
   var stage = null;      // 舞台のDOM
   var actorLayer = null; // 客・店員を載せるレイヤー
   var state = null;
-  var seats = [];        // {x, sitY, kind, occupant}
+  var seats = [];        // {x, y, kind, occupant}
   var actors = [];       // 客
   var staffActors = [];  // 互換用。実体はkitchenWorkers(下)
   var queue = [];        // 入店待ちの客
   // v13-1/v14-5: 厨房・ホールの作業動線。1人 = state.staffHired の1人ぶん。
-  var kitchenWorkers = []; // {id, def, el, gone, busy, homeX, curY, role: "kitchen"|"hall"|"both"}
+  var kitchenWorkers = []; // {id, def, el, gone, busy, homeX, homeY, curX, curY, role: "kitchen"|"hall"|"both"}
   var orderQueue = [];     // {id, seat, actor} まだ厨房が着手していない注文
-  var readyQueue = [];     // {id, seat, actor} 盛り付け済みで、ホールが客席へ運ぶのを待っている丼(=丼の山)
+  var readyQueue = [];     // {id, seat, actor} 盛り付け済みで、ホールが客席へ運ぶのを待っている丼(=丼の山)。
+                            // v32(§37): カウンター席の注文はここを経由せず厨房から直接届ける(下記参照)。
   var orderSeq = 0;
   var orderPileEl = null;  // 積まれた丼を表示するDOM
   var timers = [];       // {fn, remaining(ms), id, startedAt} v09: 残り時間を持たせ、凍結中は完全に止める
@@ -143,6 +145,24 @@ window.ShopView = (function () {
 
   function spd() { return state && state.speed > 0 ? state.speed : 1; }
   function paused() { return frozen; }
+
+  // v32: y座標(舞台%)から重なり順(z-index)を作る、唯一の関数。「奥にあるものほど先に描く」を
+  // 満たすため、静物(buildScenery時に1回だけ計算)・俳優(move()のたびに計算)の両方がこれを通す。
+  // 係数10は0〜100%を0〜1000の整数へ広げるだけ(層の余地を確保するため。特別な意味は無い)。
+  // 基準値100を足しているのは、床(floor.webp、z-index無し=0扱い)より必ず上に来るようにするため。
+  function zForY(y) { return 100 + Math.round((y || 0) * 10); }
+
+  // 2点間を(2軸とも動く前提で)n個の等間隔点に割り付ける。旧spread()(横1軸だけ)の2D版。
+  function isoSpread(n, p0, p1) {
+    var pts = [];
+    if (n <= 0) return pts;
+    if (n === 1) return [{ x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 }];
+    for (var i = 0; i < n; i++) {
+      var t = i / (n - 1);
+      pts.push({ x: p0.x + (p1.x - p0.x) * t, y: p0.y + (p1.y - p0.y) * t });
+    }
+    return pts;
+  }
 
   // 凍結中は新規タイマーを仕込むだけで実際にはarmしない(unfreezeで一括再開する)。
   function armTimer(rec) {
@@ -193,7 +213,7 @@ window.ShopView = (function () {
     var tgtY = a.tgtY != null ? a.tgtY : curY;
     if (isNaN(tgtX)) return;
     if (Math.abs(curX - tgtX) < 0.5 && Math.abs(curY - tgtY) < 0.5) return; // 既に目的地
-    move(a, tgtX, tgtY, Math.max(gm(RESUME_FLOOR_MIN), walkMs(curX, tgtX) + Math.abs(curY - tgtY) * gm(RESUME_Y_MIN_PER_PCT)));
+    move(a, tgtX, tgtY, Math.max(gm(RESUME_FLOOR_MIN), walkMs2(curX, curY, tgtX, tgtY)));
   }
 
   // v13-1: 客(actors)だけでなく厨房の店員(kitchenWorkers)も同じ「移動中の俳優」として
@@ -250,28 +270,38 @@ window.ShopView = (function () {
   // docs/指示書/v24_追補_調査への回答と追加指示.md §2): カウンター席は物件の固定値ではなく
   // 持ち物(state.seats.counter)。counterSlotsは物件が持つ「置ける上限」(枠の数)、
   // counterは実際に描く丸椅子の数(所持数、上限で頭打ち)。テーブル側は既存のまま変更していない。
+  // v32(§1-2/§3-2、懸念11): テーブル席+4の計算はここでは行わず、Scoring.tableSeats()を読むだけ
+  // にした(以前はここに"has('table_seats')?4:0"という同じ式が別に書かれていた二重管理だった)。
   function seatCounts() {
     var p = window.Scoring.getProperty(state);
     if (!p) return { counter: 0, counterSlots: 0, table: 0 };
-    var table = p.seats_table + (has("table_seats") ? 4 : 0);
     var owned = (state.seats && state.seats.counter) || 0;
     return {
       counter: Math.min(p.counterSlots, owned),
       counterSlots: p.counterSlots,
-      table: Math.min(GEO.drawMaxTable, table)
+      table: Math.min(GEO.drawMaxTable, window.Scoring.tableSeats(state))
     };
   }
 
-  function spread(n, min, max) {
-    var xs = [];
-    if (n <= 0) return xs;
-    if (n === 1) return [(min + max) / 2];
-    for (var i = 0; i < n; i++) xs.push(min + (max - min) * (i / (n - 1)));
-    return xs;
+  // v32: idとcategoryから直接img/配下のパスを作って画像ノードを返す(v31のwindow.AssetImage.node()
+  // はデータ定義(emoji/img)を持つ"def"を前提にしているため、店内固有の小物(丼・表情・家具)には
+  // 疑似的なdefを作って渡す。読み込み失敗時のフォールバックもAssetImage側の仕組みがそのまま効く)。
+  // idがnull/undefinedのときは絵が用意されていないものとして扱い、最初から絵文字のみを返す
+  // (架空のファイル名を作って毎回読み込み失敗させない)。
+  function stageDef(id, emojiFallback) {
+    return id ? { img: "stage/" + id, emoji: emojiFallback, name: "" } : { emoji: emojiFallback, name: "" };
   }
 
   function block(cls, style, children) {
     return h("div", { className: cls, style: style }, children || []);
+  }
+
+  // 静物を(x,y)に置く。z-indexはyから自動計算する(zForY、店の躯体・俳優共通の1つの関数)。
+  function placeAt(el, x, y) {
+    el.style.left = x + "%";
+    el.style.top = y + "%";
+    el.style.zIndex = zForY(y);
+    return el;
   }
 
   function buildScenery() {
@@ -283,66 +313,81 @@ window.ShopView = (function () {
 
     var counts = seatCounts();
 
-    // 外(通り) と 店内 を分ける躯体
-    stage.appendChild(block("sv-sky", {}));
-    stage.appendChild(block("sv-outwall", {})); // 向かいの建物。行列の客が夜空に浮いて見えるのを防ぐ
-    stage.appendChild(block("sv-street", {}));
-    stage.appendChild(block("sv-room", {}));
-    stage.appendChild(block("sv-ceiling", {}));
-    stage.appendChild(block("sv-floor", {}));
-    stage.appendChild(block("sv-wall-right", {}));
+    // 下地(1枚絵)。v32: 壁・床・出入口はすべてこの絵の中に描かれている(旧版のようにCSSの
+    // 箱を積んで作らない)。z-indexは付けない(0扱い=必ず一番奥)。
+    var floorImg = AI.node(stageDef("floor"));
+    floorImg.className = "sv-floor-img";
+    stage.appendChild(floorImg);
 
-    // 天井の設備
-    var lamps = has("bright_light") ? [26, 44, 62] : [44];
-    lamps.forEach(function (x) {
-      stage.appendChild(block("sv-lamp", { left: x + "%" }, [
-        block("sv-lamp-cord", {}),
-        h("span", { className: "sv-lamp-bulb", text: "💡" })
-      ]));
+    actorLayer = block("sv-actors", {});
+    stage.appendChild(actorLayer);
+
+    // 天井の設備(壁に埋め込まれた下地には無いので、小物として重ねる)。ランプ自体は常設の
+    // 装飾(専用の絵は無い)なので絵文字のまま。「明るい照明」を導入していると数が増える
+    // (既存の演出、v14以来変更なし)。
+    var lampSpots = has("bright_light") ? [{ x: 30, y: 26 }, { x: 50, y: 22 }, { x: 68, y: 27 }] : [{ x: 50, y: 22 }];
+    lampSpots.forEach(function (spot) {
+      var el = block("sv-lamp", {}, [AI.node(stageDef(null, "💡"))]);
+      placeAt(el, spot.x, spot.y);
+      stage.appendChild(el);
     });
     if (has("exhaust")) {
-      stage.appendChild(block("sv-duct", { left: "10%" }, [h("span", { text: "💨" })]));
+      var ductEl = block("sv-duct", {}, [AI.node(U.findById(EQUIP, "exhaust"))]);
+      placeAt(ductEl, 12, 30);
+      stage.appendChild(ductEl);
     }
 
-    // 厨房(カウンターの向こう側)
-    stage.appendChild(block("sv-kitchen-counter", {}));
-    var kit = [{ x: 8, e: "🍥" }];
-    if (has("big_pot")) kit.push({ x: 20, e: "🍲" }); else kit.push({ x: 20, e: "🥘" });
-    if (has("noodle_boiler")) kit.push({ x: 32, e: "♨️" });
-    if (has("extra_boiler")) kit.push({ x: 39, e: "♨️" }); // 増設した茹で麺器。v25で壁移動に合わせ44→39
+    // 厨房設備(タイル側の奥の壁沿い)。既製品(big_pot/noodle_boiler/extra_boiler)は
+    // v31のimg/equipment/を使い、常設の寸胴(未購入時のベース)だけは絵が無いので絵文字のまま。
+    var kit = [{ x: GEO.soup.x - 4, y: GEO.soup.y + 8, def: stageDef(null, "🍥") }];
+    if (has("big_pot")) kit.push({ x: GEO.soup.x, y: GEO.soup.y, def: U.findById(EQUIP, "big_pot") });
+    if (has("noodle_boiler")) kit.push({ x: GEO.noodle.x, y: GEO.noodle.y, def: U.findById(EQUIP, "noodle_boiler") });
+    if (has("extra_boiler")) kit.push({ x: GEO.noodle.x + 8, y: GEO.noodle.y - 4, def: U.findById(EQUIP, "extra_boiler") });
     kit.forEach(function (k) {
-      stage.appendChild(block("sv-kit-item", { left: k.x + "%" }, [h("span", { text: k.e })]));
+      var el = block("sv-kit-item", {}, [AI.node(k.def)]);
+      placeAt(el, k.x, k.y);
+      stage.appendChild(el);
     });
-    // v13-1/v14-5: 盛り付け済みでホールが運ぶのを待っている丼が積まれて見える場所。
-    // 「受け渡し口」の座標(PLATE_X、既存の盛り付け位置)を起点に、新しい座標系を作らず
-    // 既存の厨房カウンター上へ並べる(位置づけ直しの経緯はrenderReadyPile()のコメント参照)。
-    orderPileEl = block("sv-order-pile", { left: PLATE_X + "%", top: "9%" });
+    // v13-1/v14-5: 盛り付け済みでホールが運ぶのを待っている丼が積まれて見える場所
+    // (受け渡し口=GEO.plateのすぐ奥)。v32(§37): カウンター客の丼はここを経由せず直接届くため、
+    // ここに積まれるのはテーブル客ぶんだけになる。
+    orderPileEl = block("sv-order-pile", {});
+    placeAt(orderPileEl, GEO.plate.x, GEO.plate.y - 8);
     stage.appendChild(orderPileEl);
     if (has("multilingual")) {
-      stage.appendChild(block("sv-wall-sign", { left: "45%" }, [h("span", { text: "🌏 MENU" })]));
+      var signEl = block("sv-wall-sign", {}, [AI.node(U.findById(EQUIP, "multilingual"))]);
+      placeAt(signEl, 46, 33);
+      stage.appendChild(signEl);
     }
     if (has("pos")) {
-      stage.appendChild(block("sv-kit-item", { left: "55%" }, [h("span", { text: "🖥️" })]));
+      var posEl = block("sv-kit-item", {}, [AI.node(U.findById(EQUIP, "pos"))]);
+      placeAt(posEl, 60, 44);
+      stage.appendChild(posEl);
     }
 
-    // カウンター
-    stage.appendChild(block("sv-counter", {}));
+    // カウンター本体(1枚を受け渡し口の手前に大きめに置く。実際の座席数に応じて伸び縮みはしない
+    // ——既存のsv-kitchen-counterと同じく「代表表示」の1枚絵)。
+    var counterEl = block("sv-counter-img", {}, [AI.node(stageDef("counter"))]);
+    placeAt(counterEl, (GEO.counterLine.x0 + GEO.counterLine.x1) / 2, (GEO.counterLine.y0 + GEO.counterLine.y1) / 2 - 3);
+    stage.appendChild(counterEl);
 
     // カウンター席の丸椅子。
     // v24(指示書§3-5、追補§2): 枠(物件のcounterSlots)を先に等間隔で確保し、所持している席
     // (counts.counter)だけを左から順に埋める。空き枠には席を描かない(カウンターだけが見える)。
-    // こうすると席を1つ足しても既にある席は動かない(spread()は枠の数=counterSlotsで固定して
-    // いるため、所持数が変わっても各枠のx座標自体は変わらない)。
+    // こうすると席を1つ足しても既にある席は動かない。
     // §3-3: 前回描画時より所持数が増えていたら、増えた席にだけポップ用のクラス+✨を付ける
     // (チュートリアルのプレゼント演出・§5の購入演出、どちらもこの1つの仕組みで賄う)。
-    var slotXs = spread(counts.counterSlots, GEO.inMinX + 2, GEO.inMaxX - 2);
+    var slots = isoSpread(counts.counterSlots,
+      { x: GEO.counterLine.x0, y: GEO.counterLine.y0 }, { x: GEO.counterLine.x1, y: GEO.counterLine.y1 });
     var isFirstBuild = prevDrawnCounter == null;
     var rm = reducedMotionSV();
     var popIndex = 0;
     for (var si = 0; si < counts.counter; si++) {
-      var x = slotXs[si];
+      var sp = slots[si];
+      var sx = sp.x + GEO.counterSeatOffset.dx, sy = sp.y + GEO.counterSeatOffset.dy;
       var isNew = !isFirstBuild && si >= prevDrawnCounter && !rm;
-      var stoolEl = block("sv-stool" + (isNew ? " sv-stool-pop" : ""), { left: x + "%", top: GEO.stoolY + "%" });
+      var stoolEl = block("sv-stool" + (isNew ? " sv-stool-pop" : ""), {}, [AI.node(stageDef("stool", "🪑"))]);
+      placeAt(stoolEl, sx, sy);
       if (isNew) {
         var delay = (popIndex * STOOL_POP_STAGGER_MS) + "ms";
         stoolEl.style.animationDelay = delay;
@@ -352,39 +397,43 @@ window.ShopView = (function () {
         popIndex++;
       }
       stage.appendChild(stoolEl);
-      seats.push({ x: x, sitY: GEO.counterSitY, kind: "counter", occupant: null });
+      seats.push({ x: sx, y: sy, kind: "counter", occupant: null });
     }
     prevDrawnCounter = counts.counter;
 
-    // テーブル席(2席ごとに卓を1つ置く)
+    // テーブル席。v32: v31のimg/equipment/table_seats.webp(卓+丸椅子2脚が1枚に描かれた絵)を
+    // 1卓ぶんの代表表示として使う(専用のテーブル画像はv32では作っていないため。指示書§2の
+    // 「客・従業員・設備・物件の絵はv31のものをそのまま使う」に沿った判断)。1枚=2席として数える。
     if (counts.table > 0) {
-      var tx = spread(counts.table, 10, 58); // v25で壁移動に合わせ(12,66)→(10,58)
-      for (var i = 0; i < tx.length; i += 2) {
-        var cxx = tx[i + 1] != null ? (tx[i] + tx[i + 1]) / 2 : tx[i];
-        stage.appendChild(block("sv-table", { left: cxx + "%", top: GEO.tableY + "%" }));
-      }
-      tx.forEach(function (x) {
-        seats.push({ x: x, sitY: GEO.tableSitY, kind: "table", occupant: null });
+      var tableCount = Math.ceil(counts.table / 2);
+      var tPts = isoSpread(tableCount,
+        { x: GEO.tableLine.x0, y: GEO.tableLine.y0 }, { x: GEO.tableLine.x1, y: GEO.tableLine.y1 });
+      var tableDef = U.findById(EQUIP, "table_seats");
+      var seatIdx = 0;
+      tPts.forEach(function (pt) {
+        var tEl = block("sv-table-img", {}, [AI.node(tableDef)]);
+        placeAt(tEl, pt.x, pt.y);
+        stage.appendChild(tEl);
+        for (var k = 0; k < 2 && seatIdx < counts.table; k++, seatIdx++) {
+          seats.push({ x: pt.x + (k === 0 ? -3 : 3), y: pt.y + 2, kind: "table", occupant: null });
+        }
       });
     }
 
-    // 券売機は入口の内側。v25で壁移動に合わせ72%→64%(doorX=70の6%内側、旧比率のまま)
+    // 券売機は入口の内側。
     if (has("ticket_machine")) {
-      stage.appendChild(block("sv-ticket", { left: "64%" }, [h("span", { text: "🎫" })]));
+      var ticketEl = block("sv-ticket", {}, [AI.node(U.findById(EQUIP, "ticket_machine"))]);
+      placeAt(ticketEl, GEO.door.x + 14, GEO.door.y + 2);
+      stage.appendChild(ticketEl);
     }
 
-    // 入口・暖簾
-    stage.appendChild(block("sv-doorway", { left: GEO.doorX + "%" }));
-    stage.appendChild(block("sv-noren", { left: GEO.doorX + "%" }, [
-      h("span", { className: "sv-noren-text", text: "らーめん" })
-    ]));
     var prop = window.Scoring.getProperty(state);
-    stage.appendChild(block("sv-signboard", {}, [
-      h("span", { text: (prop ? prop.emoji : "🏪") + " " + (prop ? prop.name : "") })
-    ]));
-
-    actorLayer = block("sv-actors", {});
-    stage.appendChild(actorLayer);
+    var signboardEl = block("sv-signboard", {}, [
+      AI.node(prop || stageDef(null, "🏪")),
+      h("span", { text: prop ? prop.name : "" })
+    ]);
+    placeAt(signboardEl, 88, 20);
+    stage.appendChild(signboardEl);
 
     stage.className = "shop-stage" + (has("bright_light") ? " bright" : "");
 
@@ -394,8 +443,8 @@ window.ShopView = (function () {
   // v14-5: 店員の役割を「厨房」「ホール」に分ける(プレイヤーには選ばせない。既存の接客能力から
   // 自動で決める)。2人以上いれば接客(service)が最も高い1名をホール・残りを厨房、1人なら兼任。
   // 役割は既存の従業員能力(effectiveStat。「教える」の伸びも反映済み)を読むだけで、新しい設定項目・
-  // 新しい数値は一切増やしていない。定位置(homeX)も役割ごとに分け、厨房は寸胴側、ホールは
-  // 受け渡し口(PLATE_X)寄りに置く(1人兼任のときは厨房側の定位置のまま)。
+  // 新しい数値は一切増やしていない。定位置(homeX/homeY)も役割ごとに分け、厨房は寸胴側、ホールは
+  // 受け渡し口(GEO.plate)寄りに置く(1人兼任のときは厨房側の定位置のまま)。
   function assignRoles(workers) {
     if (workers.length >= 2) {
       var bestIdx = 0;
@@ -426,18 +475,19 @@ window.ShopView = (function () {
       return def ? { id: id, def: def } : null;
     }).filter(Boolean);
     assignRoles(workers);
-    var kitchenHomeXs = spread(workers.filter(function (w) { return w.role !== "hall"; }).length, 10, 18);
-    var hallHomeX = U.clamp(PLATE_X + 6, GEO.inMinX, GEO.inMaxX);
+    var kitchenSpots = isoSpread(workers.filter(function (w) { return w.role !== "hall"; }).length,
+      { x: GEO.kitchenHome.x - 6, y: GEO.kitchenHome.y - 4 }, { x: GEO.kitchenHome.x + 6, y: GEO.kitchenHome.y + 4 });
     var kIdx = 0;
     workers.forEach(function (w) {
-      var homeX = w.role === "hall" ? hallHomeX : (kitchenHomeXs[kIdx++] != null ? kitchenHomeXs[kIdx - 1] : 14);
-      var el = h("div", { className: "sv-staff", style: { top: GEO.kitchenY + "%", left: homeX + "%" } }, [
-        h("span", { className: "sv-body", text: w.def.emoji }),
-        h("span", { className: "sv-bowl", text: "🍜" })
+      var home = w.role === "hall" ? GEO.hallHome : (kitchenSpots[kIdx++] || GEO.kitchenHome);
+      var el = h("div", { className: "sv-staff" }, [
+        h("span", { className: "sv-body" }, [AI.node(w.def)]),
+        h("span", { className: "sv-bowl" }, [AI.node(stageDef("bowl", "🍜"))])
       ]);
-      el.dataset.x = homeX;
+      placeAt(el, home.x, home.y);
+      el.dataset.x = home.x;
       actorLayer.appendChild(el);
-      w.el = el; w.gone = false; w.busy = false; w.homeX = homeX; w.curY = GEO.kitchenY;
+      w.el = el; w.gone = false; w.busy = false; w.homeX = home.x; w.homeY = home.y; w.curY = home.y;
       kitchenWorkers.push(w);
       staffActors.push(el);
     });
@@ -458,9 +508,9 @@ window.ShopView = (function () {
   // 取る→客席へ運ぶ→戻る)に分けた。1人だけの店は兼任(runSoloCycle。v13までと同じ、作って自分で
   // 運んで戻るの一続き)。厨房・ホールで別々に動くのは2人以上のときだけ(runKitchenCycle/runHallCycle、
   // orderQueue=厨房が未着手の注文/readyQueue=盛り付け済みでホール待ちの丼、の2段構え)。
-  function soupStationX() { return 18; }             // 既存: 寸胴/鍋の座標(buildScenery)。v25で壁移動に合わせ20→18
-  function noodleStationX() { return has("noodle_boiler") ? 29 : 7; } // 既存: 茹で麺器、無ければ既存の別の厨房座標で代用。v25で32/8→29/7
-  var PLATE_X = 50;      // 既存: 盛り付け台=受け渡し口の座標(旧svPaceキーフレームの右端を踏襲)。v25で壁移動に合わせ56→50
+  // v32(§37、指示書§3-3): カウンター席(kind==="counter")は受け渡し口のすぐそばという設定に
+  // 合わせ、盛り付けた瞬間に直接提供する(ホールの客席までの往復を挟まない)。テーブル席
+  // (kind==="table")は今までどおりホールが運ぶ。seats.kindを初めて読む箇所がここ。
   var KITCHEN_PILE_MAX = 6; // 積める丼アイコンの表示上限(それ以上は「+N」で表す)
   // v15-2: 「待機中(丼がまだ届いていない)」の我慢の限界。v14-5にあった60分の安全弁は
   // 「強制的に食べさせる」処理だったため、丼を受け取っていない客が満足顔で帰る不具合の原因に
@@ -474,14 +524,14 @@ window.ShopView = (function () {
   // 詰まっている場所によって絵が変わるようにするため、v13で入れた「丼の山」はホール側の詰まり
   // (=盛り付け済みで運ばれるのを待っているreadyQueue)を表すものとして位置づけ直した
   // (厨房側の未着手の注文=orderQueueには専用の絵を足していない。客が席で待ったままなのが
-  // 「厨房が遅い」の見え方になる)。
+  // 「厨房が遅い」の見え方になる)。v32: カウンター客ぶんはここに積まれない(直接提供のため)。
   function renderReadyPile() {
     if (!orderPileEl) return;
     window.UI.clear(orderPileEl);
     var n = readyQueue.length;
     var shown = Math.min(n, KITCHEN_PILE_MAX);
     for (var i = 0; i < shown; i++) {
-      orderPileEl.appendChild(h("span", { className: "sv-pile-bowl", text: "🍜" }));
+      orderPileEl.appendChild(h("span", { className: "sv-pile-bowl" }, [AI.node(stageDef("bowl", "🍜"))]));
     }
     if (n > KITCHEN_PILE_MAX) {
       orderPileEl.appendChild(h("span", { className: "sv-pile-more", text: "+" + (n - KITCHEN_PILE_MAX) }));
@@ -521,17 +571,17 @@ window.ShopView = (function () {
   function targetIntervalMin() { return traffic.targetInterval || WEEK_OPERATING_MIN; }
 
   // 現在地(fromX,fromY)からある地点(toX,toY)までの「pace=1のときの」移動ゲーム分(1x基準ms)。
-  // moveWorker()が実際の移動(CSS遷移込み)に使うのと同じ式(WALK_MIN_PER_PCT/RESUME_Y_MIN_PER_PCT)
-  // だが、ここでは呼び出し前にpaceを求めるための下見(副作用なし)としてだけ使う。
+  // v32: 斜め上視点では移動が斜めになるため、x・y両方の距離を合成する(旧版はxだけ・yだけを
+  // 別々に足すマンハッタン距離に近い式だったが、斜め移動の実態に合わせ直線距離にした)。
   function legBaseMs(fromX, fromY, toX, toY) {
-    return walkMs(fromX, toX) + Math.abs(fromY - toY) * gm(RESUME_Y_MIN_PER_PCT);
+    return walkMs2(fromX, fromY, toX, toY);
   }
 
   // moveWorker()と同じ移動を、渡されたpaceで一律にスケールして実行する(CSS遷移の尺と
   // later()の待ち時間を必ず一致させるため、スケールはここで一度だけ行う)。
   function moveWorker(w, x, y, pace) {
     var fromX = parseFloat(w.el.dataset.x != null ? w.el.dataset.x : x);
-    var fromY = w.curY != null ? w.curY : GEO.kitchenY;
+    var fromY = w.curY != null ? w.curY : GEO.kitchenHome.y;
     var travelMs = legBaseMs(fromX, fromY, x, y) / (pace || 1);
     move(w, x, y, travelMs);
     w.curY = y;
@@ -569,32 +619,42 @@ window.ShopView = (function () {
   // v14-5: 兼任(1人)。v13までと同じ、寸胴→茹で麺器→盛り付け→客席→定位置、の一続き。
   // 客席へ届けた瞬間に食べ始めさせる(以前は席に着いてから固定時間で自動的に食べ始めていた)。
   // v28-2(追補2§J):「1人兼任(従業員1人)の場合=調理+ホール1サイクルの合計=目標間隔」。
-  // 移動時間を含む全行程(現在地→寸胴→茹で麺器→盛り付け→客席→定位置)の合計が
-  // targetIntervalMin()と一致するよう、pace(店全体で共通の速度係数)をこの1件ぶんの
-  // 実際の距離から逆算する。個人の能力(旧5能力)は参照しない。
+  // 移動時間を含む全行程の合計がtargetIntervalMin()と一致するよう、pace(店全体で共通の速度係数)を
+  // この1件ぶんの実際の距離から逆算する。個人の能力(旧5能力)は参照しない。
+  // v32(§37): カウンター席は「客席へ運ぶ」を「受け渡し口=GEO.plateで直接手渡す」に短縮する
+  // (実際には客がすぐそこに座っているという設定のため、盛り付け台から先の移動が要らない)。
   function runSoloCycle(w, order) {
     w.busy = true;
     w.el.classList.add("carrying");
     var target = targetIntervalMin();
     var fromX = parseFloat(w.el.dataset.x != null ? w.el.dataset.x : w.homeX);
-    var fromY = w.curY != null ? w.curY : GEO.kitchenY;
+    var fromY = w.curY != null ? w.curY : GEO.kitchenHome.y;
     var seat = order.seat;
-    var baseTravel = legBaseMs(fromX, fromY, soupStationX(), GEO.kitchenY) +
-      legBaseMs(soupStationX(), GEO.kitchenY, noodleStationX(), GEO.kitchenY) +
-      legBaseMs(noodleStationX(), GEO.kitchenY, PLATE_X, GEO.kitchenY) +
-      legBaseMs(PLATE_X, GEO.kitchenY, seat.x, seat.sitY) +
-      legBaseMs(seat.x, seat.sitY, w.homeX, GEO.kitchenY);
-    var baseWait = gm(KITCHEN_STATION_MIN) * 3 + gm(KITCHEN_HANDOFF_MIN);
+    var isCounter = seat.kind === "counter";
+    var stops = isCounter ? [
+      { x: GEO.soup.x, y: GEO.soup.y, wait: 0 },
+      { x: GEO.noodle.x, y: GEO.noodle.y, wait: 0 },
+      { x: GEO.plate.x, y: GEO.plate.y, wait: 0, deliver: true }, // 受け渡し口=カウンター客への直接提供
+      { x: w.homeX, y: w.homeY, wait: 0 }
+    ] : [
+      { x: GEO.soup.x, y: GEO.soup.y, wait: 0 },
+      { x: GEO.noodle.x, y: GEO.noodle.y, wait: 0 },
+      { x: GEO.plate.x, y: GEO.plate.y, wait: 0 },
+      { x: seat.x, y: seat.y, wait: 0, deliver: true },
+      { x: w.homeX, y: w.homeY, wait: 0 }
+    ];
+    var stationCount = isCounter ? 3 : 3; // 寸胴・茹で麺器・盛り付け(共通)
+    var baseTravel = 0;
+    var fx = fromX, fy = fromY;
+    stops.forEach(function (s) { baseTravel += legBaseMs(fx, fy, s.x, s.y); fx = s.x; fy = s.y; });
+    var baseWait = gm(KITCHEN_STATION_MIN) * stationCount + gm(KITCHEN_HANDOFF_MIN);
     var pace = (baseTravel + baseWait) / gm(target);
     var pauseMs = gm(KITCHEN_STATION_MIN) / pace;
     var handoffMs = gm(KITCHEN_HANDOFF_MIN) / pace;
-    var stops = [
-      { x: soupStationX(), y: GEO.kitchenY, wait: pauseMs },
-      { x: noodleStationX(), y: GEO.kitchenY, wait: pauseMs },
-      { x: PLATE_X, y: GEO.kitchenY, wait: pauseMs },
-      { x: seat.x, y: seat.sitY, wait: handoffMs, deliver: true }, // 客席へ運ぶ
-      { x: w.homeX, y: GEO.kitchenY, wait: 0 }                     // 定位置へ戻る
-    ];
+    stops.forEach(function (s, i) {
+      if (i === stops.length - 1) return; // 最後(定位置へ戻る)は待ちを付けない
+      s.wait = s.deliver ? handoffMs : pauseMs;
+    });
     function step(i) {
       if (w.gone) return;
       if (i >= stops.length) { w.busy = false; dispatchOrders(); return; }
@@ -608,8 +668,9 @@ window.ShopView = (function () {
     step(0);
   }
 
-  // v14-5: 厨房担当。寸胴→茹で麺器→盛り付けまでで、客席へは行かない。盛り付けたら受け渡し口
-  // (readyQueue)へ置き、すぐ次の注文へ取り掛かる。
+  // v14-5: 厨房担当。寸胴→茹で麺器→盛り付けまでで、客席へは行かない。
+  // v32(§37): テーブル客ぶんは今までどおりreadyQueueへ置いてホール待ちにするが、
+  // カウンター客ぶんは盛り付けた瞬間にそのままdeliverToSeat()する(ホールを挟まない)。
   // v28-2(追補2§J):「厨房1人の1サイクル=目標間隔×厨房人数」。dispatchOrders()で人数比例に
   // 並列化される前提のため、1人あたりの持ち時間は目標間隔にその時点の厨房役割の人数を掛けた値。
   function runKitchenCycle(w, order) {
@@ -618,25 +679,29 @@ window.ShopView = (function () {
     var kCount = kitchenWorkers.filter(function (x) { return x.role === "kitchen"; }).length || 1;
     var target = targetIntervalMin() * kCount;
     var fromX = parseFloat(w.el.dataset.x != null ? w.el.dataset.x : w.homeX);
-    var fromY = w.curY != null ? w.curY : GEO.kitchenY;
-    var baseTravel = legBaseMs(fromX, fromY, soupStationX(), GEO.kitchenY) +
-      legBaseMs(soupStationX(), GEO.kitchenY, noodleStationX(), GEO.kitchenY) +
-      legBaseMs(noodleStationX(), GEO.kitchenY, PLATE_X, GEO.kitchenY);
+    var fromY = w.curY != null ? w.curY : GEO.kitchenHome.y;
+    var baseTravel = legBaseMs(fromX, fromY, GEO.soup.x, GEO.soup.y) +
+      legBaseMs(GEO.soup.x, GEO.soup.y, GEO.noodle.x, GEO.noodle.y) +
+      legBaseMs(GEO.noodle.x, GEO.noodle.y, GEO.plate.x, GEO.plate.y);
     var baseWait = gm(KITCHEN_STATION_MIN) * 3;
     var pace = (baseTravel + baseWait) / gm(target);
     var pauseMs = gm(KITCHEN_STATION_MIN) / pace;
     var stops = [
-      { x: soupStationX(), y: GEO.kitchenY, wait: pauseMs },
-      { x: noodleStationX(), y: GEO.kitchenY, wait: pauseMs },
-      { x: PLATE_X, y: GEO.kitchenY, wait: pauseMs }
+      { x: GEO.soup.x, y: GEO.soup.y, wait: pauseMs },
+      { x: GEO.noodle.x, y: GEO.noodle.y, wait: pauseMs },
+      { x: GEO.plate.x, y: GEO.plate.y, wait: pauseMs }
     ];
     function step(i) {
       if (w.gone) return;
       if (i >= stops.length) {
         w.el.classList.remove("carrying");
         w.busy = false;
-        readyQueue.push(order);
-        renderReadyPile();
+        if (order.seat.kind === "counter") {
+          deliverToSeat(order); // v32(§37): 受け渡し口のすぐそばのカウンター客へ直接提供
+        } else {
+          readyQueue.push(order);
+          renderReadyPile();
+        }
         dispatchOrders(); // 次の注文と、待っているホール担当の両方へ回す
         return;
       }
@@ -647,24 +712,25 @@ window.ShopView = (function () {
   }
 
   // v14-5: ホール担当。受け渡し口の丼を取る→客席へ運ぶ→受け渡し口寄りの定位置へ戻る。調理設備には触れない。
+  // v32(§37): readyQueueにはもうテーブル客ぶんしか積まれない(カウンター客は厨房が直接届けるため)。
   // v28-2(追補2§B・§J):「ホール1サイクル=目標間隔」。常に1人(assignRoles()、変更なし)の
   // ため、この1サイクル(移動時間込み)がそのまま系全体のボトルネックになる。
   function runHallCycle(w, order) {
     w.busy = true;
     var target = targetIntervalMin();
     var fromX = parseFloat(w.el.dataset.x != null ? w.el.dataset.x : w.homeX);
-    var fromY = w.curY != null ? w.curY : GEO.kitchenY;
+    var fromY = w.curY != null ? w.curY : GEO.kitchenHome.y;
     var seat = order.seat;
-    var baseTravel = legBaseMs(fromX, fromY, PLATE_X, GEO.kitchenY) +
-      legBaseMs(PLATE_X, GEO.kitchenY, seat.x, seat.sitY) +
-      legBaseMs(seat.x, seat.sitY, w.homeX, GEO.kitchenY);
+    var baseTravel = legBaseMs(fromX, fromY, GEO.plate.x, GEO.plate.y) +
+      legBaseMs(GEO.plate.x, GEO.plate.y, seat.x, seat.y) +
+      legBaseMs(seat.x, seat.y, w.homeX, w.homeY);
     var baseWait = gm(KITCHEN_HANDOFF_MIN);
     var pace = (baseTravel + baseWait) / gm(target);
     var handoffMs = gm(KITCHEN_HANDOFF_MIN) / pace;
     var stops = [
-      { x: PLATE_X, y: GEO.kitchenY, wait: 0, pickup: true },
-      { x: seat.x, y: seat.sitY, wait: handoffMs, deliver: true },
-      { x: w.homeX, y: GEO.kitchenY, wait: 0 }
+      { x: GEO.plate.x, y: GEO.plate.y, wait: 0, pickup: true },
+      { x: seat.x, y: seat.y, wait: handoffMs, deliver: true },
+      { x: w.homeX, y: w.homeY, wait: 0 }
     ];
     function step(i) {
       if (w.gone) return;
@@ -692,28 +758,36 @@ window.ShopView = (function () {
     return gm(PATIENCE_BASE_MIN + tol * PATIENCE_TOL_MIN);
   }
 
-  function faceFor(segId) {
+  // v32: 満足/普通/不満の3種(img/stage/face_*.webp)は、満足度の数値から選ぶだけ
+  // (§0の逆流禁止どおり、絵から数値を作る経路は無い)。3段階の判定式自体は据え置き
+  // (moodClassFor()と共有。閾値60/45は既存のまま変更していない)。
+  var FACE_EMOJI = { good: "😄", neutral: "😐", bad: "😒" };
+  function moodKeyFor(segId) {
     var sat = traffic.satBySeg[segId];
-    if (sat == null) return "😐";
-    if (sat >= 60) return "😄";
-    if (sat >= 45) return "😐";
-    return "😒";
+    if (sat == null) return "neutral";
+    if (sat >= 60) return "good";
+    if (sat >= 45) return "neutral";
+    return "bad";
   }
-
   // v14-2: 絵文字が単色フォント(Noto Emoji)になり表情の区別が付きにくいため、faceFor()と
   // 同じ閾値で満足/普通/不満のクラス名を作り、CSS側(.sv-bubble.mood-*)で色を分ける。
-  function moodClassFor(segId) {
-    var sat = traffic.satBySeg[segId];
-    if (sat == null) return "mood-neutral";
-    if (sat >= 60) return "mood-good";
-    if (sat >= 45) return "mood-neutral";
-    return "mood-bad";
+  // v32: 表情そのものは画像(FACE_EMOJIはフォールバック用)になったが、🕐(丼待ち)・😡(退店)の
+  // 吹き出しは引き続きこの色分けを使うので、クラスとしては残す。
+  function moodClassFor(segId) { return "mood-" + moodKeyFor(segId); }
+
+  function setBubbleText(a, text) {
+    window.UI.clear(a.bubble);
+    a.bubble.textContent = text;
+  }
+  function setBubbleFace(a, moodKey) {
+    window.UI.clear(a.bubble);
+    a.bubble.appendChild(AI.node(stageDef("face_" + moodKey, FACE_EMOJI[moodKey])));
   }
 
   // ---------- v13-2: 退店時のフィードバック(表情の下に「評判 +1」を出す) ----------
   // 週の評判は既存の式(runWeeklyCalc: reputation += (avgSat-50)*0.04)で週の平均満足度から
   // 一括更新されており、客1人ぶんの寄与という数値は元々存在しない。ここでは新しい数値を作らず、
-  // 既存の満足度3段階の判定(faceForと同じ閾値: 60以上=満足/45未満=不満)をそのまま符号に使う
+  // 既存の満足度3段階の判定(moodKeyForと同じ閾値: 60以上=満足/45未満=不満)をそのまま符号に使う
   // ——満足なら平均を押し上げる側(+1)、不満なら押し下げる側(-1)、普通(0)は出さない。
   // 週の実際の評判の増減量そのものはこれまで通りrunWeeklyCalcで一括計算する(ここは表示専用)。
   var activePopups = 0;
@@ -744,16 +818,18 @@ window.ShopView = (function () {
 
   function makeActor(segId) {
     var def = segDef(segId);
-    var el = h("div", { className: "sv-cust", style: { left: GEO.offX + "%", top: GEO.walkY + "%" } }, [
-      h("span", { className: "sv-bowl", text: "🍜" }),
-      h("span", { className: "sv-body", text: def ? def.emoji : "🧑" }),
+    var el = h("div", { className: "sv-cust" }, [
+      h("span", { className: "sv-bowl" }, [AI.node(stageDef("bowl", "🍜"))]),
+      h("span", { className: "sv-body" }, [AI.node(def || stageDef(null, "🧑"))]),
       h("span", { className: "sv-bubble", text: "" })
     ]);
+    placeAt(el, GEO.off.x, GEO.off.y);
     var a = {
       id: ++custSeq, // v15-1: 客ごとのID。注文・丼はこの客への参照(actor自体)で1対1に結び付ける
       segId: segId, el: el, seat: null, queued: false, gone: false,
       eatingStarted: false, // v14-5: 丼が届いて食べ始めたかどうか(届くまでは席で待つ)
       waiting: false, // v15-2: 着席して丼を待っている(=我慢の限界タイマーが有効な)間だけtrue
+      tgtY: GEO.off.y, // v32: 現在地(y)を追う。move()のたびに更新される(2D移動の距離計算に使う)
       // v15-1/6: ライフサイクルの各時刻(ログ・確認用。計算には一切使わない)
       seatedAt: null, orderedAt: null, deliveredAt: null, eatStartAt: null, exitAt: null, exitReason: null,
       // v13-3: 湧いた瞬間の「今週の1杯あたり売価」を固定で持たせる。週をまたいで退店した場合でも
@@ -781,17 +857,24 @@ window.ShopView = (function () {
     if (q >= 0) queue.splice(q, 1);
   }
 
+  // v32: y座標も動かすため、z-indexをここで一括更新する(奥にあるものほど先に描く=手前にいる
+  // ものが後で描かれて重なった相手を隠す、をzForY()で機械的に満たす)。
   function move(a, x, y, ms) {
     if (a.gone) return;
     a.el.style.transitionDuration = Math.max(16, ms / spd()) + "ms";
     a.el.style.left = x + "%";
-    if (y != null) { a.el.style.top = y + "%"; a.tgtY = y; } // v09: 凍結からの再開(resumeActor)で目的地を辿るために覚えておく
-    a.el.classList.toggle("flip", x > (parseFloat(a.el.dataset.x || GEO.offX)));
+    if (y != null) { a.el.style.top = y + "%"; a.tgtY = y; a.el.style.zIndex = zForY(y); }
+    a.el.classList.toggle("flip", x > (parseFloat(a.el.dataset.x || GEO.off.x)));
     a.el.dataset.x = x;
   }
 
   function walkMs(fromX, toX, minPerPct) {
     return Math.abs(toX - fromX) * gm(minPerPct || WALK_MIN_PER_PCT);
+  }
+  // v32: 斜め上視点では移動が斜めになるため、x・y両方の距離を合成した直線距離で歩行時間を計算する。
+  function walkMs2(fromX, fromY, toX, toY, minPerPct) {
+    var dx = toX - fromX, dy = toY - fromY;
+    return Math.sqrt(dx * dx + dy * dy) * gm(minPerPct || WALK_MIN_PER_PCT);
   }
 
   function spawnCustomer(segId) {
@@ -799,8 +882,8 @@ window.ShopView = (function () {
     // 初期位置を確定させてから移動させる。requestAnimationFrame だと
     // タブが非表示のときにコールバックが来ず、客が湧いた位置で固まる。
     void a.el.offsetWidth;
-    var ms = walkMs(GEO.offX, GEO.doorX);
-    move(a, GEO.doorX, GEO.walkY, ms);
+    var ms = walkMs2(GEO.off.x, GEO.off.y, GEO.door.x, GEO.door.y);
+    move(a, GEO.door.x, GEO.door.y, ms);
     later(function () { arriveDoor(a); }, ms);
   }
 
@@ -822,11 +905,16 @@ window.ShopView = (function () {
   }
 
   // v25(§4-2): 行列に並んだ順(0始まり)から、列(row)・その中の位置(col)を求めて座標にする。
-  // GEO.queueCols人ぶん埋まったら次の列へ折り返す(奥へ1列ぶんGEO.queueRowGapだけ下げる)。
+  // GEO.queueCols人ぶん埋まったら次の列へ折り返す。
+  // v32(§1-5/指示書「行列」): 横一列の代わりに、入口のすぐ内側から手前へ短く伸びる斜めの列にした
+  // (queueColStepで1人ずつ手前へ、queueRowStepで列が折り返るたびに奥へ少しずらす)。
   function queueSlot(i) {
     var row = Math.floor(i / GEO.queueCols);
     var col = i % GEO.queueCols;
-    return { x: GEO.queueX0 + col * GEO.queueGap, y: GEO.queueRowY0 + row * GEO.queueRowGap };
+    return {
+      x: GEO.queueOrigin.x + col * GEO.queueColStep.dx + row * GEO.queueRowStep.dx,
+      y: GEO.queueOrigin.y + col * GEO.queueColStep.dy + row * GEO.queueRowStep.dy
+    };
   }
 
   function layoutQueue() {
@@ -856,12 +944,12 @@ window.ShopView = (function () {
     a.exitAt = nowLabel();
     a.exitReason = "待ちきれず(行列)";
     logLifecycle(a);
-    a.bubble.textContent = "😡"; // v15-4: 待ちきれず帰るのは怒った表情に統一(隠さずはっきり見せる)。v25§5で😠→😡(より赤く、視認性を上げる)
+    setBubbleText(a, "😡"); // v15-4: 待ちきれず帰るのは怒った表情に統一(隠さずはっきり見せる)。v25§5で😠→😡(より赤く、視認性を上げる)
     a.bubble.className = "sv-bubble mood-bad";
     a.el.classList.add("show-bubble");
     var slot = queueSlot(i < 0 ? 0 : i);
-    var ms = walkMs(slot.x, GEO.offX);
-    move(a, GEO.offX, GEO.walkY, ms);
+    var ms = walkMs2(slot.x, slot.y, GEO.off.x, GEO.off.y);
+    move(a, GEO.off.x, GEO.off.y, ms);
     later(function () { removeActor(a); }, ms);
   }
 
@@ -882,41 +970,41 @@ window.ShopView = (function () {
     // 方式に変わったため、着席イベントを数えるコールバック(onEnterCb)は廃止した。
     a.orderedAt = nowLabel(); // v15-1: 着席が決まった瞬間=注文発生(既存のplaceOrderと同じ瞬間)
     placeOrder(seat, a); // v13-1: 入店=注文発生。手が空いている厨房担当がいなければ席で待ったままになる
-    var fromX = parseFloat(a.el.dataset.x || GEO.doorX);
-    var ms = walkMs(fromX, seat.x, SEAT_WALK_MIN_PER_PCT) + gm(ENTER_EXTRA_MIN);
-    move(a, seat.x, GEO.walkY, ms);
+    var fromX = parseFloat(a.el.dataset.x || GEO.door.x);
+    var fromY = a.tgtY != null ? a.tgtY : GEO.door.y;
+    // v32: 横から見た旧版は「席のx手前まで歩く→縦にsitYまで座る」の2段階だったが、斜め上視点は
+    // 席のx・yへ1本の斜め移動で向かう(そのぶんSIT_MINは「座る間合い」の一拍としてタイマーだけ残す)。
+    var ms = walkMs2(fromX, fromY, seat.x, seat.y, SEAT_WALK_MIN_PER_PCT) + gm(ENTER_EXTRA_MIN);
+    move(a, seat.x, seat.y, ms);
     later(function () {
       if (a.gone) return;
-      move(a, seat.x, seat.sitY, gm(SIT_MIN));      // 席に着く
-      later(function () {
-        if (a.gone) return;
-        a.seatedAt = nowLabel();
-        a.bubble.textContent = "🕐";
-        a.bubble.className = "sv-bubble mood-neutral";
-        a.el.classList.add("show-bubble");
-        // v25(指示書§2): 着席した客は丼が届くまで必ず待つ(待ちきれずに席を立つ経路を廃止)。
-        // a.waitingは「まだ丼を受け取っていない着席客」の目印として残す
-        // (startEating()でfalseになる。週の境界の片付け=clearSeatedWaiters()がこれを見て使う)。
-        // v28-2: 配膳(厨房・ホール)は目標間隔まで速くなった一方、客側の着席の尺(SIT_MIN等)は
-        // 指示書§Dどおり変更していないため、極端に配膳が速い条件では「着席が完了する前に
-        // 丼が届いてstartEating()が先に走る」逆転が起こり得る(既存の実装にはこの逆転が
-        // 起こらない前提=常に着席完了→配膳の順、という暗黙の前提があった)。その場合
-        // startEating()が既にeatingStarted=true/waiting=falseにしているので、ここで
-        // waiting=trueを無条件に上書きしない(eatingStartedならもう「食事中」であり
-        // 「丼待ち」ではないため)。数値・タイミング定数は一切変えていない、状態機械の
-        // 整合性だけを直す修正。
-        if (!a.eatingStarted) a.waiting = true;
-      }, gm(SIT_MIN));
-    }, ms);
+      a.seatedAt = nowLabel();
+      setBubbleText(a, "🕐");
+      a.bubble.className = "sv-bubble mood-neutral";
+      a.el.classList.add("show-bubble");
+      // v25(指示書§2): 着席した客は丼が届くまで必ず待つ(待ちきれずに席を立つ経路を廃止)。
+      // a.waitingは「まだ丼を受け取っていない着席客」の目印として残す
+      // (startEating()でfalseになる。週の境界の片付け=clearSeatedWaiters()がこれを見て使う)。
+      // v28-2: 配膳(厨房・ホール)は目標間隔まで速くなった一方、客側の着席の尺(SIT_MIN等)は
+      // 指示書§Dどおり変更していないため、極端に配膳が速い条件では「着席が完了する前に
+      // 丼が届いてstartEating()が先に走る」逆転が起こり得る(既存の実装にはこの逆転が
+      // 起こらない前提=常に着席完了→配膳の順、という暗黙の前提があった)。その場合
+      // startEating()が既にeatingStarted=true/waiting=falseにしているので、ここで
+      // waiting=trueを無条件に上書きしない(eatingStartedならもう「食事中」であり
+      // 「丼待ち」ではないため)。数値・タイミング定数は一切変えていない、状態機械の
+      // 整合性だけを直す修正。
+      if (!a.eatingStarted) a.waiting = true;
+    }, ms + gm(SIT_MIN));
   }
 
-  // v14-5: 丼が実際に届いた瞬間(runSoloCycle/runHallCycleのdeliverステップ)にだけ食べ始めさせる。
+  // v14-5: 丼が実際に届いた瞬間(runSoloCycle/runHallCycle/runKitchenCycleのdeliverステップ)にだけ
+  // 食べ始めさせる。
   function startEating(a) {
     if (a.gone || a.eatingStarted) return;
     a.eatingStarted = true;
     a.waiting = false; // v15-2: 我慢の限界タイマーはここで無効化(guardで再チェックしているが念のため)
     a.eatStartAt = nowLabel();
-    a.bubble.textContent = "";
+    setBubbleText(a, "");
     a.el.classList.remove("show-bubble");
     a.el.classList.add("eating");
     // v10-3/v12-1: 滞在時間はゲーム内時間で持つ(提供+食事で30〜40分程度)。実秒は
@@ -938,18 +1026,17 @@ window.ShopView = (function () {
       a.exitAt = nowLabel();
       a.exitReason = "待ちきれず(週の切り替わり)";
       logLifecycle(a);
-      a.bubble.textContent = "😡"; // v25§5で😠→😡(より赤く、視認性を上げる)
+      setBubbleText(a, "😡"); // v25§5で😠→😡(より赤く、視認性を上げる)
       a.bubble.className = "sv-bubble mood-bad";
       a.el.classList.add("show-bubble");
       var seat = a.seat;
       if (!seat) return; // 通常は起こらない(a.waiting=trueならa.seatは必ずある。念のための保険)
-      move(a, seat.x, GEO.walkY, gm(SIT_MIN)); // 席を立つ
       later(function () {
         if (a.gone) return;
         seat.occupant = null;
         a.seat = null;
-        var ms = walkMs(seat.x, GEO.offX, SEAT_WALK_MIN_PER_PCT);
-        move(a, GEO.offX, GEO.walkY, ms);
+        var ms = walkMs2(seat.x, seat.y, GEO.off.x, GEO.off.y, SEAT_WALK_MIN_PER_PCT);
+        move(a, GEO.off.x, GEO.off.y, ms);
         later(function () { removeActor(a); }, ms);
         pullFromQueue();
       }, gm(LEAVE_WAIT_MIN));
@@ -962,19 +1049,18 @@ window.ShopView = (function () {
     a.exitReason = "食べ終わった";
     logLifecycle(a);
     a.el.classList.remove("eating");
-    a.bubble.textContent = faceFor(a.segId);
+    setBubbleFace(a, moodKeyFor(a.segId));
     a.bubble.className = "sv-bubble " + moodClassFor(a.segId);
     a.el.classList.add("show-bubble");
     showExitPopup(a); // v13-2: 退店の動きが始まった瞬間、表情の下に「評判 ±1」を出す(変化があるときだけ)
     // v16-1: 所持金への加算はdeliverToSeat()へ移した(丼が届いた瞬間)。ここでは行わない。
     var seat = a.seat;
-    move(a, seat.x, GEO.walkY, gm(SIT_MIN));        // 席を立つ
     later(function () {
       if (a.gone) return;
       seat.occupant = null;
       a.seat = null;
-      var ms = walkMs(seat.x, GEO.offX, SEAT_WALK_MIN_PER_PCT);
-      move(a, GEO.offX, GEO.walkY, ms);
+      var ms = walkMs2(seat.x, seat.y, GEO.off.x, GEO.off.y, SEAT_WALK_MIN_PER_PCT);
+      move(a, GEO.off.x, GEO.off.y, ms);
       later(function () { removeActor(a); }, ms);
       pullFromQueue();
     }, gm(LEAVE_WAIT_MIN));

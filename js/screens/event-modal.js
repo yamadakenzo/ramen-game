@@ -10,14 +10,19 @@ window.ScreenEventModal = (function () {
     return v || "";
   }
 
-  // "staff" と書かれていたら ctx.staffId の本人に差し替える
+  // "staff" と書かれていたら ctx.staffId の本人に差し替える。
+  // v31 §3-2(Q4): 以前はここで"def.emoji + " " + def.name"を1本の文字列に結合していたため、
+  // 同じ従業員が雇用カードでは絵・イベントの発言者名では絵文字のまま、という食い違いが起きていた。
+  // ここではdefをそのまま返し、表示側(showResult)でwindow.AssetImage.node(def)を使って組み立て直す。
+  // それ以外(events.js側に直書きされた"🧓 最初の客"のような定型文)は、元から絵文字が地の文の
+  // 一部として書かれているだけなので手を付けない(データ定義の絵文字フィールドではないため対象外)。
   function resolveWho(choice, state, ctx) {
     var who = resolveText(choice.react_who, state, ctx);
     if (who === "staff") {
       var def = ctx && ctx.staffId ? window.Scoring.findStaffDef(state, ctx.staffId) : null; // STEP6
-      return def ? (def.emoji + " " + def.name) : "";
+      return { def: def, text: def ? def.name : "" };
     }
-    return who;
+    return { def: null, text: who };
   }
 
   function showQueue(state, entries, onAllDone) {
@@ -38,7 +43,11 @@ window.ScreenEventModal = (function () {
       var line = resolveText(choice.react, state, entry.ctx);
       if (line) {
         box.appendChild(h("div", { className: "react-box" }, [
-          who ? h("div", { className: "react-who emoji-font", text: who }) : null,
+          who.text ? h("div", { className: "react-who emoji-font" }, [
+            who.def ? window.AssetImage.node(who.def) : null,
+            who.def ? " " : null,
+            who.text
+          ]) : null,
           h("div", { className: "react-line", text: line })
         ]));
       }
@@ -48,8 +57,10 @@ window.ScreenEventModal = (function () {
         deltaBox.appendChild(h("div", { className: "delta-none", text: "何も変わらなかった" }));
       } else {
         diffs.forEach(function (d) {
+          // v31 §3-2(Q4): d.iconがあれば(素材の差分など)先頭に絵/絵文字を出す。
           deltaBox.appendChild(h("div", { className: "delta-row " + d.tone }, [
             h("span", { className: "delta-mark", text: d.tone === "good" ? "▲" : (d.tone === "bad" ? "▼" : "・") }),
+            d.icon ? h("span", { className: "delta-icon emoji-font" }, [window.AssetImage.node(d.icon)]) : null,
             h("span", { text: d.text })
           ]));
         });

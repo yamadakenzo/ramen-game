@@ -42,7 +42,7 @@ window.DayOff = (function () {
           className: "choice-card" + (ok ? "" : " disabled"),
           onclick: function () { if (ok) handlePick(def); }
         }, [
-          h("div", { className: "emoji emoji-font", text: def.emoji }),
+          h("div", { className: "emoji emoji-font" }, [window.AssetImage.node(def)]),
           h("div", { className: "name", text: def.name }),
           h("div", { className: "blurb", text: def.blurb }),
           !ok ? h("div", { className: "locked", text: needsStaff ? "従業員がいない" : gate.reason }) : null
@@ -88,7 +88,7 @@ window.DayOff = (function () {
           className: "choice-card",
           onclick: function () { resolve(def, { staffId: id }); }
         }, [
-          h("div", { className: "emoji emoji-font", text: sd.emoji }),
+          h("div", { className: "emoji emoji-font" }, [window.AssetImage.node(sd)]),
           h("div", { className: "name", text: sd.name + "（" + sd.role + "）" })
         ]));
       });
@@ -108,7 +108,7 @@ window.DayOff = (function () {
           className: "choice-card",
           onclick: function () { resolve(def, { cardId: c.id }); }
         }, [
-          h("div", { className: "emoji emoji-font", text: c.emoji }),
+          h("div", { className: "emoji emoji-font" }, [window.AssetImage.node(c)]),
           h("div", { className: "name", text: c.name }),
           h("div", { className: "sub", text: "関係値 " + rel })
         ]));
@@ -131,7 +131,7 @@ window.DayOff = (function () {
           className: "choice-card" + (affordable ? "" : " disabled"),
           onclick: function () { if (affordable) resolve(def, { adMethod: m.id }); }
         }, [
-          h("div", { className: "emoji emoji-font", text: m.emoji }),
+          h("div", { className: "emoji emoji-font" }, [window.AssetImage.node(m)]),
           h("div", { className: "name", text: m.name }),
           h("div", { className: "blurb", text: m.blurb }),
           h("div", { className: "sub", text: m.cost > 0 ? "費用 " + U.formatMoney(m.cost) : "費用 なし" }),
@@ -169,7 +169,7 @@ window.DayOff = (function () {
             resolve(def, { scoutResult: "hired", candidate: c });
           }
         }, [
-          h("div", { className: "emoji emoji-font", text: c.emoji }),
+          h("div", { className: "emoji emoji-font" }, [window.AssetImage.node(c)]),
           h("div", { className: "name", text: c.name }),
           h("div", { className: "sub", text: "伸びしろ " + c.potential + " ・ 給与 " + U.formatMoney(c.wage) + "/週" +
             " ・ 紹介料 " + U.formatMoney(c.hiringFee) }),
@@ -213,8 +213,10 @@ window.DayOff = (function () {
         deltaBox.appendChild(h("div", { className: "delta-none", text: "今週は何も掴めなかった" }));
       }
       (result.diffs || []).forEach(function (d) {
+        // v31 §3-2(Q4): d.iconがあれば(素材の差分など)先頭に絵/絵文字を出す。
         deltaBox.appendChild(h("div", { className: "delta-row " + d.tone }, [
           h("span", { className: "delta-mark", text: d.tone === "good" ? "▲" : (d.tone === "bad" ? "▼" : "・") }),
+          d.icon ? h("span", { className: "delta-icon emoji-font" }, [window.AssetImage.node(d.icon)]) : null,
           h("span", { text: d.text })
         ]));
       });

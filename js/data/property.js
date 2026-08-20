@@ -18,10 +18,14 @@ window.DATA = window.DATA || {};
 // 物件ごとの差別化を潰す描画都合の制約)だったため、その判断は追補で撤回し、
 // 値は元のseats_counterをそのまま使っている(判断の経緯はdocs/設計判断記録.md参照)。
 // seats_table には一切触れていない(テーブル席を席システムへ移すのは次以降の版)。
+// v31 §3-1(imgフィールドの意味はjs/data/recipes.js冒頭コメント参照): propertiesは5枚とも
+// 切り出し済みだが、今回はどの画面からも参照しない(shop-view.jsの中でしか使われておらず、
+// shop-view.jsは今回対象外のため。v31指示書 質問2回答)。斜め上視点への作り直しのときに使う。
 window.DATA.property = {
   "properties": [
     {
       "id": "shotengai", "name": "商店街の空き店舗", "name_en": "Shopping Street Vacancy", "emoji": "🏪",
+      "img": "property/shotengai",
       "initial_cost": 0, "rent": 14500, "counterSlots": 10, "seats_table": 0, "condition": "居抜き",
       "segment_flow": { "regular": 1.4, "salaryman": 0.8, "ol": 0.5, "student": 0.6, "family": 0.7, "tourist": 0.3 },
       "traits": ["前の店の設備が使える（初期投資が安い）", "常連文化が根付いている", "商店街の付き合いイベントが多い"],
@@ -29,6 +33,7 @@ window.DATA.property = {
     },
     {
       "id": "office", "name": "オフィス街の一階", "name_en": "Office District Ground Floor", "emoji": "🏢",
+      "img": "property/office",
       "initial_cost": 7800000, "rent": 34000, "counterSlots": 14, "seats_table": 0, "condition": "スケルトン",
       "segment_flow": { "regular": 0.4, "salaryman": 1.6, "ol": 1.5, "student": 0.2, "family": 0.1, "tourist": 0.4 },
       "traits": ["昼のピークが極端（11:30-13:30に集中）", "夜と週末は死ぬ", "回転率が全て"],
@@ -36,6 +41,7 @@ window.DATA.property = {
     },
     {
       "id": "campus", "name": "大学前", "name_en": "Near Campus", "emoji": "🎓",
+      "img": "property/campus",
       "initial_cost": 4100000, "rent": 18500, "counterSlots": 12, "seats_table": 2, "condition": "居抜き",
       "segment_flow": { "regular": 0.6, "salaryman": 0.5, "ol": 0.3, "student": 2.0, "family": 0.4, "tourist": 0.2 },
       "traits": ["長期休暇に客が消える（2月・8月）", "SNS拡散が起きやすい", "単価が上げられない"],
@@ -43,6 +49,7 @@ window.DATA.property = {
     },
     {
       "id": "roadside", "name": "郊外ロードサイド", "name_en": "Suburban Roadside", "emoji": "🛣️",
+      "img": "property/roadside",
       "initial_cost": 9500000, "rent": 25000, "counterSlots": 8, "seats_table": 6, "condition": "スケルトン",
       "segment_flow": { "regular": 0.8, "salaryman": 0.7, "ol": 0.3, "student": 0.5, "family": 1.8, "tourist": 0.5 },
       "traits": ["駐車場あり", "テーブル席が最初からある", "週末に売上が集中", "初期投資が重い"],
@@ -50,6 +57,7 @@ window.DATA.property = {
     },
     {
       "id": "tourist_spot", "name": "観光地の路地", "name_en": "Tourist Alley", "emoji": "⛩️",
+      "img": "property/tourist_spot",
       "initial_cost": 11000000, "rent": 42000, "counterSlots": 9, "seats_table": 0, "condition": "居抜き",
       "segment_flow": { "regular": 0.3, "salaryman": 0.2, "ol": 0.2, "student": 0.4, "family": 0.6, "tourist": 2.2 },
       "traits": ["単価を高く設定できる", "リピートしない客が中心", "季節変動が激しい", "多言語対応が必須"],
@@ -62,15 +70,15 @@ window.DATA.property = {
   // 「麺量アップ(extra_boiler)」は指示書の設備表(8種)に含まれておらず対象外。週維持費は付けて
   // いない(付けると合計が14,000円からずれるため。指示書自身の合計例とも整合する解釈)。
   "equipment": [
-    { "id": "ticket_machine", "name": "券売機",       "emoji": "🎫", "cost": 850000,  "weekly_upkeep": 700,  "effect": "週の処理可能人数+60", "penalty": "家族連れ・観光客の満足度-10", "note": "回転型の要" },
-    { "id": "table_seats",    "name": "テーブル席",   "emoji": "🪑", "cost": 420000,  "weekly_upkeep": 350,  "effect": "家族連れ解放、席数+4", "penalty": "回転率-10", "requires_space": true },
-    { "id": "exhaust",        "name": "強力ダクト",   "emoji": "💨", "cost": 1200000, "weekly_upkeep": 1400, "effect": "匂いペナルティを70%軽減", "note": "OL・家族連れ狙いなら必須。豚骨と組むと効く" },
-    { "id": "multilingual",   "name": "多言語メニュー","emoji": "🌏", "cost": 120000,  "weekly_upkeep": 0,    "effect": "観光客解放、観光客満足度+15" },
-    { "id": "bright_light",   "name": "明るい照明",   "emoji": "💡", "cost": 180000,  "weekly_upkeep": 525,  "effect": "brightness+30", "penalty": "常連満足度-5" },
-    { "id": "big_pot",        "name": "大型寸胴",     "emoji": "🍲", "cost": 380000,  "weekly_upkeep": 350,  "effect": "週の処理可能人数+50" },
-    { "id": "noodle_boiler",  "name": "高性能茹で麺器","emoji": "♨️", "cost": 640000,  "weekly_upkeep": 1050, "effect": "週の処理可能人数+80" },
-    { "id": "pos",            "name": "POSレジ",      "emoji": "🖥️", "cost": 300000,  "weekly_upkeep": 525,  "effect": "客層別の売上データを表示" },
-    { "id": "extra_boiler",   "name": "麺量アップ",   "emoji": "🍜", "cost": 300000,  "effect": "全メニューの量+15", "note": "茹で麺器の増設。学生・サラリーマンなど量を求める客層の底上げ" }
+    { "id": "ticket_machine", "name": "券売機",       "emoji": "🎫", "img": "equipment/ticket_machine", "cost": 850000,  "weekly_upkeep": 700,  "effect": "週の処理可能人数+60", "penalty": "家族連れ・観光客の満足度-10", "note": "回転型の要" },
+    { "id": "table_seats",    "name": "テーブル席",   "emoji": "🪑", "img": "equipment/table_seats", "cost": 420000,  "weekly_upkeep": 350,  "effect": "家族連れ解放、席数+4", "penalty": "回転率-10", "requires_space": true },
+    { "id": "exhaust",        "name": "強力ダクト",   "emoji": "💨", "img": "equipment/exhaust", "cost": 1200000, "weekly_upkeep": 1400, "effect": "匂いペナルティを70%軽減", "note": "OL・家族連れ狙いなら必須。豚骨と組むと効く" },
+    { "id": "multilingual",   "name": "多言語メニュー","emoji": "🌏", "img": "equipment/multilingual", "cost": 120000,  "weekly_upkeep": 0,    "effect": "観光客解放、観光客満足度+15" },
+    { "id": "bright_light",   "name": "明るい照明",   "emoji": "💡", "img": "equipment/bright_light", "cost": 180000,  "weekly_upkeep": 525,  "effect": "brightness+30", "penalty": "常連満足度-5" },
+    { "id": "big_pot",        "name": "大型寸胴",     "emoji": "🍲", "img": "equipment/big_pot", "cost": 380000,  "weekly_upkeep": 350,  "effect": "週の処理可能人数+50" },
+    { "id": "noodle_boiler",  "name": "高性能茹で麺器","emoji": "♨️", "img": "equipment/noodle_boiler", "cost": 640000,  "weekly_upkeep": 1050, "effect": "週の処理可能人数+80" },
+    { "id": "pos",            "name": "POSレジ",      "emoji": "🖥️", "img": "equipment/pos", "cost": 300000,  "weekly_upkeep": 525,  "effect": "客層別の売上データを表示" },
+    { "id": "extra_boiler",   "name": "麺量アップ",   "emoji": "🍜", "img": "equipment/extra_boiler", "cost": 300000,  "effect": "全メニューの量+15", "note": "茹で麺器の増設。学生・サラリーマンなど量を求める客層の底上げ" }
   ],
   // v17(docs/新設計/v17_ラーメン屋_修正指示書.md §2-2): 「資金調達」の選択自体を無くし、
   // 開業資金を単一の固定額(自己資金のみ)にした。金額の根拠はdocs/設計判断記録.md参照

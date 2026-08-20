@@ -14,32 +14,35 @@
 // volume/cost/smell/prep_time/boil_time/unlock/noteは変更していない(§2「今回触らない」)。
 window.DATA = window.DATA || {};
 window.DATA.recipes = {
+  // v31 §3-1: "img"はimg/配下の画像パス(拡張子・キャッシュ対策の?v=は付けない。js/asset-image.js
+  // が組み立てる)。絵がまだ無いもの(double/spicy/none)は付けない → 絵文字のまま表示される。
+  // noodleは初回シートが生成に失敗していたが(v31指示書§2)、後日1個ずつ届いたものを切り出して追加した。
   "soup": [
-    { "id": "chicken",   "name": "鶏ガラ",   "emoji": "🐔", "quality": 18, "richness": 25, "volume": 0,  "uniqueness": 8,  "workload": 6,  "cost": 90,  "prep_time": 6,  "smell": 10, "unlock": "start" },
-    { "id": "pork",      "name": "豚骨",     "emoji": "🐷", "quality": 20, "richness": 75, "volume": 0,  "uniqueness": 15, "workload": 12, "cost": 140, "prep_time": 12, "smell": 85, "unlock": "start" },
-    { "id": "seafood",   "name": "魚介",     "emoji": "🐟", "quality": 18, "richness": 38, "volume": 0,  "uniqueness": 20, "workload": 5,  "cost": 160, "prep_time": 5,  "smell": 45, "unlock": "start" },
-    { "id": "veggie",    "name": "野菜",     "emoji": "🥬", "quality": 15, "richness": 18, "volume": 0,  "uniqueness": 10, "workload": 7,  "cost": 80,  "prep_time": 7,  "smell": 5,  "unlock": "event" },
+    { "id": "chicken",   "name": "鶏ガラ",   "emoji": "🐔", "img": "material/chicken", "quality": 18, "richness": 25, "volume": 0,  "uniqueness": 8,  "workload": 6,  "cost": 90,  "prep_time": 6,  "smell": 10, "unlock": "start" },
+    { "id": "pork",      "name": "豚骨",     "emoji": "🐷", "img": "material/pork", "quality": 20, "richness": 75, "volume": 0,  "uniqueness": 15, "workload": 12, "cost": 140, "prep_time": 12, "smell": 85, "unlock": "start" },
+    { "id": "seafood",   "name": "魚介",     "emoji": "🐟", "img": "material/seafood", "quality": 18, "richness": 38, "volume": 0,  "uniqueness": 20, "workload": 5,  "cost": 160, "prep_time": 5,  "smell": 45, "unlock": "start" },
+    { "id": "veggie",    "name": "野菜",     "emoji": "🥬", "img": "material/veggie", "quality": 15, "richness": 18, "volume": 0,  "uniqueness": 10, "workload": 7,  "cost": 80,  "prep_time": 7,  "smell": 5,  "unlock": "event" },
     { "id": "double",    "name": "動物系＋魚介のダブル", "emoji": "🍲", "quality": 22, "richness": 60, "volume": 0, "uniqueness": 18, "workload": 14, "cost": 210, "prep_time": 14, "smell": 60, "unlock": "recipe_lv3" }
   ],
   "tare": [
-    { "id": "shoyu", "name": "醤油", "emoji": "🟤", "quality": 10, "richness": 5,  "volume": 0, "uniqueness": 5,  "workload": 0, "cost": 25, "smell": 0, "unlock": "start" },
-    { "id": "shio",  "name": "塩",   "emoji": "⚪", "quality": 9,  "richness": -7, "volume": 0, "uniqueness": 6,  "workload": 0, "cost": 20, "smell": 0, "unlock": "start" },
-    { "id": "miso",  "name": "味噌", "emoji": "🟠", "quality": 12, "richness": 20, "volume": 0, "uniqueness": 12, "workload": 0, "cost": 40, "smell": 20, "unlock": "start" },
+    { "id": "shoyu", "name": "醤油", "emoji": "🟤", "img": "material/shoyu", "quality": 10, "richness": 5,  "volume": 0, "uniqueness": 5,  "workload": 0, "cost": 25, "smell": 0, "unlock": "start" },
+    { "id": "shio",  "name": "塩",   "emoji": "⚪", "img": "material/shio", "quality": 9,  "richness": -7, "volume": 0, "uniqueness": 6,  "workload": 0, "cost": 20, "smell": 0, "unlock": "start" },
+    { "id": "miso",  "name": "味噌", "emoji": "🟠", "img": "material/miso", "quality": 12, "richness": 20, "volume": 0, "uniqueness": 12, "workload": 0, "cost": 40, "smell": 20, "unlock": "start" },
     { "id": "spicy", "name": "辛味", "emoji": "🌶️", "quality": 11, "richness": 10, "volume": 0, "uniqueness": 18, "workload": 0, "cost": 35, "smell": 30, "unlock": "event" }
   ],
   "noodle": [
-    { "id": "thin",    "name": "細麺",   "emoji": "🍜", "quality": 7,  "richness": -2, "volume": -10, "uniqueness": 5,  "workload": 1, "cost": 60,  "boil_time": 1, "unlock": "start" },
-    { "id": "medium",  "name": "中太麺", "emoji": "🍜", "quality": 8,  "richness": 0,  "volume": 0,   "uniqueness": 2,  "workload": 2, "cost": 70,  "boil_time": 2, "unlock": "start" },
-    { "id": "thick",   "name": "太麺",   "emoji": "🍜", "quality": 9,  "richness": 3,  "volume": 20,  "uniqueness": 7,  "workload": 4, "cost": 85,  "boil_time": 4, "unlock": "start" },
-    { "id": "premium", "name": "自家製麺", "emoji": "✨", "quality": 15, "richness": 5, "volume": 10, "uniqueness": 12, "workload": 3, "cost": 110, "boil_time": 3, "unlock": "card_menya", "note": "製麺所の親父と関係を作ると解放" }
+    { "id": "thin",    "name": "細麺",   "emoji": "🍜", "img": "material/thin", "quality": 7,  "richness": -2, "volume": -10, "uniqueness": 5,  "workload": 1, "cost": 60,  "boil_time": 1, "unlock": "start" },
+    { "id": "medium",  "name": "中太麺", "emoji": "🍜", "img": "material/medium", "quality": 8,  "richness": 0,  "volume": 0,   "uniqueness": 2,  "workload": 2, "cost": 70,  "boil_time": 2, "unlock": "start" },
+    { "id": "thick",   "name": "太麺",   "emoji": "🍜", "img": "material/thick", "quality": 9,  "richness": 3,  "volume": 20,  "uniqueness": 7,  "workload": 4, "cost": 85,  "boil_time": 4, "unlock": "start" },
+    { "id": "premium", "name": "自家製麺", "emoji": "✨", "img": "material/premium", "quality": 15, "richness": 5, "volume": 10, "uniqueness": 12, "workload": 3, "cost": 110, "boil_time": 3, "unlock": "card_menya", "note": "製麺所の親父と関係を作ると解放" }
   ],
   "topping": [
-    { "id": "chashu_thin", "name": "チャーシュー",     "emoji": "🥩", "quality": 7,  "richness": 13, "volume": 15, "uniqueness": 4, "workload": 3, "cost": 90,  "unlock": "start" },
-    { "id": "chashu_thick","name": "厚切りチャーシュー","emoji": "🥩", "quality": 10, "richness": 23, "volume": 35, "uniqueness": 6, "workload": 5, "cost": 180, "unlock": "start" },
-    { "id": "egg",         "name": "味玉",             "emoji": "🥚", "quality": 5,  "richness": 5,  "volume": 10, "uniqueness": 3, "workload": 2, "cost": 55,  "unlock": "start" },
-    { "id": "veggie_pile", "name": "野菜マシ",         "emoji": "🥬", "quality": 2,  "richness": 3,  "volume": 40, "uniqueness": 3, "workload": 2, "cost": 60,  "unlock": "start" },
-    { "id": "nori",        "name": "海苔",             "emoji": "🟩", "quality": 1,  "richness": 5,  "volume": 5,  "uniqueness": 3, "workload": 1, "cost": 30,  "unlock": "start" },
-    { "id": "large",       "name": "大盛り",           "emoji": "⬆️", "quality": 0,  "richness": 0,  "volume": 60, "uniqueness": 0, "workload": 0, "cost": 50,  "unlock": "start" },
+    { "id": "chashu_thin", "name": "チャーシュー",     "emoji": "🥩", "img": "material/chashu_thin", "quality": 7,  "richness": 13, "volume": 15, "uniqueness": 4, "workload": 3, "cost": 90,  "unlock": "start" },
+    { "id": "chashu_thick","name": "厚切りチャーシュー","emoji": "🥩", "img": "material/chashu_thick", "quality": 10, "richness": 23, "volume": 35, "uniqueness": 6, "workload": 5, "cost": 180, "unlock": "start" },
+    { "id": "egg",         "name": "味玉",             "emoji": "🥚", "img": "material/egg", "quality": 5,  "richness": 5,  "volume": 10, "uniqueness": 3, "workload": 2, "cost": 55,  "unlock": "start" },
+    { "id": "veggie_pile", "name": "野菜マシ",         "emoji": "🥬", "img": "material/veggie_pile", "quality": 2,  "richness": 3,  "volume": 40, "uniqueness": 3, "workload": 2, "cost": 60,  "unlock": "start" },
+    { "id": "nori",        "name": "海苔",             "emoji": "🟩", "img": "material/nori", "quality": 1,  "richness": 5,  "volume": 5,  "uniqueness": 3, "workload": 1, "cost": 30,  "unlock": "start" },
+    { "id": "large",       "name": "大盛り",           "emoji": "⬆️", "img": "material/large", "quality": 0,  "richness": 0,  "volume": 60, "uniqueness": 0, "workload": 0, "cost": 50,  "unlock": "start" },
     { "id": "none",        "name": "なし",             "emoji": "➖", "quality": 0,  "richness": 0,  "volume": 0,  "uniqueness": 0, "workload": 0, "cost": 0,   "unlock": "start" }
   ]
 };

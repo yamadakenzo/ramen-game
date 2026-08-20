@@ -284,9 +284,14 @@ window.EventEngine = (function () {
   }
 
   // dir: 正なら増加。inverted は「増えると痛い」項目(家賃・給与・ロック)で色を反転させる。
-  function diffEntry(text, dir, inverted) {
+  // iconDef: v31 §3-2(Q4)。素材など絵/絵文字を持つ項目の差分行に付ける先頭アイコン用。
+  // これまでは text に "item.emoji + item.name" を文字列連結していたため、絵に差し替えた項目
+  // (雇用カード等)と絵文字のままのイベント文言とで見た目が食い違っていた。ここでは text から
+  // 絵文字を外し、アイコンは別枠(icon)として持たせ、表示側(dayoff.js/event-modal.js)で
+  // window.AssetImage.node(icon) を使って組み立て直す。
+  function diffEntry(text, dir, inverted, iconDef) {
     var tone = dir === 0 ? "flat" : ((dir > 0) !== !!inverted ? "good" : "bad");
-    return { text: text, tone: tone };
+    return { text: text, tone: tone, icon: iconDef || null };
   }
   function signed(v) { return (v > 0 ? "+" : "") + Math.round(v).toLocaleString("ja-JP"); }
 
@@ -345,7 +350,7 @@ window.EventEngine = (function () {
       after.ownedMaterials[cat].forEach(function (id) {
         if (before.ownedMaterials[cat].indexOf(id) >= 0) return;
         var item = U.findById(RECIPES[cat], id);
-        out.push(diffEntry("新しい素材: " + (item ? item.emoji + item.name : id), 1));
+        out.push(diffEntry("新しい素材: " + (item ? item.name : id), 1, false, item));
       });
     });
 
@@ -355,7 +360,7 @@ window.EventEngine = (function () {
       if (b == null || a === b) return; // 新規入手した回はLv1→Lv1(変化なし)なので出さない
       var parts = key.split(":");
       var item = U.findById(RECIPES[parts[0]], parts[1]);
-      out.push(diffEntry((item ? item.emoji + item.name : key) + " Lv" + b + " → Lv" + a, 1));
+      out.push(diffEntry((item ? item.name : key) + " Lv" + b + " → Lv" + a, 1, false, item));
     });
 
     var segIds = {};
@@ -643,6 +648,8 @@ window.EventEngine = (function () {
           state.money -= hiringFee;
           state.staffHired.push(id);
           state.scoutedStaff[id] = {
+            // v31: imgは持たせない(スカウト候補は固定idが無く実行時に生成されるため絵を用意できない。
+            // v31指示書 質問3回答。window.AssetImage.nodeはimg未設定なら絵文字にフォールバックする)。
             id: id, name: c.name, emoji: c.emoji, role: c.role,
             newStats: c.newStats, maxLevel: c.maxLevel, stats: c.stats, wage: c.wage
           };

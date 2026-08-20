@@ -8,12 +8,15 @@
 // 差し替えてよい。新しくフォントを取得し直さないこと」に従い、既存フォントに含まれる食べ物系の
 // 絵文字へ差し替えた(値と理由はPROGRESS.md「STEP8対応」参照)。
 window.DATA = window.DATA || {};
+// v31 §3-1: "img"を追加(imgフィールドの意味はrecipes.js冒頭のコメント参照)。
+// v22時点で絵文字が意味と食い違っていた(🍥がライス、🥘がビール等。理由は上記コメント・
+// docs/設計判断記録.md §14)問題は、この画像差し替えで解消される。
 window.DATA.sides = {
   items: [
-    { id: "rice",       name: "ライス",     emoji: "🍥", price: 150, cost: 30,  workload: 1, segments: ["student", "salaryman"] },
-    { id: "beer",       name: "ビール",     emoji: "🥘", price: 500, cost: 150, workload: 1, segments: ["salaryman", "tourist"] },
-    { id: "gyoza",      name: "餃子",       emoji: "🍳", price: 350, cost: 120, workload: 4, segments: ["family", "regular"] },
-    { id: "fried_rice", name: "チャーハン", emoji: "🍲", price: 600, cost: 200, workload: 7, segments: ["student", "family"] },
-    { id: "karaage",    name: "唐揚げ",     emoji: "🥩", price: 450, cost: 180, workload: 6, segments: ["student", "salaryman"] }
+    { id: "rice",       name: "ライス",     emoji: "🍥", img: "equipment/rice",       price: 150, cost: 30,  workload: 1, segments: ["student", "salaryman"] },
+    { id: "beer",       name: "ビール",     emoji: "🥘", img: "equipment/beer",       price: 500, cost: 150, workload: 1, segments: ["salaryman", "tourist"] },
+    { id: "gyoza",      name: "餃子",       emoji: "🍳", img: "equipment/gyoza",      price: 350, cost: 120, workload: 4, segments: ["family", "regular"] },
+    { id: "fried_rice", name: "チャーハン", emoji: "🍲", img: "equipment/fried_rice", price: 600, cost: 200, workload: 7, segments: ["student", "family"] },
+    { id: "karaage",    name: "唐揚げ",     emoji: "🥩", img: "equipment/karaage",    price: 450, cost: 180, workload: 6, segments: ["student", "salaryman"] }
   ]
 };

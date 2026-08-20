@@ -4,7 +4,8 @@
 // 部品として最初から作る(§4-1)。ここから他画面への接続は行わない(§4-1・§5)。
 //
 // window.CardReveal.show(items, doneCb)
-//   items: [{ emoji, name, sub }] sub は省略可
+//   items: [{ emoji, name, sub, img }] sub・imgは省略可(v31: imgがあれば絵、無ければ絵文字。
+//   window.AssetImage.node()に渡すのでitemはdefそのもの、または最低限{emoji,name,img}を持つ形でよい)
 //   doneCb: 演出が終わった(=タップして「▼ タップして続ける」を閉じた)ときに呼ぶ
 //
 // v24(docs/指示書/v24_席の設備化とプレゼント演出_指示書.md §4): 自動では閉じない。
@@ -108,7 +109,7 @@ window.CardReveal = (function () {
 
     items.forEach(function (item) {
       var card = h("div", { className: "card-reveal-card" }, [
-        h("span", { className: "card-reveal-emoji emoji-font", text: item.emoji }),
+        h("span", { className: "card-reveal-emoji emoji-font" }, [window.AssetImage.node(item)]),
         h("div", { className: "card-reveal-name", text: item.name }),
         item.sub ? h("div", { className: "card-reveal-sub", text: item.sub }) : null
       ]);

@@ -1198,7 +1198,7 @@ window.ScreenLoop = (function () {
             refreshSheet();
           }
         }, [
-          h("div", { className: "emoji emoji-font", text: item.emoji }),
+          h("div", { className: "emoji emoji-font" }, [window.AssetImage.node(item)]),
           h("div", { className: "name", text: item.name })
         ]));
       });
@@ -1253,7 +1253,7 @@ window.ScreenLoop = (function () {
       var key = c[0], id = ingredients[key];
       if (!id || id === "none") return; // §4: 「なし」は飛ばす絵が無いので演出には含めない
       var def = U.findById(RECIPES[key], id);
-      if (def) items.push({ emoji: def.emoji, name: def.name });
+      if (def) items.push({ emoji: def.emoji, name: def.name, img: def.img });
     });
 
     window.DevelopReveal.show(items, defaultName, function (finalName) {
@@ -1374,7 +1374,7 @@ window.ScreenLoop = (function () {
             refreshSheet();
           }
         }, [
-          h("div", { className: "emoji emoji-font", text: item.emoji }),
+          h("div", { className: "emoji emoji-font" }, [window.AssetImage.node(item)]),
           h("div", { className: "name", text: item.name }),
           unowned ? h("div", { className: "locked", text: "未所持" }) : null
         ]));
@@ -1411,7 +1411,7 @@ window.ScreenLoop = (function () {
           refreshSheet();
         }
       }, [
-        h("div", { className: "emoji emoji-font", text: side.emoji }),
+        h("div", { className: "emoji emoji-font" }, [window.AssetImage.node(side)]),
         h("div", { className: "name", text: side.name }),
         h("div", { className: "blurb", text: "単価" + side.price + "円 ・ 原価" + side.cost + "円 ・ 提供負荷" + side.workload }),
         full ? h("div", { className: "locked", text: "これ以上は選べません" }) : null
@@ -1460,7 +1460,7 @@ window.ScreenLoop = (function () {
             refreshSheet();
           }
         }, [
-          h("div", { className: "emoji emoji-font", text: item.emoji }),
+          h("div", { className: "emoji emoji-font" }, [window.AssetImage.node(item)]),
           h("div", { className: "name", text: item.name }),
           unowned ? h("div", { className: "locked", text: "未所持" }) : h("div", { className: "blurb", text: G.blurb(item.id) })
         ]));
@@ -1496,7 +1496,7 @@ window.ScreenLoop = (function () {
         var owned = window.Scoring.isMaterialOwned(state, key, item.id);
         if (!owned) {
           grid.appendChild(h("div", { className: "choice-card disabled" }, [
-            h("div", { className: "emoji emoji-font", text: item.emoji }),
+            h("div", { className: "emoji emoji-font" }, [window.AssetImage.node(item)]),
             h("div", { className: "name", text: item.name }),
             h("div", { className: "locked", text: "未所持" })
           ]));
@@ -1508,7 +1508,7 @@ window.ScreenLoop = (function () {
           var optA = Scoring.branchOptionPreview(key, item.id, "a");
           var optB = Scoring.branchOptionPreview(key, item.id, "b");
           var pickerCard = h("div", { className: "choice-card wide" }, [
-            h("div", { className: "emoji emoji-font", text: item.emoji }),
+            h("div", { className: "emoji emoji-font" }, [window.AssetImage.node(item)]),
             h("div", { className: "name", text: item.name + "：育てる方向を選ぶ（戻せません）" })
           ]);
           [["a", optA], ["b", optB]].forEach(function (pair) {
@@ -1538,7 +1538,7 @@ window.ScreenLoop = (function () {
         if (!cs.maxed) sub.push("Lvアップまであと" + cs.dupesToNextLevel + "枚");
         else sub.push("これ以上重ねても無駄になる");
         grid.appendChild(h("div", { className: "choice-card" }, [
-          h("div", { className: "emoji emoji-font", text: item.emoji }),
+          h("div", { className: "emoji emoji-font" }, [window.AssetImage.node(item)]),
           h("div", { className: "name", text: item.name + "　" + lvLabel }),
           h("div", { className: "blurb", text: "品質" + stat(eff.quality) + " ・ 濃さ" + stat(eff.richness) + " ・ 量" + stat(eff.volume) + " ・ 個性" + stat(eff.uniqueness) + " ・ 原価" + eff.cost + "円" }),
           h("div", { className: "dim", text: sub.join(" ・ ") })
@@ -1597,7 +1597,7 @@ window.ScreenLoop = (function () {
       }
       segSec.appendChild(h("div", { className: "staff-card" + (blocked ? "" : "") }, [
         h("div", { className: "staff-head" }, [
-          h("span", { className: "staff-emoji emoji-font", text: seg.emoji }),
+          h("span", { className: "staff-emoji emoji-font" }, [window.AssetImage.node(seg)]),
           h("span", { className: "staff-name", text: seg.name }),
           h("span", { className: "dim", text: "予算 " + U.formatMoney(seg.budget) })
         ]),
@@ -1630,7 +1630,7 @@ window.ScreenLoop = (function () {
           refreshSheet();
         }
       }, [
-        h("div", { className: "emoji emoji-font", text: eq.emoji }),
+        h("div", { className: "emoji emoji-font" }, [window.AssetImage.node(eq)]),
         h("div", { className: "name", text: eq.name + (owned ? "（導入済）" : "") }),
         // STEP7(§4): 購入前に週維持費が見えるようにする。
         h("div", { className: "cost", text: U.formatMoney(eq.cost) + (eq.weekly_upkeep ? " / 週" + U.formatMoney(eq.weekly_upkeep) : " / 週維持費なし") }),
@@ -1664,7 +1664,7 @@ window.ScreenLoop = (function () {
           refreshSheet();
         }
       }, [
-        h("div", { className: "emoji emoji-font", text: seatDef.emoji }),
+        h("div", { className: "emoji emoji-font" }, [window.AssetImage.node(seatDef)]),
         h("div", { className: "name", text: seatDef.name + "（" + owned + "/" + slots + "）" }),
         h("div", { className: "cost", text: U.formatMoney(seatDef.price) + " / 週" + U.formatMoney(seatDef.weekly_upkeep) }),
         h("div", { className: "blurb", text: "1つ置くと" + seatDef.capacity + "人座れる" }),
@@ -1683,7 +1683,7 @@ window.ScreenLoop = (function () {
     var guideSec = h("div", { className: "sheet-section" }, [
       h("div", { className: "staff-card" }, [
         h("div", { className: "staff-head" }, [
-          h("span", { className: "staff-emoji emoji-font", text: G.def().emoji }),
+          h("span", { className: "staff-emoji emoji-font" }, [window.AssetImage.node(G.def())]),
           h("span", { className: "staff-name", text: G.def().name }),
           h("span", { className: "dim", text: "（" + G.def().role + "）" })
         ]),
@@ -1750,7 +1750,7 @@ window.ScreenLoop = (function () {
             refreshSheet();
           }
         }, [
-          h("div", { className: "emoji emoji-font" }, [def.emoji, " ", window.StatusPanel.rankBadge(Scoring.staffRating(def).rank)]),
+          h("div", { className: "emoji emoji-font" }, [window.AssetImage.node(def), " ", window.StatusPanel.rankBadge(Scoring.staffRating(def).rank)]),
           h("div", { className: "name", text: def.name + "（" + def.role + "）" }),
           h("div", { className: "cost", text: U.formatMoney(def.wage) + "/週" }),
           window.StatusPanel.staffStats(def),
@@ -1779,7 +1779,7 @@ window.ScreenLoop = (function () {
           refreshSheet();
         }
       }, [
-        h("div", { className: "emoji emoji-font", text: c.emoji }),
+        h("div", { className: "emoji emoji-font" }, [window.AssetImage.node(c)]),
         h("div", { className: "name", text: c.name }),
         h("div", { className: "sub", text: "関係値 " + rel })
       ]));

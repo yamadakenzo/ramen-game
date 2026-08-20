@@ -55,9 +55,8 @@ window.StatusPanel = (function () {
       var tick = h("span", { className: "axis-tick" + (m.blocked ? " blocked" : ""), style: { left: m.x + "%" } });
       var mark = h("span", {
         className: "axis-mark emoji-font" + (m.blocked ? " blocked" : ""),
-        style: { left: m.x + "%", top: (m.row === 1 ? -30 : -16) + "px" },
-        text: seg_emoji(m.seg)
-      });
+        style: { left: m.x + "%", top: (m.row === 1 ? -30 : -16) + "px" }
+      }, [window.AssetImage.node(m.seg)]);
       mark.title = m.seg.name + "の理想 " + m.seg.taste[axis.key] + (m.blocked ? "（設備不足で来店なし）" : "");
       tick.title = mark.title;
       track.appendChild(tick);
@@ -71,15 +70,19 @@ window.StatusPanel = (function () {
     ]);
   }
 
-  function seg_emoji(seg) { return seg.emoji; }
-
+  // v31 §3-2(Q4): 以前は"item.emoji + item.name"を1本の文字列に連結していたが、絵に差し替わった
+  // 素材と絵文字のままの素材が混在すると崩れるため、要素を分けて返す(呼び出し側はtextではなく
+  // childrenとして渡す)。
   function recipeLine(state) {
     var parts = [];
     [["soup", "スープ"], ["tare", "タレ"], ["noodle", "麺"], ["topping", "トッピング"]].forEach(function (c) {
       var item = U.findById(RECIPES[c[0]], state.recipe[c[0]]);
-      if (item) parts.push(item.emoji + item.name);
+      if (!item) return;
+      if (parts.length) parts.push(" ＋ ");
+      parts.push(h("span", { className: "recipe-line-icon" }, [window.AssetImage.node(item)]));
+      parts.push(item.name);
     });
-    return parts.join(" ＋ ");
+    return parts;
   }
 
   function renderRamen(state) {
@@ -92,7 +95,7 @@ window.StatusPanel = (function () {
         h("span", { className: "score-max", text: "/ 100" })
       ]),
       h("div", { className: "dim", text: "味の相性 " + r.fit + " ・ 素材の質 " + r.material }),
-      h("div", { className: "recipe-line emoji-font", text: recipeLine(state) }),
+      h("div", { className: "recipe-line emoji-font" }, recipeLine(state)),
       h("div", { className: "dim", text: "原価 " + r.cost + "円 / 価格 " + state.price + "円" })
     ]);
     var axesBox = h("div", { className: "axes-box" });
@@ -143,7 +146,7 @@ window.StatusPanel = (function () {
     var level = sstate ? (sstate.level || 1) : 1;
     var block = h("div", { className: "staff-card" }, [
       h("div", { className: "staff-head" }, [
-        h("span", { className: "staff-emoji emoji-font", text: def.emoji }),
+        h("span", { className: "staff-emoji emoji-font" }, [window.AssetImage.node(def)]),
         h("span", { className: "staff-name", text: def.name }),
         h("span", { className: "dim", text: "（" + def.role + "）" }),
         rankBadge(rating.rank),

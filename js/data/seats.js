@@ -4,6 +4,7 @@
 // 今回中身が入るのは counter だけ。table/private は将来の版で追加する(今回は追加しない。
 // 既存のtable_seats設備<js/data/property.js>とは別物なので混同しないこと)。
 // price / weekly_upkeep は仮置きの値。バランス調整フェーズで見直す前提(指示書§2-1)。
+// v31 §3-1: imgフィールドは付けていない(v31指示書 質問3回答: 席は画像化の対象外)。絵文字のまま。
 window.DATA = window.DATA || {};
 window.DATA.seats = [
   {

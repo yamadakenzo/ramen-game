@@ -3,7 +3,8 @@
 // (#app直下のフルスクリーンオーバーレイ、タップで即完了、独立した部品でどの画面からも呼べる)で作った。
 //
 // window.DevelopReveal.show(items, defaultName, onNamed)
-//   items: [{ emoji, name }] 選んだ素材カード(「なし」は含めない。呼び出し側で除外する)
+//   items: [{ emoji, name, img }] 選んだ素材カード(「なし」は含めない。呼び出し側で除外する。
+//   imgは省略可、v31: あれば絵・無ければ絵文字)
 //   defaultName: 命名モーダルに最初から入っている名前
 //   onNamed(name): 決定ボタンを押した(または空欄のまま決定した)ときに、確定した名前を渡して呼ぶ
 //
@@ -81,7 +82,7 @@ window.DevelopReveal = (function () {
 
     var cardEls = items.map(function (item) {
       var card = h("div", { className: "dev-reveal-card" }, [
-        h("span", { className: "emoji emoji-font", text: item.emoji }),
+        h("span", { className: "emoji emoji-font" }, [window.AssetImage.node(item)]),
         h("div", { className: "name", text: item.name })
       ]);
       row.appendChild(card);

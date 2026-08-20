@@ -7,15 +7,20 @@ window.DATA.characters = {
   //  - 「担当者が1年間ずっと店に出入りする」設定に無理がある
   //  - 人間の立ち絵は本番制作コストが最も高い
   // 素性は作り込まない。「この店を見守っている丼」以上の説明を持たせない。
+  // v31 §3-1(imgフィールドの意味はrecipes.js冒頭コメント参照): どんぶりちゃんは表情差分6種が
+  // 用意済み(img/character/donburi_normal〜sad.webp)だが、今回参照するのはnormalのみ
+  // (v31指示書 質問1回答: 表情を切り替える仕組みはまだ作らない)。idは"donburi"のままなので
+  // imgのファイル名はidと一致しない特別扱い(donburi_normal)。
   "guide": {
     "id": "donburi", "name": "どんぶりちゃん", "name_en": "Donburi", "emoji": "🍜",
+    "img": "character/donburi_normal",
     "role": "見守り役",
     "personality": "明るい・断定的・世話焼き",
     "tone": "「決めよう」「大丈夫」"
   },
   "staff": [
     {
-      "id": "yuta", "name": "ユウタ", "name_en": "Yuta", "emoji": "🧑‍🍳", "age": 22, "role": "麺上げ",
+      "id": "yuta", "name": "ユウタ", "name_en": "Yuta", "emoji": "🧑‍🍳", "img": "character/yuta", "age": 22, "role": "麺上げ",
       "personality": "熱血・不器用", "tone": "「押忍！」「やらせてください！」",
       "stats": { "noodle": 70, "prep": 30, "service": 25, "numbers": 10, "teach": 15 },
       // STEP5(docs/新設計/05_STEP5_従業員能力と育成_修正版.md §1): 新4能力(1〜10)と最大Lv。
@@ -28,7 +33,7 @@ window.DATA.characters = {
       "route_bias": { "independent": 0.5, "stay": 0.3, "betray": 0.15, "retire": 0.05 }
     },
     {
-      "id": "misaki", "name": "ミサキ", "name_en": "Misaki", "emoji": "👩‍🍳", "age": 28, "role": "接客",
+      "id": "misaki", "name": "ミサキ", "name_en": "Misaki", "emoji": "👩‍🍳", "img": "character/misaki", "age": 28, "role": "接客",
       "personality": "如才ない・現実的", "tone": "「店長、それ言わなくていいですよ」",
       "stats": { "noodle": 20, "prep": 35, "service": 85, "numbers": 55, "teach": 40 },
       "newStats": { "cooking": 3, "speed": 7, "service": 9, "development": 4 },
@@ -39,7 +44,7 @@ window.DATA.characters = {
       "route_bias": { "independent": 0.1, "stay": 0.5, "betray": 0.15, "retire": 0.25 }
     },
     {
-      "id": "gonzo", "name": "ゴンゾウ", "name_en": "Gonzo", "emoji": "👨‍🦳", "age": 58, "role": "仕込み",
+      "id": "gonzo", "name": "ゴンゾウ", "name_en": "Gonzo", "emoji": "👨‍🦳", "img": "character/gonzo", "age": 58, "role": "仕込み",
       "personality": "頑固・寡黙", "tone": "「……ふん」「そりゃ違う」",
       "stats": { "noodle": 55, "prep": 90, "service": 5, "numbers": 20, "teach": 60 },
       "newStats": { "cooking": 7, "speed": 3, "service": 1, "development": 8 },
@@ -50,7 +55,7 @@ window.DATA.characters = {
       "route_bias": { "independent": 0.05, "stay": 0.4, "betray": 0.2, "retire": 0.35 }
     },
     {
-      "id": "rin", "name": "リン", "name_en": "Rin", "emoji": "👧", "age": 19, "role": "アルバイト",
+      "id": "rin", "name": "リン", "name_en": "Rin", "emoji": "👧", "img": "character/rin", "age": 19, "role": "アルバイト",
       "personality": "軽い・SNS中毒", "tone": "「え、それバズるやつじゃないですか？」",
       "stats": { "noodle": 30, "prep": 20, "service": 60, "numbers": 15, "teach": 5 },
       "newStats": { "cooking": 3, "speed": 7, "service": 6, "development": 2 },
@@ -61,7 +66,7 @@ window.DATA.characters = {
       "route_bias": { "independent": 0.1, "stay": 0.2, "betray": 0.1, "retire": 0.6 }
     },
     {
-      "id": "tetsu", "name": "テツ", "name_en": "Tetsu", "emoji": "🧔", "age": 34, "role": "万能",
+      "id": "tetsu", "name": "テツ", "name_en": "Tetsu", "emoji": "🧔", "img": "character/tetsu", "age": 34, "role": "万能",
       "personality": "冷静・計算高い", "tone": "「原価、今月32%ですよ」",
       "stats": { "noodle": 55, "prep": 55, "service": 50, "numbers": 80, "teach": 45 },
       "newStats": { "cooking": 6, "speed": 6, "service": 5, "development": 5 },
@@ -72,6 +77,8 @@ window.DATA.characters = {
       "route_bias": { "independent": 0.3, "stay": 0.3, "betray": 0.35, "retire": 0.05 }
     }
   ],
+  // v31 §3-1: この5人(人カード)はimgフィールドを付けていない(まだ絵が無い。v31指示書の
+  // README「まだ作っていないもの」参照)。絵文字のまま表示される。
   "cards": [
     {
       "id": "menya", "name": "麺屋の親父", "name_en": "The Noodle Maker", "emoji": "👨‍🏭", "type": "supplier",

@@ -117,9 +117,10 @@ window.ScreenSetup = (function () {
 
   // ---------- §4-4: カード演出に出す中身。文字列に直接書かず、必ずデータから読む ----------
   function materialCardItems() {
+    // v31 §3-2: imgもそのまま引き継ぐ(window.AssetImage.nodeが読むため)。
     function pick(list, id, sub) {
       var d = U.findById(list, id);
-      return { emoji: d ? d.emoji : "", name: d ? d.name : "", sub: sub };
+      return { emoji: d ? d.emoji : "", name: d ? d.name : "", img: d ? d.img : null, sub: sub };
     }
     return [
       pick(RECIPE_DATA.soup, FIXED_RECIPE.soup, "スープ"),
@@ -130,7 +131,7 @@ window.ScreenSetup = (function () {
 
   function staffCardItems() {
     var d = U.findById(CHAR_DATA.staff, FIXED_STAFF_ID);
-    return [{ emoji: d ? d.emoji : "", name: d ? d.name : "" }];
+    return [{ emoji: d ? d.emoji : "", name: d ? d.name : "", img: d ? d.img : null }];
   }
 
   // ---------- v24 §3-2: 席プレゼント演出 ----------
@@ -286,7 +287,7 @@ window.ScreenSetup = (function () {
       className: "btn small setup-skip", text: "スキップ", onclick: onSkip
     }));
 
-    var charEl = h("span", { className: "setup-char emoji-font", text: DONBURI.emoji });
+    var charEl = h("span", { className: "setup-char emoji-font" }, [window.AssetImage.node(DONBURI)]);
     var topEl = h("div", { className: "setup-panel-top" }, [charEl]);
 
     var nameEl = h("div", { className: "setup-window-name", text: DONBURI.name });

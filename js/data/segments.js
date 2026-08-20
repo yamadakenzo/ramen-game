@@ -5,6 +5,7 @@
 // richnessは指示書§2の表の値をそのまま採用(旧richness・oilinessの平均)。oilinessは削除した。
 // uniquenessは指示書§3の表の値をそのまま採用(観光客だけ突出して高いのは意図どおり)。
 // volume/tolerance/weights/budget/peak_hours等は変更していない。
+// v31 §3-1: "img"を追加(意味はjs/data/recipes.js冒頭のコメント参照)。6種とも絵が揃っている。
 window.DATA = window.DATA || {};
 window.DATA.segments = {
   "segments": [
@@ -13,6 +14,7 @@ window.DATA.segments = {
       "name": "OL",
       "name_en": "Office Worker (F)",
       "emoji": "👩‍💼",
+      "img": "segment/ol",
       "desc": "昼休みの1時間で来る。並ぶのは嫌。匂いが服につくのを警戒する。",
       "taste": { "richness": 25, "volume": 35, "uniqueness": 40 },
       "tolerance": 18,
@@ -34,6 +36,7 @@ window.DATA.segments = {
       "name": "サラリーマン",
       "name_en": "Salaryman",
       "emoji": "🧑‍💼",
+      "img": "segment/salaryman",
       "desc": "早く、多く、濃く。券売機を好む。並ぶことは苦にしない。",
       "taste": { "richness": 73, "volume": 80, "uniqueness": 45 },
       "tolerance": 25,
@@ -55,6 +58,7 @@ window.DATA.segments = {
       "name": "学生",
       "name_en": "Student",
       "emoji": "🎓",
+      "img": "segment/student",
       "desc": "安く、多く。味の細かい違いには鈍い。SNSでよく喋る。",
       "taste": { "richness": 63, "volume": 95, "uniqueness": 45 },
       "tolerance": 35,
@@ -76,6 +80,7 @@ window.DATA.segments = {
       "name": "家族連れ",
       "name_en": "Family",
       "emoji": "🧑👧",
+      "img": "segment/family",
       "desc": "週末に来る。テーブル席がないと入れない。一度に人数が入る。",
       "taste": { "richness": 43, "volume": 55, "uniqueness": 35 },
       "tolerance": 30,
@@ -98,6 +103,7 @@ window.DATA.segments = {
       "name": "観光客",
       "name_en": "Tourist",
       "emoji": "🧳",
+      "img": "segment/tourist",
       "desc": "写真を撮る。分かりやすさを求める。二度と来ない。",
       "taste": { "richness": 60, "volume": 60, "uniqueness": 80 },
       "tolerance": 40,
@@ -121,6 +127,7 @@ window.DATA.segments = {
       "name": "常連",
       "name_en": "Regular",
       "emoji": "🧓",
+      "img": "segment/regular",
       "desc": "毎日同じ席に座る。味を変えると気づく。値上げに敏感。",
       "taste": { "richness": 53, "volume": 60, "uniqueness": 50 },
       "tolerance": 12,

@@ -3,12 +3,14 @@
 // img/stage/(floor.webp下地 + 家具・人・丼を画像で重ねる)へ作り直した。
 // 客・従業員・設備・物件の絵は v31 で img/ に入れたものをそのまま使う(新しく作らない)。
 //
-// 座標系: x は舞台幅に対する%、y は舞台高さに対する%。斜め上視点なので「奥へ進む」動きは
-// x・yが同時に動く(横から見た旧版のように一方向だけの移動ではない)。
-// v32(§3-1): 座標は GEO の1箇所だけが出典。CSS(css/style.css の .sv-*)には座標(top/left/
-// width/height)を一切持たせない。壁・床・カウンター・券売機も含め、位置はすべてここから
-// JSがインラインstyleで書く。CSSに残すのは色・枠線・角丸・トランジション・アニメーションだけ
-// (v02から続いていた「GEOとCSSの座標二重管理」はこれで解消。詳細はdocs/設計判断記録.md §42)。
+// 座標系(v35、docs/指示書/v35-2_升目基盤_座標系と仮タイル_指示書.md /
+// docs/素材仕様_カイロソフト方式.md): x・y は「マス」の連続座標。1マス = 画面上 CELL(48)px 固定で、
+// マス(col,row)の中心 = (col+0.5, row+0.5)。部屋が画面に収まらなければはみ出す(第3段階の
+// スクロール/ピンチで見せる。「部屋を1画面に収めるために1マスを縮める」ことはもうしない)。
+// v32(§3-1)からの継続: 座標は GEO(と部屋の表 ROOMS)だけが出典。CSS(css/style.css の .sv-*)には
+// 座標(top/left)を一切持たせない。位置はすべてここからJSがインラインstyleで書く。CSSに残すのは
+// 色・枠線・トランジション・アニメーション・接地アンカー(translate(-50%,-100%))だけ
+// (詳細はdocs/設計判断記録.md §42、v35の項)。
 window.ShopView = (function () {
   var h = window.UI.h;
   var U = window.Utils;
@@ -17,28 +19,59 @@ window.ShopView = (function () {
   var STAFF = window.DATA.characters.staff;
   var EQUIP = window.DATA.property.equipment;
 
-  // v32: 斜め上視点の間取り(img/stage/floor.webpの絵に合わせて実測した座標)。
-  // 各地点は{x,y}(舞台%)。線状に並べる場所(カウンター・テーブル・行列)は始点/終点の
-  // 2点だけを持ち、isoSpread()で等間隔に割り付ける(旧spread()の2D版)。
+  // v35: 1マス = 画面上 48 CSS px(等倍)。素材仕様(docs/素材仕様_カイロソフト方式.md §2-1)の
+  // 決定値。物件が広くなってもこの値は縮めない。
+  var CELL = 48;
+
+  // v35(v35-2指示書 §1-1): 部屋の表。区画は数式ではなく人が書いた文字の表で持つ(§43-2の教訓)。
+  // 記号: L/#/R = 奥壁(左角/中間/右角)  l/r = 側壁(左/右)  D = 入口(暖簾)
+  //       K = 厨房床(タイル)  ( = ) = カウンター(左端/中間/右端。下に敷く床はタイル)
+  //       S = カウンター席  A = 通路  T = テーブル席 (S/A/Tの床は木目)
+  // カウンターの端の位置も記号で書き切る(式で求めない——表を見るだけで目視検証できるように)。
+  var ROOMS = {
+    shotengai: {
+      cols: 12, rows: 10,
+      map: [
+        "L##########R", // row0 奥壁
+        "lKKKKKKKKKKr", // row1 厨房
+        "lKKKKKKKKKKr", // row2 厨房
+        "l(========)r", // row3 カウンター(左端+中間×8+右端)。両端が側壁に接して1本の台になる
+        "lSSSSSSSSSSr", // row4 カウンター席(内側10マス=商店街のcounterSlots=10と一致)
+        "DAAAAAAAAAAr", // row5 通路。入口Dは左側壁のrow5(v33実測 col≈0,row≈5.8と整合)
+        "lTTTTTTTTTTr", // row6 テーブル席
+        "lTTTTTTTTTTr", // row7 テーブル席
+        "lAAAAAAAAAAr", // row8 通路
+        "lAAAAAAAAAAr"  // row9 通路(手前。下端は開放=壁を描かない)
+      ]
+    }
+  };
+  // 商店街以外の物件は今回対象外で、商店街の表を流用しているだけ(未対応の明示。v35-2指示書の指定)。
+  // 特にオフィス街はcounterSlots=14で、この表の席の行(内側10マス)には入りきらない。
+  // 物件を本対応するときは物件ごとの表を足すこと(docs/設計判断記録.md v35の項参照)。
+  function roomDef() {
+    var p = state && window.Scoring.getProperty(state);
+    return (p && ROOMS[p.id]) || ROOMS.shotengai;
+  }
+
+  // v35: 間取りの名前付きの点。単位はマスの連続座標(マス(col,row)の中心 = (col+0.5, row+0.5))。
+  // 部屋の表(ROOMS)に載らない可動物・小物の置き場所はここが唯一の出典。
   var GEO = {
-    door: { x: 23, y: 53 },   // 入口(暖簾の足元、床の切れ目)
-    off: { x: 23, y: 107 },   // 画面外(退場・湧き出し先)。入口の真下(overflow:hiddenで隠れる)
-    kitchenHome: { x: 72, y: 36 }, // 厨房担当の定位置の基準(タイル側、奥の壁寄り。カウンターより
-                                    // 十分奥<yが小さい>に置き、カウンターの絵と重なって隠れないようにする)
-    soup: { x: 88, y: 34 },        // 寸胴/鍋
-    noodle: { x: 78, y: 31 },      // 茹で麺器(無い場合の代役も同じ位置を使う)
-    plate: { x: 62, y: 43 },       // 盛り付け台=受け渡し口(カウンター客はここが受け取り場所そのもの)
-    hallHome: { x: 48, y: 50 },    // ホール担当の定位置(受け渡し口のすぐ手前)
-    // カウンター客席は受け渡し口の手前(ウッド床側)に並べる。線の始点/終点は
-    // 実測(img/stage/floor.webpの木目床とタイルの境界に沿わせた)。
-    counterLine: { x0: 42, y0: 53, x1: 80, y1: 60 },
-    counterSeatOffset: { dx: 0, dy: 2 },  // カウンター本体(絵)に対する客の座り位置の微調整(手前へ)
-    // テーブル席(img/equipment/table_seats.webpを1卓ぶんの絵として使う)は手前の板張り床に置く。
-    tableLine: { x0: 10, y0: 60, x1: 32, y1: 67 },
-    // 行列: 入口のすぐ内側から、壁沿い(手前)へ短い列を作る。GEO.queueColsで折り返す。
-    queueOrigin: { x: 13, y: 54 },
-    queueColStep: { dx: -1.8, dy: 2.6 },  // 列の中で1人ずつ進む方向(手前へ)
-    queueRowStep: { dx: 6, dy: 1 },       // 列が埋まったら次列(奥側へ少し戻ってずらす)
+    door: { x: 0.5, y: 5.5 },   // 入口(表のD=マス(0,5))の中心
+    off: { x: -1.5, y: 5.5 },   // 湧き/退場先 = 入口の外の道(マス(-2,5))。旧「y>100%=画面外」の
+                                 // 定義は廃止(スクロールで見えても「店の外の人」として自然な位置)
+    kitchenHome: { x: 7.5, y: 2.5 }, // 厨房担当の定位置の基準(K帯。複数人は左右にspread)
+    soup: { x: 8.5, y: 1.5 },        // 寸胴/鍋(K)
+    noodle: { x: 6.5, y: 1.5 },      // 茹で麺器(K。無い場合の代役も同じ位置)
+    plate: { x: 6.5, y: 2.5 },       // 盛り付け台=受け渡し口の立ち位置(K。カウンターのすぐ奥)
+    hallHome: { x: 5.5, y: 5.5 },    // ホール担当の定位置(A。カウンターの手前)
+    ticket: { x: 1.5, y: 5.5 },      // 券売機(A。入口のすぐ内側)
+    counterSeatRow: 4.5,             // 丸椅子の行(表のS行)の中心。席はcol1から1マスに1脚
+    // テーブル卓(2マス幅)の接地中心(T帯)。drawMaxTable=4席=2卓ぶんだけ持つ
+    tableAnchors: [{ x: 3.0, y: 6.5 }, { x: 7.0, y: 6.5 }],
+    // 行列: 手前の通路(A、rows8-9)に、入口寄りから右へ並べる。GEO.queueColsで折り返す。
+    queueOrigin: { x: 1.5, y: 8.5 },
+    queueColStep: { dx: 0.7, dy: 0 },   // 列の中で1人ずつ進む方向(右へ)
+    queueRowStep: { dx: 0, dy: 0.9 },   // 列が埋まったら次列(さらに手前へ)
     queueCols: 4,
     drawMaxTable: 4 // テーブル側は実際の卓数より多くは描かない(絵は代表表示。v24からの既存方針)
   };
@@ -50,8 +83,13 @@ window.ShopView = (function () {
   // 何ゲーム内分だったか」に換算しただけで、体感の尺そのものは変えていない
   // (BASE_HOUR_MSを変えても客の動きが速すぎ/遅すぎにならないようにするための書き換え)。
   var OLD_MS_PER_MIN = 5000 / 60; // 換算の物差し。以後この値そのものを直接使うことはない
-  var WALK_MIN_PER_PCT = 22 / OLD_MS_PER_MIN;        // 通常の歩行、距離1%あたりの分
-  var SEAT_WALK_MIN_PER_PCT = 20 / OLD_MS_PER_MIN;   // 席へ向かう/席から出るときの歩行
+  // v35: 距離の単位が「舞台%」から「マス」へ変わったため、旧「1% = 22ms/20ms」を換算係数
+  // k=10(%/マス)で「1マス = 220ms/200ms」へ校正した。kは現行GEO(%)と新配置(マス)で同じ
+  // 代表旅程(入店/厨房/ホール/退店/兼任1周)の距離を実測して求めた比の平均(≈10.2、
+  // 第2段階着手前報告)。この校正で旅程の所要時間と、厨房サイクルの移動:静止の配分
+  // (0.62→0.61)が現行とほぼ同じに保たれる。
+  var WALK_MIN_PER_CELL = 220 / OLD_MS_PER_MIN;      // 通常の歩行、距離1マスあたりの分
+  var SEAT_WALK_MIN_PER_CELL = 200 / OLD_MS_PER_MIN; // 席へ向かう/席から出るときの歩行
   var ENTER_EXTRA_MIN = 200 / OLD_MS_PER_MIN;        // 席へ向かう前の一拍
   var SIT_MIN = 420 / OLD_MS_PER_MIN;                // 席に着く/席を立つ(間合いの一拍)
   var LEAVE_WAIT_MIN = 460 / OLD_MS_PER_MIN;         // 席を立ってから実際に歩き出すまでの間
@@ -66,7 +104,8 @@ window.ShopView = (function () {
   var MEAL_MIN_MIN = 2500 / OLD_MS_PER_MIN;          // 提供+食事(最短)。約30分
   var MEAL_MIN_MAX = 3500 / OLD_MS_PER_MIN;          // 提供+食事(最長)。約42分
   var RESUME_FLOOR_MIN = 200 / OLD_MS_PER_MIN;       // 一時停止/速度変更からの再開時の最短尺
-  var RESUME_Y_MIN_PER_PCT = 6 / OLD_MS_PER_MIN;     // 同、縦移動ぶんの上乗せ(%あたり)
+  // v35: RESUME_Y_MIN_PER_PCT は参照0件の死にコードだったため削除(単位変換の対象を減らす。
+  // v35-2指示書 §1-3。walkMs()も同じ理由で削除済み)
   // v13-1: 厨房の作業ポーズの基準値(ゲーム内分)。
   // v28-2(docs/指示書/v28-2追補2_移動時間を含めた目標間隔の実現.md §J)以降、これらは
   // 「pace=1のときの基準値」としてのみ使う。実際の所要時間は目標間隔(targetIntervalMin()、
@@ -85,7 +124,14 @@ window.ShopView = (function () {
 
   function gm(min) { return U.gameMinMs(min); }
 
-  var stage = null;      // 舞台のDOM
+  var stage = null;      // 舞台のDOM(クリップ枠。動かさない)
+  var cameraEl = null;   // v35: カメラ層。床・壁・什器・actorLayerはすべてこの子。
+                          // 見る場所・倍率はこの層のtranslate+scaleだけで変える
+  // v35: カメラの固定値(第2段階)。x=-24は「入口(col0)の半分〜厨房の寸胴まで」が380px幅に
+  // 収まる位置、y=124は奥壁の上端(row-1=-48px)が上部HUD(top-bar、実測70.8px)のすぐ下(76px)に
+  // 来る位置。第3段階のスクロール/ピンチはこの値を書き換えるだけにする。
+  // ?cam=x,y,s(確認専用。?grid=1と同じ「URLに付けたときだけ」の考え方)で上書きできる。
+  var CAM = { x: -24, y: 124, s: 1 };
   var actorLayer = null; // 客・店員を載せるレイヤー
   var state = null;
   var seats = [];        // {x, y, kind, occupant}
@@ -146,11 +192,18 @@ window.ShopView = (function () {
   function spd() { return state && state.speed > 0 ? state.speed : 1; }
   function paused() { return frozen; }
 
-  // v32: y座標(舞台%)から重なり順(z-index)を作る、唯一の関数。「奥にあるものほど先に描く」を
-  // 満たすため、静物(buildScenery時に1回だけ計算)・俳優(move()のたびに計算)の両方がこれを通す。
-  // 係数10は0〜100%を0〜1000の整数へ広げるだけ(層の余地を確保するため。特別な意味は無い)。
-  // 基準値100を足しているのは、床(floor.webp、z-index無し=0扱い)より必ず上に来るようにするため。
-  function zForY(y) { return 100 + Math.round((y || 0) * 10); }
+  // v35: 重なり順(z-index)はrowから作る、唯一の関数(素材仕様§2-3「z=row」)。「奥の行ほど
+  // 先に描く」を満たすため、静物(buildScenery時に1回)・俳優(move()のたびに)の両方がこれを通す。
+  // 係数10は、移動中の小数row(例: 5.5)でも単調な整数zになるようにするため。
+  // 基準値100を足しているのは、床タイル(z-index無し=0扱い)より必ず上に来るようにするため。
+  function zForRow(row) { return 100 + Math.round((row || 0) * 10); }
+
+  // v35: マス座標→px。yは「接地マスの下端」アンカー(CSS側の translate(-50%,-100%) と対)。
+  // 素材仕様§2-2「接地マスの中心が配置先マスの中心に一致」を、全部品・全俳優で
+  // 「足元(下端中央)をマスの下端中央に置く」という1つの規約に揃えて実現する。
+  function toPxX(x) { return x * CELL; }
+  function toPxY(y) { return (y + 0.5) * CELL; } // マス中心yの属するマスの下端
+  function fromPxY(px) { return px / CELL - 0.5; }
 
   // 2点間を(2軸とも動く前提で)n個の等間隔点に割り付ける。旧spread()(横1軸だけ)の2D版。
   function isoSpread(n, p0, p1) {
@@ -194,25 +247,26 @@ window.ShopView = (function () {
   // 距離から所要時間を作り直す簡易措置。プロトタイプの検証用途としては十分と判断した)。
   function pinActor(a) {
     if (a.gone || !stage) return;
+    // v35: left/topはpx直書きになったので、遷移中の実レイアウト値(px)をそのまま固定すればよい。
+    // getComputedStyleのleft/topはカメラ層(.sv-camera)のscaleが掛かる前のレイアウト値なので
+    // そのまま使える。以前のようにgetBoundingClientRect()から%へ逆算してはならない
+    // (rectはscale後の値なので、倍率が1でないと倍率ぶんズレる。v35-2指示書 §1-3)。
     var cs = getComputedStyle(a.el);
-    var leftPx = parseFloat(cs.left), topPx = parseFloat(cs.top);
-    var rect = stage.getBoundingClientRect();
-    var leftPct = rect.width ? (leftPx / rect.width) * 100 : parseFloat(a.el.dataset.x || 0);
-    var topPct = rect.height ? (topPx / rect.height) * 100 : (a.tgtY || 0);
     a.el.style.transitionDuration = "0s";
-    a.el.style.left = leftPct + "%";
-    a.el.style.top = topPct + "%";
+    a.el.style.left = parseFloat(cs.left) + "px";
+    a.el.style.top = parseFloat(cs.top) + "px";
   }
 
   function resumeActor(a) {
     if (a.gone) return;
     a.el.style.transitionDuration = ""; // 一旦解除。moveが必要ならすぐ上書きする
-    var curX = parseFloat(a.el.style.left);
-    var curY = parseFloat(a.el.style.top);
+    var curX = parseFloat(a.el.style.left) / CELL;
+    var curY = fromPxY(parseFloat(a.el.style.top));
     var tgtX = parseFloat(a.el.dataset.x);
     var tgtY = a.tgtY != null ? a.tgtY : curY;
     if (isNaN(tgtX)) return;
-    if (Math.abs(curX - tgtX) < 0.5 && Math.abs(curY - tgtY) < 0.5) return; // 既に目的地
+    // 既に目的地(0.05マス≒2.4px。旧「舞台の0.5%」に相当する値)
+    if (Math.abs(curX - tgtX) < 0.05 && Math.abs(curY - tgtY) < 0.05) return;
     move(a, tgtX, tgtY, Math.max(gm(RESUME_FLOOR_MIN), walkMs2(curX, curY, tgtX, tgtY)));
   }
 
@@ -296,11 +350,12 @@ window.ShopView = (function () {
     return h("div", { className: cls, style: style }, children || []);
   }
 
-  // 静物を(x,y)に置く。z-indexはyから自動計算する(zForY、店の躯体・俳優共通の1つの関数)。
+  // 静物を(x,y)(マス)に置く。z-indexはrow(y)から自動計算する(zForRow、店の躯体・俳優共通)。
+  // 要素はCSS側で translate(-50%,-100%)(足元=接地マスの下端中央)にアンカーされている前提。
   function placeAt(el, x, y) {
-    el.style.left = x + "%";
-    el.style.top = y + "%";
-    el.style.zIndex = zForY(y);
+    el.style.left = toPxX(x) + "px";
+    el.style.top = toPxY(y) + "px";
+    el.style.zIndex = zForRow(y);
     return el;
   }
 
@@ -312,79 +367,113 @@ window.ShopView = (function () {
     queue = [];
 
     var counts = seatCounts();
+    var room = roomDef();
 
-    // 下地(1枚絵)。v32: 壁・床・出入口はすべてこの絵の中に描かれている(旧版のようにCSSの
-    // 箱を積んで作らない)。z-indexは付けない(0扱い=必ず一番奥)。
-    var floorImg = AI.node(stageDef("floor"));
-    floorImg.className = "sv-floor-img";
-    stage.appendChild(floorImg);
+    // v35: カメラ層。舞台(.shop-stage=クリップ枠)自身にはtransformをかけない(枠ごと動いてしまう。
+    // v35-2指示書 §1-2)。以後の床・壁・什器・actorLayerはすべてこの層の子にする。
+    cameraEl = block("sv-camera", {});
+    cameraEl.style.transform = "translate(" + CAM.x + "px," + CAM.y + "px) scale(" + CAM.s + ")";
+    stage.appendChild(cameraEl);
 
-    actorLayer = block("sv-actors", {});
-    stage.appendChild(actorLayer);
+    // 床と躯体を部屋の表(ROOMS)のとおりに敷く。第2段階は仮タイル(色板+薄い境界線。
+    // v35-2指示書 §1-7——敷き詰め・区画・「カウンターが1本の台に通るか」を目で判定できることが目的。
+    // 本素材<img/stage/floor_wood.webp等>への差し替えは第4段階)。
+    // 記号→床の色クラス(壁マスには床を敷かない。壁の絵が接地マスごと覆う前提<素材仕様§3-2>)
+    var FLOOR_CLS = { "K": "tile", "S": "wood-s", "A": "wood", "T": "wood-t", "(": "tile", "=": "tile", ")": "tile", "D": "wood" };
+    // 記号→高さのある部品 [色クラス, 高さ(マス)]。壁は2マス、カウンターは1.2マス
+    // (素材仕様§3-3「台の絵は下1マス強」の仮表現。1.5マスで作ったら、奥のrow2に立つ店員が
+    // 頭しか見えなくなるのを実際のスクリーンショットで確認し、1マス強へ直した)
+    var PIECE_CLS = {
+      "L": ["wall-corner", 2], "#": ["wall-mid", 2], "R": ["wall-corner", 2],
+      "l": ["wall-side", 2], "r": ["wall-side", 2], "D": ["door", 2],
+      "(": ["counter-l", 1.2], "=": ["counter-mid", 1.2], ")": ["counter-r", 1.2]
+    };
+    for (var row = 0; row < room.rows; row++) {
+      for (var col = 0; col < room.cols; col++) {
+        var sym = room.map[row].charAt(col);
+        var fcls = FLOOR_CLS[sym];
+        if (fcls) {
+          // 床タイルはtop-left直置き(接地アンカー不要の平面)。z無し(0扱い=必ず一番奥)
+          cameraEl.appendChild(block("sv-tile sv-tile-" + fcls, {
+            left: (col * CELL) + "px", top: (row * CELL) + "px",
+            width: CELL + "px", height: CELL + "px"
+          }));
+        }
+        var pcls = PIECE_CLS[sym];
+        if (pcls) {
+          var piece = block("sv-piece sv-piece-" + pcls[0], {
+            width: CELL + "px", height: (pcls[1] * CELL) + "px"
+          });
+          placeAt(piece, col + 0.5, row + 0.5); // 接地マス=このマス。絵はそこから上へ伸びる
+          cameraEl.appendChild(piece);
+        }
+      }
+    }
 
-    // 天井の設備(壁に埋め込まれた下地には無いので、小物として重ねる)。ランプ自体は常設の
-    // 装飾(専用の絵は無い)なので絵文字のまま。「明るい照明」を導入していると数が増える
-    // (既存の演出、v14以来変更なし)。
-    var lampSpots = has("bright_light") ? [{ x: 30, y: 26 }, { x: 50, y: 22 }, { x: 68, y: 27 }] : [{ x: 50, y: 22 }];
+    // 電灯・ダクト・壁の案内・店名看板は奥壁の面(row0の壁が上へ伸びた部分=部屋の外の負のrow)に
+    // 掛ける。yが負のままzForRow()を通すと壁(row0)より奥のzになってしまうため、
+    // 「壁に掛かっている物は壁のすぐ手前」としてzだけrow0.6相当を明示的に与える。
+    var wallZ = zForRow(0.6);
+    var lampSpots = has("bright_light") ? [{ x: 3.0, y: -0.1 }, { x: 6.5, y: -0.3 }, { x: 9.0, y: -0.1 }] : [{ x: 6.5, y: -0.3 }];
     lampSpots.forEach(function (spot) {
       var el = block("sv-lamp", {}, [AI.node(stageDef(null, "💡"))]);
       placeAt(el, spot.x, spot.y);
-      stage.appendChild(el);
+      el.style.zIndex = wallZ;
+      cameraEl.appendChild(el);
     });
     if (has("exhaust")) {
       var ductEl = block("sv-duct", {}, [AI.node(U.findById(EQUIP, "exhaust"))]);
-      placeAt(ductEl, 12, 30);
-      stage.appendChild(ductEl);
+      placeAt(ductEl, 1.5, -0.2);
+      ductEl.style.zIndex = wallZ;
+      cameraEl.appendChild(ductEl);
     }
 
-    // 厨房設備(タイル側の奥の壁沿い)。既製品(big_pot/noodle_boiler/extra_boiler)は
+    // 厨房設備(K帯の奥の壁沿い)。既製品(big_pot/noodle_boiler/extra_boiler)は
     // v31のimg/equipment/を使い、常設の寸胴(未購入時のベース)だけは絵が無いので絵文字のまま。
-    var kit = [{ x: GEO.soup.x - 4, y: GEO.soup.y + 8, def: stageDef(null, "🍥") }];
+    // v35: v32の既存素材を1マス幅(48px)の規約に乗せた仮置き(本素材化は今回やらない。指示書§2)。
+    var kit = [{ x: GEO.soup.x, y: GEO.soup.y + 1, def: stageDef(null, "🍥") }];
     if (has("big_pot")) kit.push({ x: GEO.soup.x, y: GEO.soup.y, def: U.findById(EQUIP, "big_pot") });
     if (has("noodle_boiler")) kit.push({ x: GEO.noodle.x, y: GEO.noodle.y, def: U.findById(EQUIP, "noodle_boiler") });
-    if (has("extra_boiler")) kit.push({ x: GEO.noodle.x + 8, y: GEO.noodle.y - 4, def: U.findById(EQUIP, "extra_boiler") });
+    if (has("extra_boiler")) kit.push({ x: GEO.soup.x + 1, y: GEO.soup.y, def: U.findById(EQUIP, "extra_boiler") });
     kit.forEach(function (k) {
       var el = block("sv-kit-item", {}, [AI.node(k.def)]);
       placeAt(el, k.x, k.y);
-      stage.appendChild(el);
+      cameraEl.appendChild(el);
     });
-    // v13-1/v14-5: 盛り付け済みでホールが運ぶのを待っている丼が積まれて見える場所
-    // (受け渡し口=GEO.plateのすぐ奥)。v32(§37): カウンター客の丼はここを経由せず直接届くため、
-    // ここに積まれるのはテーブル客ぶんだけになる。
+    // v13-1/v14-5: 盛り付け済みでホールが運ぶのを待っている丼が積まれて見える場所。
+    // v35: カウンターの天板の上(受け渡し口=GEO.plateの手前のC帯)に置く。台の上に載る物なので、
+    // zは台(row3)より手前を明示する(yを台の見た目の上面<row3.1>に置くとzForRowでは台より奥になるため)。
     orderPileEl = block("sv-order-pile", {});
-    placeAt(orderPileEl, GEO.plate.x, GEO.plate.y - 8);
-    stage.appendChild(orderPileEl);
+    placeAt(orderPileEl, GEO.plate.x, 3.1);
+    orderPileEl.style.zIndex = zForRow(3.6);
+    cameraEl.appendChild(orderPileEl);
     if (has("multilingual")) {
       var signEl = block("sv-wall-sign", {}, [AI.node(U.findById(EQUIP, "multilingual"))]);
-      placeAt(signEl, 46, 33);
-      stage.appendChild(signEl);
+      placeAt(signEl, 5.0, -0.25);
+      signEl.style.zIndex = wallZ;
+      cameraEl.appendChild(signEl);
     }
     if (has("pos")) {
       var posEl = block("sv-kit-item", {}, [AI.node(U.findById(EQUIP, "pos"))]);
-      placeAt(posEl, 60, 44);
-      stage.appendChild(posEl);
+      placeAt(posEl, 4.5, 2.5);
+      cameraEl.appendChild(posEl);
     }
 
-    // カウンター本体(1枚を受け渡し口の手前に大きめに置く。実際の座席数に応じて伸び縮みはしない
-    // ——既存のsv-kitchen-counterと同じく「代表表示」の1枚絵)。
-    var counterEl = block("sv-counter-img", {}, [AI.node(stageDef("counter"))]);
-    placeAt(counterEl, (GEO.counterLine.x0 + GEO.counterLine.x1) / 2, (GEO.counterLine.y0 + GEO.counterLine.y1) / 2 - 3);
-    stage.appendChild(counterEl);
+    // カウンター本体はもう1枚絵では描かない(部屋の表の (==…==) が左端/中間/右端の部品として
+    // 敷かれている。§43-8の「独立した箱を引き伸ばす/継ぎ足す」問題の解消)。
 
     // カウンター席の丸椅子。
-    // v24(指示書§3-5、追補§2): 枠(物件のcounterSlots)を先に等間隔で確保し、所持している席
-    // (counts.counter)だけを左から順に埋める。空き枠には席を描かない(カウンターだけが見える)。
-    // こうすると席を1つ足しても既にある席は動かない。
-    // §3-3: 前回描画時より所持数が増えていたら、増えた席にだけポップ用のクラス+✨を付ける
-    // (チュートリアルのプレゼント演出・§5の購入演出、どちらもこの1つの仕組みで賄う)。
-    var slots = isoSpread(counts.counterSlots,
-      { x: GEO.counterLine.x0, y: GEO.counterLine.y0 }, { x: GEO.counterLine.x1, y: GEO.counterLine.y1 });
+    // v24(指示書§3-5、追補§2): 枠(物件のcounterSlots)を先に確保し、所持している席
+    // (counts.counter)だけを左から順に埋める。空き枠には席を描かない。
+    // v35: 枠はS行(counterSeatRow)のcol1から1マスに1脚(旧isoSpreadの等間隔割り付けは廃止)。
+    // 席の枠が部屋の内側の幅を超える物件は今回未対応(ROOMSのコメント参照)——超える分は描かない。
+    // §3-3: 前回描画時より所持数が増えていたら、増えた席にだけポップ用のクラス+✨を付ける。
+    var maxSlots = Math.min(counts.counterSlots, room.cols - 2);
     var isFirstBuild = prevDrawnCounter == null;
     var rm = reducedMotionSV();
     var popIndex = 0;
-    for (var si = 0; si < counts.counter; si++) {
-      var sp = slots[si];
-      var sx = sp.x + GEO.counterSeatOffset.dx, sy = sp.y + GEO.counterSeatOffset.dy;
+    for (var si = 0; si < Math.min(counts.counter, maxSlots); si++) {
+      var sx = 1.5 + si, sy = GEO.counterSeatRow;
       var isNew = !isFirstBuild && si >= prevDrawnCounter && !rm;
       var stoolEl = block("sv-stool" + (isNew ? " sv-stool-pop" : ""), {}, [AI.node(stageDef("stool", "🪑"))]);
       placeAt(stoolEl, sx, sy);
@@ -396,35 +485,34 @@ window.ShopView = (function () {
         stoolEl.appendChild(sparkleEl);
         popIndex++;
       }
-      stage.appendChild(stoolEl);
+      cameraEl.appendChild(stoolEl);
       seats.push({ x: sx, y: sy, kind: "counter", occupant: null });
     }
     prevDrawnCounter = counts.counter;
 
     // テーブル席。v32: v31のimg/equipment/table_seats.webp(卓+丸椅子2脚が1枚に描かれた絵)を
-    // 1卓ぶんの代表表示として使う(専用のテーブル画像はv32では作っていないため。指示書§2の
-    // 「客・従業員・設備・物件の絵はv31のものをそのまま使う」に沿った判断)。1枚=2席として数える。
+    // 1卓ぶんの代表表示として使う。1枚=2席として数える。
+    // v35: 卓は2マス幅(96px)としてT帯の固定アンカー(GEO.tableAnchors)に置く。
     if (counts.table > 0) {
       var tableCount = Math.ceil(counts.table / 2);
-      var tPts = isoSpread(tableCount,
-        { x: GEO.tableLine.x0, y: GEO.tableLine.y0 }, { x: GEO.tableLine.x1, y: GEO.tableLine.y1 });
+      var tPts = GEO.tableAnchors.slice(0, tableCount);
       var tableDef = U.findById(EQUIP, "table_seats");
       var seatIdx = 0;
       tPts.forEach(function (pt) {
         var tEl = block("sv-table-img", {}, [AI.node(tableDef)]);
         placeAt(tEl, pt.x, pt.y);
-        stage.appendChild(tEl);
+        cameraEl.appendChild(tEl);
         for (var k = 0; k < 2 && seatIdx < counts.table; k++, seatIdx++) {
-          seats.push({ x: pt.x + (k === 0 ? -3 : 3), y: pt.y + 2, kind: "table", occupant: null });
+          seats.push({ x: pt.x + (k === 0 ? -0.5 : 0.5), y: pt.y + 0.2, kind: "table", occupant: null });
         }
       });
     }
 
-    // 券売機は入口の内側。
+    // 券売機は入口の内側(A帯)。
     if (has("ticket_machine")) {
       var ticketEl = block("sv-ticket", {}, [AI.node(U.findById(EQUIP, "ticket_machine"))]);
-      placeAt(ticketEl, GEO.door.x + 14, GEO.door.y + 2);
-      stage.appendChild(ticketEl);
+      placeAt(ticketEl, GEO.ticket.x, GEO.ticket.y);
+      cameraEl.appendChild(ticketEl);
     }
 
     var prop = window.Scoring.getProperty(state);
@@ -432,8 +520,17 @@ window.ShopView = (function () {
       AI.node(prop || stageDef(null, "🏪")),
       h("span", { text: prop ? prop.name : "" })
     ]);
-    placeAt(signboardEl, 88, 20);
-    stage.appendChild(signboardEl);
+    placeAt(signboardEl, 8.0, -0.5); // 奥壁の面の右寄り
+    signboardEl.style.zIndex = wallZ;
+    cameraEl.appendChild(signboardEl);
+
+    // v35(v35-2指示書 §1-6、§43-5の再発防止): 客・従業員を載せる層は、家具をすべて描き終えた
+    // 「最後」に追加する。着席した客は丸椅子と同じマス(=zForRowが同じ整数)になるため、
+    // z-index同点の重なりはDOM出現順で決まる——後に追加したactorLayer側(人物)が必ず上に来る。
+    // masterではこの層を床の直後(家具より前)に追加しており、v33で「着席客が丸椅子の陰に隠れる」
+    // 事故の原因になっていた(ブランチv33-34-iso-gridにだけ修正が入っていた)。
+    actorLayer = block("sv-actors", {});
+    cameraEl.appendChild(actorLayer);
 
     stage.className = "shop-stage" + (has("bright_light") ? " bright" : "");
 
@@ -475,8 +572,9 @@ window.ShopView = (function () {
       return def ? { id: id, def: def } : null;
     }).filter(Boolean);
     assignRoles(workers);
+    // v35: 厨房の定位置はK帯のrow2に横一列でspread(±2マス。1人なら基準点そのもの)
     var kitchenSpots = isoSpread(workers.filter(function (w) { return w.role !== "hall"; }).length,
-      { x: GEO.kitchenHome.x - 6, y: GEO.kitchenHome.y - 4 }, { x: GEO.kitchenHome.x + 6, y: GEO.kitchenHome.y + 4 });
+      { x: GEO.kitchenHome.x - 2, y: GEO.kitchenHome.y }, { x: GEO.kitchenHome.x + 2, y: GEO.kitchenHome.y });
     var kIdx = 0;
     workers.forEach(function (w) {
       var home = w.role === "hall" ? GEO.hallHome : (kitchenSpots[kIdx++] || GEO.kitchenHome);
@@ -858,23 +956,21 @@ window.ShopView = (function () {
   }
 
   // v32: y座標も動かすため、z-indexをここで一括更新する(奥にあるものほど先に描く=手前にいる
-  // ものが後で描かれて重なった相手を隠す、をzForY()で機械的に満たす)。
+  // ものが後で描かれて重なった相手を隠す、をzForRow()で機械的に満たす)。
   function move(a, x, y, ms) {
     if (a.gone) return;
     a.el.style.transitionDuration = Math.max(16, ms / spd()) + "ms";
-    a.el.style.left = x + "%";
-    if (y != null) { a.el.style.top = y + "%"; a.tgtY = y; a.el.style.zIndex = zForY(y); }
+    a.el.style.left = toPxX(x) + "px";
+    if (y != null) { a.el.style.top = toPxY(y) + "px"; a.tgtY = y; a.el.style.zIndex = zForRow(y); }
     a.el.classList.toggle("flip", x > (parseFloat(a.el.dataset.x || GEO.off.x)));
-    a.el.dataset.x = x;
+    a.el.dataset.x = x; // 単位はマス(px変換前の値。距離計算・向きの判定はマスのまま行う)
   }
 
-  function walkMs(fromX, toX, minPerPct) {
-    return Math.abs(toX - fromX) * gm(minPerPct || WALK_MIN_PER_PCT);
-  }
   // v32: 斜め上視点では移動が斜めになるため、x・y両方の距離を合成した直線距離で歩行時間を計算する。
-  function walkMs2(fromX, fromY, toX, toY, minPerPct) {
+  // v35: 距離の単位はマス(旧walkMs<横1軸だけ・参照0件>は削除した)。
+  function walkMs2(fromX, fromY, toX, toY, minPerCell) {
     var dx = toX - fromX, dy = toY - fromY;
-    return Math.sqrt(dx * dx + dy * dy) * gm(minPerPct || WALK_MIN_PER_PCT);
+    return Math.sqrt(dx * dx + dy * dy) * gm(minPerCell || WALK_MIN_PER_CELL);
   }
 
   function spawnCustomer(segId) {
@@ -974,7 +1070,7 @@ window.ShopView = (function () {
     var fromY = a.tgtY != null ? a.tgtY : GEO.door.y;
     // v32: 横から見た旧版は「席のx手前まで歩く→縦にsitYまで座る」の2段階だったが、斜め上視点は
     // 席のx・yへ1本の斜め移動で向かう(そのぶんSIT_MINは「座る間合い」の一拍としてタイマーだけ残す)。
-    var ms = walkMs2(fromX, fromY, seat.x, seat.y, SEAT_WALK_MIN_PER_PCT) + gm(ENTER_EXTRA_MIN);
+    var ms = walkMs2(fromX, fromY, seat.x, seat.y, SEAT_WALK_MIN_PER_CELL) + gm(ENTER_EXTRA_MIN);
     move(a, seat.x, seat.y, ms);
     later(function () {
       if (a.gone) return;
@@ -1035,7 +1131,7 @@ window.ShopView = (function () {
         if (a.gone) return;
         seat.occupant = null;
         a.seat = null;
-        var ms = walkMs2(seat.x, seat.y, GEO.off.x, GEO.off.y, SEAT_WALK_MIN_PER_PCT);
+        var ms = walkMs2(seat.x, seat.y, GEO.off.x, GEO.off.y, SEAT_WALK_MIN_PER_CELL);
         move(a, GEO.off.x, GEO.off.y, ms);
         later(function () { removeActor(a); }, ms);
         pullFromQueue();
@@ -1059,7 +1155,7 @@ window.ShopView = (function () {
       if (a.gone) return;
       seat.occupant = null;
       a.seat = null;
-      var ms = walkMs2(seat.x, seat.y, GEO.off.x, GEO.off.y, SEAT_WALK_MIN_PER_PCT);
+      var ms = walkMs2(seat.x, seat.y, GEO.off.x, GEO.off.y, SEAT_WALK_MIN_PER_CELL);
       move(a, GEO.off.x, GEO.off.y, ms);
       later(function () { removeActor(a); }, ms);
       pullFromQueue();
@@ -1117,6 +1213,14 @@ window.ShopView = (function () {
     state = gameState;
     onServeCb = (callbacks && callbacks.onServe) || null;
     clearTimers();
+    // v35(v35-2指示書 §1-2/§4): ?cam=x,y,s が付いているときだけカメラの固定値を上書きする
+    // (?grid=1と同じ「URLに付けたときだけ」の確認専用経路。判定点6<scaleが乗った状態でも
+    // 崩れないか>と、部屋全体を縮小して見る確認に使う。通常プレイは常に既定の固定値)。
+    CAM = { x: -24, y: 124, s: 1 };
+    try {
+      var cm = /(^|[?&])cam=(-?[\d.]+),(-?[\d.]+),([\d.]+)/.exec(window.location.search || "");
+      if (cm) CAM = { x: parseFloat(cm[2]), y: parseFloat(cm[3]), s: parseFloat(cm[4]) };
+    } catch (e) { /* URLが読めない環境では既定値のまま */ }
     stage = h("div", { className: "shop-stage" });
     container.appendChild(stage);
     builtSig = "";
@@ -1176,6 +1280,7 @@ window.ShopView = (function () {
   function destroy() {
     clearTimers();
     stage = null;
+    cameraEl = null;
     actorLayer = null;
     actors = [];
     queue = [];

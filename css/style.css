@@ -901,60 +901,84 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .card-item { border: 2px solid var(--c-ink-16); border-radius: var(--r-s); padding: 5px 8px; text-align: center; font-size: var(--fs-note); background: var(--c-panel); }
 .card-item .emoji { font-size: 1.3rem; }
 
-/* ================= 店舗の斜め上視点 =================
-   v32(docs/指示書/v32_斜め上視点_指示書.md §3-1、docs/設計判断記録.md §42): 座標は
-   js/screens/shop-view.js の GEO だけが出典。ここ(CSS)には top/left/width/height の
-   数値を一切持たせない(v02から続いていた二重管理を解消。位置はすべてJSがインラインstyle
-   で書き、CSSに残すのは色・枠線・角丸・トランジション・アニメーション・em単位の相対的な
-   大きさだけ)。z-indexも同様——奥行きの重なり順はJS側のzForY()が動的に付けるので、
-   ここでは書かない(唯一の例外は俳優自身の子要素<丼・吹き出し・評判ポップ>のように、
-   親要素の中だけで完結するローカルな重なりで、部屋の奥行きとは無関係なもの)。
-   絵の中の大きさは .shop-stage の font-size(枠幅比例)に対する em で書く(v14以来の方針を継続)。 */
+/* ================= 店舗のカイロソフト方式(升目) =================
+   v35(docs/指示書/v35-2_升目基盤_座標系と仮タイル_指示書.md、docs/素材仕様_カイロソフト方式.md):
+   座標は js/screens/shop-view.js の GEO と部屋の表(ROOMS)だけが出典。ここ(CSS)には
+   top/left の数値を一切持たせない(v32からの方針の継続。寸法<48px等>もJSのCELLが書く)。
+   z-indexも同様——奥行きの重なり順はJS側のzForRow()が動的に付ける(唯一の例外は俳優自身の
+   子要素<丼・吹き出し・評判ポップ>のようなローカルな重なり)。
+   大きさは2系統(§43-4「どこに置くかと、どのくらいの大きさで描くかは別系統」):
+   - 人物系: .sv-camera の font-size(=客のキャンバス32px。v35-2 要判断②の回答どおり
+     masterの実効値を維持)に対する em。丼・吹き出しなど人物の付属物もこちら。
+   - 什器系: マス(48px)基準の固定px(各クラスに直書き)。 */
 .shop-stage {
   position: absolute; inset: 0;
   overflow: hidden;
   background: var(--c-bg);
   line-height: 1;
   color: var(--c-ink); /* v14-2: 客・店員・設備はこの既定色(濃茶)に従う */
-  /* 絵の中の大きさの基準。縦長の枠に対して人が小さく見えないよう枠幅の 8.5% に取る */
-  font-size: calc(var(--frame-w) * 0.085);
+  /* v35: 旧「font-size = 枠幅の8.5%」(絵の大きさが画面幅に連動して伸縮する仕組み)は廃止。
+     大きさの基準は.sv-cameraへ移した(1マス48px固定の方針では画面幅から大きさを作らない)。 */
 }
 /* v32: 店内画像(img/stage/*)は絵文字と同じ「1文字ぶんの正方形」の考え方をそのまま流用する
    (v31の.emoji-font imgと同じ形だが、.shop-stage配下はfont-familyをNotoEmojiGameへ直接
    指定しており個々の要素にemoji-fontクラスを付けていないため、別に定義する)。 */
 .shop-stage img { width: 1em; height: 1em; object-fit: contain; vertical-align: middle; display: inline-block; }
 
-/* 下地(img/stage/floor.webp)。壁・床・出入口はすべてこの1枚絵の中に描かれている。
-   明るい照明を導入していると絵全体を少し明るくする(旧版は.sv-roomの沈みを外す実装だったが、
-   下地が1枚絵になったのでfilterで代える)。 */
-/* img.(タグ+クラス)にして.shop-stage img(同じ強さ)より後に書くことで、1em指定より優先させる */
-img.sv-floor-img { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; object-fit: cover; }
-.shop-stage.bright .sv-floor-img { filter: brightness(1.12); }
+/* v35: カメラ層。位置(translate)と倍率(scale)はJS(shop-view.jsのCAM)だけが書く。第2段階は
+   固定値で、第3段階のスクロール/ピンチはこの値を動かすだけにする。大きさを持たない原点
+   (left/top:0)で、子はすべて絶対配置pxなのでサイズ指定は不要。 */
+.sv-camera { position: absolute; left: 0; top: 0; transform-origin: 0 0; font-size: 32px; }
+/* 明るい照明の効果は部屋全体(カメラ層ごと)を少し明るくする(旧floor.webpのfilterの置き換え) */
+.shop-stage.bright .sv-camera { filter: brightness(1.08); }
 
+/* v35 第2段階の仮タイル(本素材<img/stage/floor_*.webp等>が来たら第4段階で差し替える)。
+   色は区画が目で区別できることだけが目的(v35-2 §1-7)。床タイルの薄い境界線は
+   「敷き詰めが隙間・重なりなく正しいか」を目で判定するためのもの。 */
+.sv-tile { position: absolute; border: 1px solid rgba(74, 51, 34, 0.14); }
+.sv-tile-wood   { background: #d8b078; } /* A 通路(木目床) */
+.sv-tile-wood-s { background: #e4c491; } /* S カウンター席 */
+.sv-tile-wood-t { background: #c19556; } /* T テーブル席(通路との区別が目で付くよう一段濃く) */
+.sv-tile-tile   { background: #a8bccb; } /* K 厨房(タイル床) */
+/* 高さのある部品(壁・カウンター)。接地はtranslate(-50%,-100%)=足元アンカーで全部品共通
+   (素材仕様§2-2)。境界線は付けない——特にカウンターは「中間を並べて1本の台に見えるか」
+   (判定点1)を判定する対象なので、部品ごとの枠線で切れて見えてはいけない。 */
+.sv-piece { position: absolute; transform: translate(-50%, -100%); }
+.sv-piece-wall-mid    { background: #8a6a4a; } /* 奥壁の中間 */
+.sv-piece-wall-corner { background: #6e523a; } /* 奥壁の角(左右) */
+.sv-piece-wall-side   { background: #7a5c40; } /* 側壁(左右) */
+.sv-piece-door        { background: #b23a3a; } /* 入口(暖簾) */
+.sv-piece-counter-l   { background: #c9992f; } /* カウンター左端 */
+.sv-piece-counter-mid { background: #e0b34f; } /* カウンター中間 */
+.sv-piece-counter-r   { background: #a87f28; } /* カウンター右端 */
+
+/* v35: 以下、床に置く物・壁に掛ける物はすべて translate(-50%,-100%)(足元=下端中央)アンカー。
+   接地点の規約を1本化した(素材仕様§2-2。v33-34の「絵ごとに実測した-88.77%等」を不要にする)。
+   什器のfont-sizeはマス基準の固定px(1マス什器=48px、2マス幅の卓=96px)。 */
 .sv-signboard {
-  position: absolute; transform: translate(-50%, -50%);
+  position: absolute; transform: translate(-50%, -100%);
   display: flex; align-items: center; gap: 3px;
   background: var(--c-panel); border: 2px solid var(--c-ink); color: var(--c-ink);
-  padding: 2px 4px; font-size: 0.24em; max-width: 30%;
+  padding: 2px 4px; font-size: 8px; max-width: 120px;
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
-.sv-lamp { position: absolute; transform: translate(-50%, -50%); font-size: 0.56em; }
-.sv-duct { position: absolute; transform: translate(-50%, -50%); font-size: 0.6em; }
-.sv-kit-item { position: absolute; transform: translate(-50%, -50%); font-size: 1.1em; }
+.sv-lamp { position: absolute; transform: translate(-50%, -100%); font-size: 18px; }
+.sv-duct { position: absolute; transform: translate(-50%, -100%); font-size: 19px; }
+.sv-kit-item { position: absolute; transform: translate(-50%, -100%); font-size: 48px; }
 .sv-wall-sign {
-  position: absolute; transform: translate(-50%, -50%);
-  font-size: 0.28em; background: var(--c-panel); border: 1px solid var(--c-ink); padding: 2px 4px;
+  position: absolute; transform: translate(-50%, -100%);
+  font-size: 9px; background: var(--c-panel); border: 1px solid var(--c-ink); padding: 2px 4px;
 }
-.sv-counter-img { position: absolute; transform: translate(-50%, -50%); font-size: 3.6em; }
-.sv-stool { position: absolute; transform: translate(-50%, -50%); font-size: 1.6em; }
+.sv-stool { position: absolute; transform: translate(-50%, -100%); font-size: 48px; }
 /* v24(指示書§3-3): 「前回描画時より席が増えていたら、増えた席にだけポップ用のクラスを付けて
    描く」共通の仕組み。数値・イージングはjs/screens/card-reveal.jsのcardRevealPop/Sparkleと揃える
    (0.45秒ease-out・0.5秒ease-out、ease-inは使わない)。stagger(0.15秒/席)はJS側で
    animation-delayとして個別に入れる(js/screens/shop-view.js)。 */
+/* v35: 基準のtransformを接地アンカー(-50%,-100%)へ揃えた(数値・イージングは変更なし) */
 @keyframes svStoolPop {
-  0%   { opacity: 0; transform: translate(-50%, -50%) translateY(10px) scale(0.85); }
-  60%  { opacity: 1; transform: translate(-50%, -50%) translateY(-3px) scale(1.05); }
-  100% { opacity: 1; transform: translate(-50%, -50%) translateY(0) scale(1); }
+  0%   { opacity: 0; transform: translate(-50%, -100%) translateY(10px) scale(0.85); }
+  60%  { opacity: 1; transform: translate(-50%, -100%) translateY(-3px) scale(1.05); }
+  100% { opacity: 1; transform: translate(-50%, -100%) translateY(0) scale(1); }
 }
 .sv-stool-pop {
   opacity: 0;
@@ -965,12 +989,15 @@ img.sv-floor-img { position: absolute; inset: 0; z-index: 0; width: 100%; height
   font-size: 0.6em; opacity: 0; pointer-events: none;
   animation: cardRevealSparkle 0.5s ease-out forwards;
 }
-.sv-table-img { position: absolute; transform: translate(-50%, -50%); font-size: 3em; }
-.sv-ticket { position: absolute; transform: translate(-50%, -50%); font-size: 1.3em; }
+.sv-table-img { position: absolute; transform: translate(-50%, -100%); font-size: 96px; } /* 2マス幅 */
+.sv-ticket { position: absolute; transform: translate(-50%, -100%); font-size: 48px; }
 
-.sv-actors { position: absolute; inset: 0; pointer-events: none; } /* z-indexは付けない(俳優はstageの他の子と同じ層で、zForY()が個別に競わせる) */
+/* z-indexは付けない(俳優はカメラ層の他の子と同じ層で、zForRow()が個別に競わせる)。
+   v35: 親(.sv-camera)が大きさを持たないためinset:0はやめ、原点(0,0)にだけ置く
+   (子の俳優はすべて絶対配置pxなので大きさは不要)。 */
+.sv-actors { position: absolute; left: 0; top: 0; pointer-events: none; }
 .sv-cust {
-  position: absolute; transform: translateX(-50%);
+  position: absolute; transform: translate(-50%, -100%); /* v35: 足元アンカー(接地規約の1本化) */
   transition: left 600ms linear, top 400ms ease-in-out;
   font-size: 1em; line-height: 1; will-change: left, top;
 }
@@ -1017,7 +1044,8 @@ img.sv-floor-img { position: absolute; inset: 0; z-index: 0; width: 100%; height
 /* v13-1: 店員は客と同じくmove()(JS)が left/top を直接動かす。旧・往復専用のCSSキーフレーム
    (svPace)は、実際の作業動線(寸胴→茹で麺器→盛り付け→客席→厨房)に置き換えたため廃止した。 */
 .sv-staff {
-  position: absolute; transform: translateX(-50%); font-size: 0.9em; line-height: 1;
+  position: absolute; transform: translate(-50%, -100%); /* v35: 足元アンカー(客と同じ規約) */
+  font-size: 0.9em; line-height: 1;
   transition: left 600ms linear, top 500ms ease-in-out; will-change: left, top;
 }
 .sv-staff .sv-bowl {
@@ -1027,7 +1055,7 @@ img.sv-floor-img { position: absolute; inset: 0; z-index: 0; width: 100%; height
 .sv-staff.carrying .sv-bowl { transform: translateX(-50%) scale(1); }
 
 /* v13-1: 誰も取っていない注文(丼)が厨房に積まれて見える列。 */
-.sv-order-pile { position: absolute; transform: translate(-50%, -50%); display: flex; gap: 2px; }
+.sv-order-pile { position: absolute; transform: translate(-50%, -100%); display: flex; gap: 2px; } /* v35: 足元アンカー */
 .sv-pile-bowl { font-size: 0.55em; color: var(--c-down); } /* colorは画像読み込み失敗時の絵文字フォールバック用 */
 .sv-pile-more { font-size: 0.4em; color: var(--c-down); align-self: center; }
 

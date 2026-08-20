@@ -211,6 +211,15 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 .opening-actions { display: flex; gap: 10px; justify-content: center; margin-top: 16px; }
 
+/* v30: オープニング動画(js/screens/opening.js)。position:absolute; inset:0 は#screen-openingの
+   padding(上記20px)の影響を受けない(絶対配置はpaddingボックスまで広がる、.setup-bgと同じ手口)ので、
+   これだけで画面いっぱいに敷ける。テキスト版フォールバック(.opening-box)とは共存しない。
+   object-fitはcontainにする(実機確認で判明: このゲームの実フレームは9:16縦長(--frame-w、
+   min(100vw, 100svh*9/16))だが、動画素材は16:9横長。coverだと横幅の32%しか映らず、
+   05〜08で焼き込んだテキストが左右で切れる。containなら上下に黒帯が入るが、テキスト・
+   キャラとも一切欠けない。謙蔵さんの判断でcontainを採用(v30、docs/設計判断記録.md参照)。 */
+.opening-video { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; object-fit: contain; background: #000; }
+
 /* ================= 案内役(開業フェーズ/営業中) ================= */
 .guide-bar {
   display: flex; gap: 8px; align-items: flex-start;

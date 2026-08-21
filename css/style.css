@@ -908,14 +908,17 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    z-indexも同様——奥行きの重なり順はJS側のzForRow()が動的に付ける(唯一の例外は俳優自身の
    子要素<丼・吹き出し・評判ポップ>のようなローカルな重なり)。
    大きさは2系統(§43-4「どこに置くかと、どのくらいの大きさで描くかは別系統」):
-   - 人物系: .sv-camera の font-size(=客のキャンバス32px。v35-2 要判断②の回答どおり
-     masterの実効値を維持)に対する em。丼・吹き出しなど人物の付属物もこちら。
+   - 人物系: .sv-camera の font-size(=客のキャンバス。v35-3でPERSON_HEIGHT_CELLS=1.25マスから
+     JSが作る。§44-7の保留を解消)に対する em。丼・吹き出しなど人物の付属物もこちら。
    - 什器系: マス(48px)基準の固定px(各クラスに直書き)。 */
 .shop-stage {
   position: absolute; inset: 0;
   overflow: hidden;
   background: var(--c-bg);
   line-height: 1;
+  /* v35-3 §6: 指スクロール・ピンチはJS(Pointer Events)が受ける。ブラウザ既定のパン・ピンチ・
+     ダブルタップズーム・文字選択はこの面では起こさない */
+  touch-action: none; user-select: none; -webkit-user-select: none;
   color: var(--c-ink); /* v14-2: 客・店員・設備はこの既定色(濃茶)に従う */
   /* v35: 旧「font-size = 枠幅の8.5%」(絵の大きさが画面幅に連動して伸縮する仕組み)は廃止。
      大きさの基準は.sv-cameraへ移した(1マス48px固定の方針では画面幅から大きさを作らない)。 */
@@ -928,7 +931,8 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 /* v35: カメラ層。位置(translate)と倍率(scale)はJS(shop-view.jsのCAM)だけが書く。第2段階は
    固定値で、第3段階のスクロール/ピンチはこの値を動かすだけにする。大きさを持たない原点
    (left/top:0)で、子はすべて絶対配置pxなのでサイズ指定は不要。 */
-.sv-camera { position: absolute; left: 0; top: 0; transform-origin: 0 0; font-size: 32px; }
+.sv-camera { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+/* v35-3(§2): font-size(=客の1em)はJS(shop-view.jsのPERSON_HEIGHT_CELLS)が書く。ここには持たない。 */
 /* 明るい照明の効果は部屋全体(カメラ層ごと)を少し明るくする(旧floor.webpのfilterの置き換え) */
 .shop-stage.bright .sv-camera { filter: brightness(1.08); }
 
@@ -951,6 +955,10 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .sv-piece-counter-l   { background: #c9992f; } /* カウンター左端 */
 .sv-piece-counter-mid { background: #e0b34f; } /* カウンター中間 */
 .sv-piece-counter-r   { background: #a87f28; } /* カウンター右端 */
+/* v35-3(§4): ?grid=1 のときだけJSが作る升目(目視判定用)。部屋の何より手前、操作は素通し */
+.sv-grid { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 9999; }
+.sv-grid-cell { position: absolute; box-sizing: border-box; border: 1px solid rgba(0, 0, 255, 0.55); }
+.sv-grid-cell span { position: absolute; left: 1px; top: 0; font: 8px monospace; color: #00f; line-height: 1; }
 
 /* v35: 以下、床に置く物・壁に掛ける物はすべて translate(-50%,-100%)(足元=下端中央)アンカー。
    接地点の規約を1本化した(素材仕様§2-2。v33-34の「絵ごとに実測した-88.77%等」を不要にする)。
@@ -996,23 +1004,28 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    v35: 親(.sv-camera)が大きさを持たないためinset:0はやめ、原点(0,0)にだけ置く
    (子の俳優はすべて絶対配置pxなので大きさは不要)。 */
 .sv-actors { position: absolute; left: 0; top: 0; pointer-events: none; }
+/* v35-3(チェックポイント1の回答3): 根(.sv-cust)は足元の点(left/top=接地マスの下端中央)を
+   持つだけの大きさ0の箱で、transformもz-indexも持たない(スタッキング文脈を作らない)。
+   接地アンカーtranslate(-50%,-100%)と行のz(JSのsetActorZ)は本体(.sv-body)に付け、
+   丼・吹き出し・評判ポップは「客についた表示」として常に部屋の物より手前(z-index:1000)に出す。
+   付属物の位置は旧「本体の箱(高さ1em)の上端基準」を足元基準に換算した値(各要素のemで書く)。 */
 .sv-cust {
-  position: absolute; transform: translate(-50%, -100%); /* v35: 足元アンカー(接地規約の1本化) */
+  position: absolute;
   transition: left 600ms linear, top 400ms ease-in-out;
   font-size: 1em; line-height: 1; will-change: left, top;
 }
-.sv-cust .sv-body { display: inline-block; }
-.sv-cust.flip .sv-body { transform: scaleX(-1); }
+.sv-cust .sv-body, .sv-staff .sv-body { position: absolute; left: 0; top: 0; transform: translate(-50%, -100%); }
+.sv-cust.flip .sv-body { transform: scaleX(-1) translate(-50%, -100%); }
 .sv-cust .sv-bowl {
-  position: absolute; left: 50%; top: -0.85em; font-size: 0.65em;
+  position: absolute; left: 0; top: -2.38em; font-size: 0.65em; z-index: 1000; /* 旧 top:-0.85em(本体上端基準) */
   color: var(--c-down); /* 画像読み込み失敗時の絵文字フォールバック用。「注文を抱えている」印象で厨房の丼の山と揃える */
   transform: translateX(-50%) scale(0); transition: transform 200ms ease;
 }
 .sv-cust.eating .sv-bowl { transform: translateX(-50%) scale(1); }
 .sv-cust.eating .sv-body { animation: svEat 640ms ease-in-out infinite; }
-@keyframes svEat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(3px); } }
+@keyframes svEat { 0%, 100% { transform: translate(-50%, -100%) translateY(0); } 50% { transform: translate(-50%, -100%) translateY(3px); } }
 .sv-cust .sv-bubble {
-  position: absolute; left: 92%; top: -0.6em; font-size: 0.62em;
+  position: absolute; left: 0.68em; top: -2.21em; font-size: 0.62em; z-index: 1000; /* 旧 left:92%/top:-0.6em */
   opacity: 0; transition: opacity 200ms ease;
   color: var(--c-ink-64); /* v14-2: 既定(普通の表情)。🕐/😡の色は.mood-*で上書きする */
 }
@@ -1028,8 +1041,8 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    数字と記号だけの短い文字列なので、翻訳が伸びても崩れにくい white-space: nowrap にしておく。
    z-index:6は俳優自身(親要素)の中だけのローカルな重なり(部屋の奥行きとは無関係)。 */
 .sv-rep-pop {
-  position: absolute; left: 50%; top: -1.9em; transform: translateX(-50%);
-  font-size: 0.48em; white-space: nowrap; font-weight: 700; z-index: 6;
+  position: absolute; left: 0; top: -3.98em; transform: translateX(-50%); /* v35-3: 足元基準(旧 left:50%/top:-1.9em) */
+  font-size: 0.48em; white-space: nowrap; font-weight: 700; z-index: 1000; /* v35-3: 常に手前(旧6=俳優内ローカル) */
   opacity: 0; animation: svRepPop 0.8s ease-out forwards;
 }
 .sv-rep-pop.good { color: var(--c-up); }
@@ -1044,12 +1057,12 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 /* v13-1: 店員は客と同じくmove()(JS)が left/top を直接動かす。旧・往復専用のCSSキーフレーム
    (svPace)は、実際の作業動線(寸胴→茹で麺器→盛り付け→客席→厨房)に置き換えたため廃止した。 */
 .sv-staff {
-  position: absolute; transform: translate(-50%, -100%); /* v35: 足元アンカー(客と同じ規約) */
-  font-size: 0.9em; line-height: 1;
+  position: absolute; /* v35-3: 足元アンカーは本体(.sv-body)側(上の.sv-custの注記と同じ構造) */
+  line-height: 1; /* font-size(客と同じ背丈になる倍率)はJS(buildStaff)が書く。v35-3(§2) */
   transition: left 600ms linear, top 500ms ease-in-out; will-change: left, top;
 }
 .sv-staff .sv-bowl {
-  position: absolute; left: 50%; top: -0.85em; font-size: 0.6em;
+  position: absolute; left: 0; top: -2.52em; font-size: 0.6em; z-index: 1000; /* 旧 top:-0.85em(本体上端基準) */
   transform: translateX(-50%) scale(0); transition: transform 200ms ease;
 }
 .sv-staff.carrying .sv-bowl { transform: translateX(-50%) scale(1); }

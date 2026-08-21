@@ -23,6 +23,17 @@ window.ShopView = (function () {
   // 決定値。物件が広くなってもこの値は縮めない。
   var CELL = 48;
 
+  // v35-3(§2、§44-7の保留を解消): 人物の見た目の背丈は「1マスの何倍か」の定数1つだけで持つ。
+  // 1.25マス(60px)= 常設の寸胴(🍥、1マス=48px規約、インク実測42px)より高く、入口の開口
+  // (2マス=96px)より低い、の中間。客・従業員の画面上の背丈はこの1つの値に揃え、絵ごとの
+  // キャンバス余白の違い(客80.47%・従業員78.83%、§43-7実測)はこの比率で割って吸収する。
+  // (font-sizeの実値はCSSには書かない。buildScenery()/buildStaff()がここから作って書く)
+  var PERSON_HEIGHT_CELLS = 1.25;
+  var CUST_VISIBLE_RATIO = 0.8047;  // 客の絵(img/segment/*.webp): 見た目の高さ/キャンバス高さ
+  var STAFF_VISIBLE_RATIO = 0.7883; // 従業員の絵(img/character/*.webp): 同上
+  function custFontPx() { return PERSON_HEIGHT_CELLS * CELL / CUST_VISIBLE_RATIO; }
+  function staffFontEm() { return CUST_VISIBLE_RATIO / STAFF_VISIBLE_RATIO; } // .sv-camera(=客の1em)に対する従業員の倍率
+
   // v35(v35-2指示書 §1-1): 部屋の表。区画は数式ではなく人が書いた文字の表で持つ(§43-2の教訓)。
   // 記号: L/#/R = 奥壁(左角/中間/右角)  l/r = 側壁(左/右)  D = 入口(暖簾)
   //       K = 厨房床(タイル)  ( = ) = カウンター(左端/中間/右端。下に敷く床はタイル)
@@ -127,12 +138,167 @@ window.ShopView = (function () {
   var stage = null;      // 舞台のDOM(クリップ枠。動かさない)
   var cameraEl = null;   // v35: カメラ層。床・壁・什器・actorLayerはすべてこの子。
                           // 見る場所・倍率はこの層のtranslate+scaleだけで変える
-  // v35: カメラの固定値(第2段階)。x=-24は「入口(col0)の半分〜厨房の寸胴まで」が380px幅に
-  // 収まる位置、y=124は奥壁の上端(row-1=-48px)が上部HUD(top-bar、実測70.8px)のすぐ下(76px)に
-  // 来る位置。第3段階のスクロール/ピンチはこの値を書き換えるだけにする。
-  // ?cam=x,y,s(確認専用。?grid=1と同じ「URLに付けたときだけ」の考え方)で上書きできる。
-  var CAM = { x: -24, y: 124, s: 1 };
+  // v35-3(§3): カメラの初期値は定数ではなく、部屋の大きさと「HUDに覆われない画面の範囲」から
+  // fitCamera()が式で作る(→ docs/設計判断記録.md §45)。camOverride は ?cam=x,y,s(確認専用。
+  // ?grid=1と同じ「URLに付けたときだけ」)のときだけ入り、式より優先する。
+  var CAM = { x: 0, y: 0, s: 1 };
+  var camOverride = null;
+  var CAM_GAP = 6; // HUDと部屋の間に空ける余白(px)。元の手置き値(top-bar 70.8 → y 76)と同じ約5〜6px
+  var CAM_ZOOM_MAX = 2; // 寄れる限界(素材仕様§2-1のピンチ上限。客の表情の絵文字が十分読める)
+  var hudObserver = null;
+  var camTouched = false; // ユーザーが一度でもカメラを動かしたらtrue(以後HUDの変化で初期表示へ戻さない)
+
+  // HUD(上帯・速度ボタン)に覆われない、舞台(.shop-stage)内の矩形を実測で求める。
+  // 横は画面の幅いっぱい(FAB列の下に部屋の右端<右側壁と9〜10席目>がかかるのは許容。
+  // チェックポイント1の回答)。要素が無い画面(開業チュートリアルの背景)では舞台全体。
+  function viewportFit() {
+    var sr = stage.getBoundingClientRect();
+    var fit = { left: 0, top: 0, right: sr.width, bottom: sr.height };
+    function el(id) { var e = document.getElementById(id); if (!e) return null; var r = e.getBoundingClientRect(); return (r.width && r.height) ? r : null; }
+    var tb = el("top-bar"), sd = el("speed-dock");
+    if (tb) fit.top = Math.max(fit.top, tb.bottom - sr.top + CAM_GAP);
+    if (sd) fit.bottom = Math.min(fit.bottom, sd.top - sr.top - CAM_GAP);
+    return fit;
+  }
+
+  // 部屋の画面上の大きさ(奥壁の高さ1マスぶんを上に含む)
+  function roomSize(s) { var room = roomDef(); return { w: room.cols * CELL * s, h: (room.rows + 1) * CELL * s }; }
+  // 部屋の全体がfit矩形に丸ごと入る最大の倍率(=初期倍率、かつピンチで引ける限界)
+  function fitScale(fit) {
+    var r = roomSize(1);
+    return Math.min(Math.max(1, fit.right - fit.left) / r.w, Math.max(1, fit.bottom - fit.top) / r.h);
+  }
+
+  // 初期表示の式: 倍率 s = fitScale、横・縦ともfit矩形の中央に部屋を置く。
+  // y は奥壁の上端(row -1)を基準にした「部屋の上端」に CELL*s を足した値(CAM.yはrow0の上端)。
+  // 旧「top-bar + 余白 + 1マス」の手置きを式にし、縦の余白は上下に半分ずつ配る。
+  function fitCamera() {
+    if (camOverride) { CAM = { x: camOverride.x, y: camOverride.y, s: camOverride.s }; return; }
+    var fit = viewportFit();
+    var s = fitScale(fit);
+    var r = roomSize(s);
+    CAM = {
+      s: s,
+      x: fit.left + ((fit.right - fit.left) - r.w) / 2,
+      y: fit.top + ((fit.bottom - fit.top) - r.h) / 2 + CELL * s
+    };
+  }
+
+  // 見回しの限界(§6): 倍率は[初期倍率, CAM_ZOOM_MAX]。位置は「部屋がfit矩形より大きい軸では
+  // 枠と部屋の間に隙間を作らない／小さい軸では部屋を枠の中に収める」——どこまで動かしても
+  // 部屋の外の余白が画面の大半を占めることはない。
+  function clampCamera() {
+    var fit = viewportFit();
+    var sMin = fitScale(fit);
+    CAM.s = Math.min(Math.max(CAM.s, sMin), Math.max(sMin, CAM_ZOOM_MAX));
+    var r = roomSize(CAM.s);
+    var lo = Math.min(fit.left, fit.right - r.w), hi = Math.max(fit.left, fit.right - r.w);
+    CAM.x = Math.min(Math.max(CAM.x, lo), hi);
+    var top = CAM.y - CELL * CAM.s; // 奥壁の上端
+    var tlo = Math.min(fit.top, fit.bottom - r.h), thi = Math.max(fit.top, fit.bottom - r.h);
+    CAM.y = Math.min(Math.max(top, tlo), thi) + CELL * CAM.s;
+  }
+
+  function applyCamera() {
+    if (!cameraEl) return;
+    cameraEl.style.transform = "translate(" + CAM.x + "px," + CAM.y + "px) scale(" + CAM.s + ")";
+  }
+
+  // HUDの高さは描画後に確定する(top-barの中身はmount後にrenderTopBarが書く)ため、
+  // HUD・舞台の大きさが変わったら初期表示を計算し直す。ただしユーザーがカメラを動かした後は
+  // 勝手に初期表示へ戻さず、限界の中に収め直すだけにする。
+  function watchHud() {
+    if (hudObserver || typeof ResizeObserver === "undefined") return;
+    hudObserver = new ResizeObserver(function () {
+      if (!stage) return;
+      if (camTouched) clampCamera(); else fitCamera();
+      applyCamera();
+    });
+    hudObserver.observe(stage);
+    ["top-bar", "speed-dock"].forEach(function (id) { var e = document.getElementById(id); if (e) hudObserver.observe(e); });
+  }
+
+  // ---------- v35-3 §6: 指スクロール・ピンチ(Pointer Events) ----------
+  // 1本指: 指の下の場所が指についてくる(drag)。2本指: 中点の下の場所を画面上で動かさずに
+  // 寄る/引く。指を離せば止まる(慣性なし)。2回続けてタップで初期表示へ戻す。
+  // カメラはstateに持たない(リロードで初期表示に戻る)。舞台(.shop-stage)はHUD(速度ボタン・
+  // FAB・パネル)より奥のレイヤーなので、ボタンの上で始まった指はここへ届かない(誤爆しない)。
+  var gesture = { pts: {}, start: null, lastTapAt: 0, lastTapX: 0, lastTapY: 0 };
+  function ptList() { return Object.keys(gesture.pts).map(function (k) { return gesture.pts[k]; }); }
+  function gestureAnchor() {
+    var p = ptList();
+    if (p.length >= 2) {
+      var mid = { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 };
+      var d = Math.max(1, Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y));
+      // 中点の下にある部屋の点(マスpx)を覚えておき、以後その点が中点に留まるようにする
+      gesture.start = { cam: { x: CAM.x, y: CAM.y, s: CAM.s }, mid: mid, d: d, moved: false,
+        room: { x: (mid.x - CAM.x) / CAM.s, y: (mid.y - CAM.y) / CAM.s } };
+    } else if (p.length === 1) {
+      gesture.start = { cam: { x: CAM.x, y: CAM.y, s: CAM.s }, x: p[0].x, y: p[0].y, moved: (gesture.start && gesture.start.moved) || false };
+    } else {
+      gesture.start = null;
+    }
+  }
+  function onPointerDown(e) {
+    if (!stage || !cameraEl) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    var sr = stage.getBoundingClientRect();
+    gesture.pts[e.pointerId] = { x: e.clientX - sr.left, y: e.clientY - sr.top };
+    try { stage.setPointerCapture(e.pointerId); } catch (err) { /* 古い環境 */ }
+    gestureAnchor();
+    e.preventDefault();
+  }
+  function onPointerMove(e) {
+    if (!gesture.pts[e.pointerId] || !gesture.start) return;
+    var sr = stage.getBoundingClientRect();
+    gesture.pts[e.pointerId] = { x: e.clientX - sr.left, y: e.clientY - sr.top };
+    var p = ptList(), st = gesture.start;
+    if (p.length >= 2 && st.mid) {
+      var mid = { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 };
+      var d = Math.max(1, Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y));
+      CAM.s = st.cam.s * (d / st.d);
+      CAM.x = mid.x - st.room.x * CAM.s;
+      CAM.y = mid.y - st.room.y * CAM.s;
+      st.moved = true;
+    } else if (p.length === 1 && st.x != null) {
+      var dx = p[0].x - st.x, dy = p[0].y - st.y;
+      if (!st.moved && Math.hypot(dx, dy) < 4) return; // タップの揺れは無視(ダブルタップ判定のため)
+      st.moved = true;
+      CAM.x = st.cam.x + dx;
+      CAM.y = st.cam.y + dy;
+    } else return;
+    camTouched = true;
+    clampCamera();
+    applyCamera();
+    e.preventDefault();
+  }
+  function onPointerUp(e) {
+    if (!gesture.pts[e.pointerId]) return;
+    var was = gesture.start;
+    delete gesture.pts[e.pointerId];
+    if (!ptList().length && was && !was.moved && was.x != null) {
+      // タップ。300ms以内・近い場所の2回目なら初期表示へ戻す
+      var now = Date.now();
+      if (now - gesture.lastTapAt < 300 && Math.hypot(was.x - gesture.lastTapX, was.y - gesture.lastTapY) < 30) {
+        camTouched = false;
+        fitCamera();
+        applyCamera();
+        gesture.lastTapAt = 0;
+      } else {
+        gesture.lastTapAt = now; gesture.lastTapX = was.x; gesture.lastTapY = was.y;
+      }
+    }
+    gestureAnchor();
+  }
+  function bindGestures() {
+    stage.addEventListener("pointerdown", onPointerDown);
+    stage.addEventListener("pointermove", onPointerMove);
+    stage.addEventListener("pointerup", onPointerUp);
+    stage.addEventListener("pointercancel", onPointerUp);
+    gesture.pts = {}; gesture.start = null;
+  }
   var actorLayer = null; // 客・店員を載せるレイヤー
+  var gridDebug = false; // v35-3(§4): ?grid=1 のときだけtrue
   var state = null;
   var seats = [];        // {x, y, kind, occupant}
   var actors = [];       // 客
@@ -358,6 +524,16 @@ window.ShopView = (function () {
     el.style.zIndex = zForRow(y);
     return el;
   }
+  // v35-3(チェックポイント1の回答3): 俳優(客・店員)は行の重なり順(z=row)を本体(.sv-body)だけに
+  // 付け、根(.sv-cust/.sv-staff)にはz-indexもtransformも持たせない(持たせると根が
+  // スタッキング文脈になり、子の丼・吹き出しが部屋の物より手前へ出られない)。
+  // 丼・吹き出し・評判ポップは「部屋に置かれた物」ではなく「客についた表示」なので常に手前
+  // (css/style.cssの .sv-bowl/.sv-bubble/.sv-rep-pop の z-index)。
+  function setActorZ(el, y) {
+    el.style.zIndex = "";
+    var body = el.querySelector(".sv-body");
+    if (body) body.style.zIndex = zForRow(y);
+  }
 
   function buildScenery() {
     window.UI.clear(stage);
@@ -372,8 +548,12 @@ window.ShopView = (function () {
     // v35: カメラ層。舞台(.shop-stage=クリップ枠)自身にはtransformをかけない(枠ごと動いてしまう。
     // v35-2指示書 §1-2)。以後の床・壁・什器・actorLayerはすべてこの層の子にする。
     cameraEl = block("sv-camera", {});
-    cameraEl.style.transform = "translate(" + CAM.x + "px," + CAM.y + "px) scale(" + CAM.s + ")";
+    // v35-3(§2): 人物系の大きさの基準(客の1em)。PERSON_HEIGHT_CELLSから作る(CSSには書かない)
+    cameraEl.style.fontSize = custFontPx() + "px";
+    fitCamera();
+    applyCamera();
     stage.appendChild(cameraEl);
+    watchHud();
 
     // 床と躯体を部屋の表(ROOMS)のとおりに敷く。第2段階は仮タイル(色板+薄い境界線。
     // v35-2指示書 §1-7——敷き詰め・区画・「カウンターが1本の台に通るか」を目で判定できることが目的。
@@ -388,6 +568,13 @@ window.ShopView = (function () {
       "l": ["wall-side", 2], "r": ["wall-side", 2], "D": ["door", 2],
       "(": ["counter-l", 1.2], "=": ["counter-mid", 1.2], ")": ["counter-r", 1.2]
     };
+    // v35-3(§1、§44-5の「許容」を解消): 重なりの規則は1行——
+    // 「壁(側壁・奥壁・入口)は部屋の縁に沿って連続する1枚の面なので手前の行を隠さない(zは部屋の最奥で固定)／
+    //   台(カウンター)は部屋の中に置かれた物なので奥の行を隠す(z=row)」。
+    // 壁を行ごとに切ってあるのは描画の都合にすぎず、row6の側壁の上半分がrow5の入口や客を覆うのは
+    // 「手前の壁の陰」ではなく単なる描画順の事故だった(v35-3調査報告 §1)。
+    var WALL_SYMS = "L#RlrD";
+    var WALL_Z = zForRow(-1); // 床(z無し=0)より上、部屋の中の何(row0以上)より奥
     for (var row = 0; row < room.rows; row++) {
       for (var col = 0; col < room.cols; col++) {
         var sym = room.map[row].charAt(col);
@@ -405,6 +592,7 @@ window.ShopView = (function () {
             width: CELL + "px", height: (pcls[1] * CELL) + "px"
           });
           placeAt(piece, col + 0.5, row + 0.5); // 接地マス=このマス。絵はそこから上へ伸びる
+          if (WALL_SYMS.indexOf(sym) >= 0) piece.style.zIndex = WALL_Z;
           cameraEl.appendChild(piece);
         }
       }
@@ -532,6 +720,20 @@ window.ShopView = (function () {
     actorLayer = block("sv-actors", {});
     cameraEl.appendChild(actorLayer);
 
+    // v35-3(§4): ?grid=1 のときだけ、マスの境界線と col,row 番号を部屋に重ねる(目視判定の道具。
+    // カメラ層の子なのでスクロール・ピンチでも部屋と一緒に動く。通常プレイには出ない)。
+    if (gridDebug) {
+      var gridEl = block("sv-grid", {});
+      for (var gr = -1; gr < room.rows; gr++) {
+        for (var gc = 0; gc < room.cols; gc++) {
+          gridEl.appendChild(block("sv-grid-cell", {
+            left: (gc * CELL) + "px", top: (gr * CELL) + "px", width: CELL + "px", height: CELL + "px"
+          }, [h("span", { text: gc + "," + gr })]));
+        }
+      }
+      cameraEl.appendChild(gridEl);
+    }
+
     stage.className = "shop-stage" + (has("bright_light") ? " bright" : "");
 
     buildStaff();
@@ -582,7 +784,9 @@ window.ShopView = (function () {
         h("span", { className: "sv-body" }, [AI.node(w.def)]),
         h("span", { className: "sv-bowl" }, [AI.node(stageDef("bowl", "🍜"))])
       ]);
+      el.style.fontSize = staffFontEm() + "em"; // v35-3(§2): 客と同じ背丈になる倍率(定数1つから導出)
       placeAt(el, home.x, home.y);
+      setActorZ(el, home.y);
       el.dataset.x = home.x;
       actorLayer.appendChild(el);
       w.el = el; w.gone = false; w.busy = false; w.homeX = home.x; w.homeY = home.y; w.curY = home.y;
@@ -922,6 +1126,7 @@ window.ShopView = (function () {
       h("span", { className: "sv-bubble", text: "" })
     ]);
     placeAt(el, GEO.off.x, GEO.off.y);
+    setActorZ(el, GEO.off.y);
     var a = {
       id: ++custSeq, // v15-1: 客ごとのID。注文・丼はこの客への参照(actor自体)で1対1に結び付ける
       segId: segId, el: el, seat: null, queued: false, gone: false,
@@ -961,7 +1166,7 @@ window.ShopView = (function () {
     if (a.gone) return;
     a.el.style.transitionDuration = Math.max(16, ms / spd()) + "ms";
     a.el.style.left = toPxX(x) + "px";
-    if (y != null) { a.el.style.top = toPxY(y) + "px"; a.tgtY = y; a.el.style.zIndex = zForRow(y); }
+    if (y != null) { a.el.style.top = toPxY(y) + "px"; a.tgtY = y; setActorZ(a.el, y); }
     a.el.classList.toggle("flip", x > (parseFloat(a.el.dataset.x || GEO.off.x)));
     a.el.dataset.x = x; // 単位はマス(px変換前の値。距離計算・向きの判定はマスのまま行う)
   }
@@ -1210,19 +1415,24 @@ window.ShopView = (function () {
   // callbacks: { onServe(segId, price, spawnWeek) v13-3/v16-1(丼が客の席に届いた瞬間。
   // その客ぶんの売価=priceOwedと、湧いた時点の週番号=spawnWeekを渡す。v26追補§B-2でspawnWeekを追加) }
   function mount(container, gameState, callbacks) {
+    destroy(); // v35-3(§5): 前の舞台(開業チュートリアルの背景など)が残っていれば、DOMごと片付けてから作る
     state = gameState;
     onServeCb = (callbacks && callbacks.onServe) || null;
-    clearTimers();
     // v35(v35-2指示書 §1-2/§4): ?cam=x,y,s が付いているときだけカメラの固定値を上書きする
     // (?grid=1と同じ「URLに付けたときだけ」の確認専用経路。判定点6<scaleが乗った状態でも
-    // 崩れないか>と、部屋全体を縮小して見る確認に使う。通常プレイは常に既定の固定値)。
-    CAM = { x: -24, y: 124, s: 1 };
+    // 崩れないか>の確認に使う。通常プレイは常にfitCamera()の式で決まる初期表示)。
+    camOverride = null;
+    gridDebug = false;
+    camTouched = false;
     try {
-      var cm = /(^|[?&])cam=(-?[\d.]+),(-?[\d.]+),([\d.]+)/.exec(window.location.search || "");
-      if (cm) CAM = { x: parseFloat(cm[2]), y: parseFloat(cm[3]), s: parseFloat(cm[4]) };
+      var qs = window.location.search || "";
+      var cm = /(^|[?&])cam=(-?[\d.]+),(-?[\d.]+),([\d.]+)/.exec(qs);
+      if (cm) camOverride = { x: parseFloat(cm[2]), y: parseFloat(cm[3]), s: parseFloat(cm[4]) };
+      gridDebug = /(^|[?&])grid=1(&|$)/.test(qs); // v35-3(§4)
     } catch (e) { /* URLが読めない環境では既定値のまま */ }
     stage = h("div", { className: "shop-stage" });
     container.appendChild(stage);
+    bindGestures(); // v35-3 §6
     builtSig = "";
     curSpd = spd();
     lifecycleLog = []; // v15-6: 新しいプレイの開始/再開のたびにログをリセットする
@@ -1279,6 +1489,10 @@ window.ShopView = (function () {
 
   function destroy() {
     clearTimers();
+    if (hudObserver) { hudObserver.disconnect(); hudObserver = null; }
+    // v35-3(§5): 舞台のDOMも取り除く(#screen-setupの背景に残った古い.shop-stageが、営業画面へ
+    // 移った後も非表示のまま残って要素の計測・計数に引っかかっていた。v35-3調査報告 3-b)
+    if (stage && stage.parentNode) stage.parentNode.removeChild(stage);
     stage = null;
     cameraEl = null;
     actorLayer = null;

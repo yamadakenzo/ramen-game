@@ -569,13 +569,20 @@ window.ShopView = (function () {
     // v35-2指示書 §1-7——敷き詰め・区画・「カウンターが1本の台に通るか」を目で判定できることが目的。
     // 本素材<img/stage/floor_wood.webp等>への差し替えは第4段階)。
     // 記号→床の色クラス(壁マスには床を敷かない。壁の絵が接地マスごと覆う前提<素材仕様§3-2>)
-    var FLOOR_CLS = { "K": "tile", "S": "wood-s", "A": "wood", "T": "wood-t", "(": "tile", "=": "tile", ")": "tile", "D": "wood" };
-    // 記号→高さのある部品 [色クラス, 高さ(マス)]。壁は2マス、カウンターは1.2マス
-    // (素材仕様§3-3「台の絵は下1マス強」の仮表現。1.5マスで作ったら、奥のrow2に立つ店員が
-    // 頭しか見えなくなるのを実際のスクリーンショットで確認し、1マス強へ直した)
+    // v35-4: 床は本素材の画像(img/stage/floor_wood.webp / floor_tile.webp、1マス48pxに縮小して敷く)。
+    // 第2段階の区画ごとの色分け(wood-s/wood-t)は目視判定用だったので廃止し、木目とタイルの2種だけ。
+    var FLOOR_CLS = { "K": "tile", "S": "wood", "A": "wood", "T": "wood", "(": "tile", "=": "tile", ")": "tile", "D": "wood" };
+    // 記号→高さのある部品 [色クラス, 高さ(マス)]。カウンターは1.2マス
+    // (素材仕様§3-3「台の絵は下1マス強」。1.5マスで作ったら、奥のrow2に立つ店員が
+    // 頭しか見えなくなるのを実際のスクリーンショットで確認し、1マス強へ直した)。
+    // v35-4(§46): 壁の高さの規則——**側壁の帯を作る部品(l/r)は1マス。上端を担う角(L/R)と、
+    // 開口や意匠のように高さを持たせたい部品(入口Dなど)は2マス以上でよい。** 描画順が奥→手前で
+    // ある限り、高い部品は必ず1つ奥の部品より後に描かれるので手前に出る(部品ごとの例外のzは不要)。
+    // 側壁の帯の部品まで2マスにすると、入口が上下両方の隣(row4・row6)と重なり、どちらの描画順でも
+    // 片方に半分隠される(実測で踏んだ)。奥壁(#)は横に並ぶだけなので2マスのまま。
     var PIECE_CLS = {
       "L": ["wall-corner", 2], "#": ["wall-mid", 2], "R": ["wall-corner", 2],
-      "l": ["wall-side", 2], "r": ["wall-side", 2], "D": ["door", 2],
+      "l": ["wall-side", 1], "r": ["wall-side", 1], "D": ["door", 2],
       "(": ["counter-l", 1.2], "=": ["counter-mid", 1.2], ")": ["counter-r", 1.2]
     };
     // v35-3(§1、§44-5の「許容」を解消): 重なりの規則は1行——
@@ -591,18 +598,35 @@ window.ShopView = (function () {
         var fcls = FLOOR_CLS[sym];
         if (fcls) {
           // 床タイルはtop-left直置き(接地アンカー不要の平面)。z無し(0扱い=必ず一番奥)
+          // v35-4: 1px大きく敷いて隣と重ねる(画像は4辺シームレスなので重なった1pxは隣の最初の1pxと同じ絵)。
+          // ぴったりCELLで敷くと、カメラの倍率でマスの境界が小数pxに落ちたとき1px未満の隙間に舞台の地
+          // (濃茶)が透けて、床に縦横の細い線が出る(実測: 境界の列だけ明度が20〜25低かった)
           cameraEl.appendChild(block("sv-tile sv-tile-" + fcls, {
             left: (col * CELL) + "px", top: (row * CELL) + "px",
-            width: CELL + "px", height: CELL + "px"
+            width: (CELL + 1) + "px", height: (CELL + 1) + "px"
           }));
         }
+      }
+    }
+    // 高さのある部品(壁・カウンター)は床の後に、**奥の行から手前の行へ**描く(v35-4、§46)。
+    // 壁は全部同じz(WALL_Z)なので重なり順はDOMの追加順で決まる(§43-5と同じ性質)。高さのある部品
+    // (入口など)は1つ奥の部品より後に描かれるので手前に出る。帯の部品(側壁l/r)は1マスなので
+    // 手前の行の部品が高い部品を覆うことはない(PIECE_CLSの注記)。カウンターはz=rowなので順序に依らない。
+    for (var row = 0; row < room.rows; row++) {
+      for (var col = 0; col < room.cols; col++) {
+        var sym = room.map[row].charAt(col);
         var pcls = PIECE_CLS[sym];
         if (pcls) {
+          // v35-4: 床タイルと同じ理由で、横に1pxずつ・上に1px大きく描いて隣と重ねる(倍率で境界が小数pxに
+          // 落ちたときの隙間線を消す。実測: 奥壁の継ぎ目の列が #c4b7a3、側壁が #ebddc6 に沈んでいた)
           var piece = block("sv-piece sv-piece-" + pcls[0], {
-            width: CELL + "px", height: (pcls[1] * CELL) + "px"
+            width: (CELL + 2) + "px", height: (pcls[1] * CELL + 1) + "px"
           });
           placeAt(piece, col + 0.5, row + 0.5); // 接地マス=このマス。絵はそこから上へ伸びる
           if (WALL_SYMS.indexOf(sym) >= 0) piece.style.zIndex = WALL_Z;
+          // v35-4: 側壁・角・入口の左右(内側の縁の縦線をどちら側に引くか)。CSSの .sv-piece-side-l / -r
+          if ("LlD".indexOf(sym) >= 0) piece.classList.add("sv-piece-side-l");
+          if ("Rr".indexOf(sym) >= 0) piece.classList.add("sv-piece-side-r");
           cameraEl.appendChild(piece);
         }
       }

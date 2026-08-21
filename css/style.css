@@ -938,25 +938,43 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 /* 明るい照明の効果は部屋全体(カメラ層ごと)を少し明るくする(旧floor.webpのfilterの置き換え) */
 .shop-stage.bright .sv-camera { filter: brightness(1.08); }
 
-/* v35 第2段階の仮タイル(本素材<img/stage/floor_*.webp等>が来たら第4段階で差し替える)。
-   色は区画が目で区別できることだけが目的(v35-2 §1-7)。床タイルの薄い境界線は
-   「敷き詰めが隙間・重なりなく正しいか」を目で判定するためのもの。 */
-.sv-tile { position: absolute; border: 1px solid rgba(74, 51, 34, 0.14); }
-.sv-tile-wood   { background: #d8b078; } /* A 通路(木目床) */
-.sv-tile-wood-s { background: #e4c491; } /* S カウンター席 */
-.sv-tile-wood-t { background: #c19556; } /* T テーブル席(通路との区別が目で付くよう一段濃く) */
-.sv-tile-tile   { background: #a8bccb; } /* K 厨房(タイル床) */
-/* 高さのある部品(壁・カウンター)。接地はtranslate(-50%,-100%)=足元アンカーで全部品共通
-   (素材仕様§2-2)。境界線は付けない——特にカウンターは「中間を並べて1本の台に見えるか」
-   (判定点1)を判定する対象なので、部品ごとの枠線で切れて見えてはいけない。 */
-.sv-piece { position: absolute; transform: translate(-50%, -100%); }
-.sv-piece-wall-mid    { background: #8a6a4a; } /* 奥壁の中間 */
-.sv-piece-wall-corner { background: #6e523a; } /* 奥壁の角(左右) */
-.sv-piece-wall-side   { background: #7a5c40; } /* 側壁(左右) */
-.sv-piece-door        { background: #b23a3a; } /* 入口(暖簾) */
-.sv-piece-counter-l   { background: #c9992f; } /* カウンター左端 */
-.sv-piece-counter-mid { background: #e0b34f; } /* カウンター中間 */
-.sv-piece-counter-r   { background: #a87f28; } /* カウンター右端 */
+/* ================= v35-4 本素材: 床は画像、壁とカウンターは図形 =================
+   (docs/指示書/v35-4_本素材_指示書.md、docs/設計判断記録.md §46)
+   画像生成に「カウンター」を頼むと必ず端の閉じた独立した箱が返る(§43-8と同じ現象)。長く連続して
+   伸びる壁・カウンターは図形(CSS)で作れば継ぎ目が原理的に出ない。味が要る床だけ画像。
+   色(絵素材は4色相方針の対象外、§41-2): 木目床と天板は同系の橙茶、壁は生成り、輪郭線は濃茶。 */
+.sv-tile { position: absolute; background-size: 48px 48px; background-repeat: repeat; } /* 1マス=48px。要素はJSが1px大きく敷く */
+.sv-tile-wood { background-image: url("../img/stage/floor_wood.webp?v=20260821232936"); } /* S/A/T/D 客席の木目床 */
+.sv-tile-tile { background-image: url("../img/stage/floor_tile.webp?v=20260821232936"); } /* K 厨房の市松タイル */
+/* 高さのある部品(壁・カウンター)。接地はtranslate(-50%,-100%)=足元アンカーで全部品共通(素材仕様§2-2)。
+   --sv-line: 輪郭線の濃茶 / --sv-wall: 壁の生成り / --sv-wood: 天板・腰板の橙茶 / --sv-front: カウンター前板 */
+.sv-piece { position: absolute; transform: translate(-50%, -100%); box-sizing: border-box;
+  --sv-line: #3a2a1e; --sv-wall: #f3e6ce; --sv-wood: #e0a040; --sv-front: #f7ecd6; --sv-foot: #a0622a; }
+/* 奥壁(横に並ぶ): 上端の線と腰板の帯(横方向の意匠)を持ってよい。左右には線を引かない。
+   部品は接地マス(row0)から上へ2マス。腰板は接地マスの下側(床に近い側)に置く */
+.sv-piece-wall-mid {
+  background: linear-gradient(to bottom, var(--sv-line) 0 2px, var(--sv-wall) 2px 62%, var(--sv-line) 62% calc(62% + 2px), var(--sv-wood) calc(62% + 2px) 100%);
+}
+/* 奥壁の角(左右): 上端の線だけ(側壁と同じく外側に線は持たない)。腰板は側壁(row1の部品が上へ伸びて
+   角の下半分を覆う)に隠れるので持たない。内側の縦線は .sv-piece-side-l/-r で側壁から続く */
+.sv-piece-wall-corner { background: var(--sv-wall); border-top: 2px solid var(--sv-line); }
+/* 側壁(縦に走る面): 横方向の線・帯・意匠を一切持たない。隣の部品と1マスぶん重なるため、上下の枠線が
+   あると1マスごとに出て横縞のはしごに見える(実際に踏んだ。§46)。持つのは内側の縁の縦線だけ。
+   左右の区別はJSが付ける .sv-piece-side-l / -r */
+.sv-piece-wall-side { background: var(--sv-wall); }
+.sv-piece-side-l { border-right: 2px solid var(--sv-line); }
+.sv-piece-side-r { border-left: 2px solid var(--sv-line); }
+.sv-piece-wall-corner.sv-piece-side-l { border-left: 2px solid var(--sv-line); border-right: 2px solid var(--sv-line); }
+.sv-piece-wall-corner.sv-piece-side-r { border-right: 2px solid var(--sv-line); border-left: 2px solid var(--sv-line); }
+/* 入口(暖簾): 側壁の中の2マスぶんの開口。壁の内側の縦線はここでも続く(.sv-piece-side-l が付く) */
+.sv-piece-door { background: #d35050; }
+/* カウンター(左端/中間/右端): 上から 輪郭線・天板(橙茶)・輪郭線・前板(生成り)・足元の濃い帯。
+   中間は左右に線を引かない(端だけが外側に線を持つ)。高さ1.2マスはJS(PIECE_CLS)が書く */
+.sv-piece-counter-l, .sv-piece-counter-mid, .sv-piece-counter-r {
+  background: linear-gradient(to bottom, var(--sv-line) 0 2px, var(--sv-wood) 2px 28%, var(--sv-line) 28% calc(28% + 2px), var(--sv-front) calc(28% + 2px) 86%, var(--sv-foot) 86% 100%);
+}
+.sv-piece-counter-l { border-left: 2px solid var(--sv-line); }
+.sv-piece-counter-r { border-right: 2px solid var(--sv-line); }
 /* v35-3(§4): ?grid=1 のときだけJSが作る升目(目視判定用)。部屋の何より手前、操作は素通し */
 .sv-grid { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 9999; }
 .sv-grid-cell { position: absolute; box-sizing: border-box; border: 1px solid rgba(0, 0, 255, 0.55); }

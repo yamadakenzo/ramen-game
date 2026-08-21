@@ -169,18 +169,28 @@ window.ShopView = (function () {
     return Math.min(Math.max(1, fit.right - fit.left) / r.w, Math.max(1, fit.bottom - fit.top) / r.h);
   }
 
-  // 初期表示の式: 倍率 s = fitScale、横・縦ともfit矩形の中央に部屋を置く。
+  // 部屋がfit矩形を埋め尽くす最小の倍率(=初期倍率。実機確認後の指示: 起動直後は画面が店で
+  // 埋まっていること。横にはみ出す分は指スクロールで見る)。上限はピンチと同じCAM_ZOOM_MAX。
+  function coverScale(fit) {
+    var r = roomSize(1);
+    var s = Math.max(Math.max(1, fit.right - fit.left) / r.w, Math.max(1, fit.bottom - fit.top) / r.h);
+    return Math.min(Math.max(s, fitScale(fit)), CAM_ZOOM_MAX);
+  }
+
+  // 初期表示の式: 倍率 s = coverScale(部屋がfit矩形を埋める)。位置はclampCamera()と同じ規則で、
+  // 部屋が枠より大きい軸は「入口側(左・奥壁側=上)を枠の端に合わせる」、小さい軸は中央。
   // y は奥壁の上端(row -1)を基準にした「部屋の上端」に CELL*s を足した値(CAM.yはrow0の上端)。
-  // 旧「top-bar + 余白 + 1マス」の手置きを式にし、縦の余白は上下に半分ずつ配る。
+  // 旧「top-bar + 余白 + 1マス」の手置きを式にしたもの。
   function fitCamera() {
     if (camOverride) { CAM = { x: camOverride.x, y: camOverride.y, s: camOverride.s }; return; }
     var fit = viewportFit();
-    var s = fitScale(fit);
+    var s = coverScale(fit);
     var r = roomSize(s);
+    var fw = fit.right - fit.left, fh = fit.bottom - fit.top;
     CAM = {
       s: s,
-      x: fit.left + ((fit.right - fit.left) - r.w) / 2,
-      y: fit.top + ((fit.bottom - fit.top) - r.h) / 2 + CELL * s
+      x: fit.left + (r.w > fw ? 0 : (fw - r.w) / 2),          // 横にはみ出すなら入口(col0)側を左端に
+      y: fit.top + (r.h > fh ? 0 : (fh - r.h) / 2) + CELL * s  // 縦にはみ出すなら奥壁を上端に
     };
   }
 

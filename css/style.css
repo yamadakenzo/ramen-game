@@ -914,7 +914,9 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .shop-stage {
   position: absolute; inset: 0;
   overflow: hidden;
-  background: var(--c-bg);
+  /* v35-3(実機確認後): 部屋の外側(舞台の地)は濃茶(--c-ink)。生成りだと余白が「何も無い場所」に
+     見え、小さい絵が白い紙に浮かんで見えた。濃い色なら店が枠の中に収まって見える(パレット内の色) */
+  background: var(--c-ink);
   line-height: 1;
   /* v35-3 §6: 指スクロール・ピンチはJS(Pointer Events)が受ける。ブラウザ既定のパン・ピンチ・
      ダブルタップズーム・文字選択はこの面では起こさない */

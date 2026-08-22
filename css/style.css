@@ -943,13 +943,24 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    画像生成に「カウンター」を頼むと必ず端の閉じた独立した箱が返る(§43-8と同じ現象)。長く連続して
    伸びる壁・カウンターは図形(CSS)で作れば継ぎ目が原理的に出ない。味が要る床だけ画像。
    色(絵素材は4色相方針の対象外、§41-2): 木目床と天板は同系の橙茶、壁は生成り、輪郭線は濃茶。 */
-.sv-tile { position: absolute; background-size: 48px 48px; background-repeat: repeat; } /* 1マス=48px。要素はJSが1px大きく敷く */
-.sv-tile-wood { background-image: url("../img/stage/floor_wood.webp?v=20260821232936"); } /* S/A/T/D 客席の木目床 */
-.sv-tile-tile { background-image: url("../img/stage/floor_tile.webp?v=20260821232936"); } /* K 厨房の市松タイル */
+/* v36-1: 床のマスは菱形(clip-path)。位置(マスの中心)はJSの変換関数が書き、ここで中心合わせする。
+   第1段階は仮の色板(本素材<img/stage/floor_*.webp>の菱形化は第2段階) */
+.sv-tile { position: absolute; transform: translate(-50%, -50%); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+.sv-tile-wood { background: #d9a648; } /* S/A/T/D 客席の木目床(仮) */
+.sv-tile-tile { background: #cfe3d6; } /* K 厨房のタイル床(仮) */
+.sv-tile-road { background: #b3aa9c; } /* P 店の外の道(仮) v36-2 */
 /* 高さのある部品(壁・カウンター)。接地はtranslate(-50%,-100%)=足元アンカーで全部品共通(素材仕様§2-2)。
    --sv-line: 輪郭線の濃茶 / --sv-wall: 壁の生成り / --sv-wood: 天板・腰板の橙茶 / --sv-front: カウンター前板 */
 .sv-piece { position: absolute; transform: translate(-50%, -100%); box-sizing: border-box;
   --sv-line: #3a2a1e; --sv-wall: #f3e6ce; --sv-wood: #e0a040; --sv-front: #f7ecd6; --sv-foot: #a0622a; }
+/* v36-1: 部品の面(JSのisoFaces()が菱形の辺から作る平行四辺形・菱形)。仮の色板 */
+.sv-face { position: absolute; }
+.sv-face-wall { background: var(--sv-wall); }            /* 奥壁の立面 */
+.sv-face-wall-side { background: #e6d6b8; }              /* 側壁の立面(奥壁より一段暗く、面の向きの違いを出す) */
+.sv-face-door { background: #d35050; }                   /* 入口の開口 */
+.sv-face-counter-top { background: var(--sv-wood); }     /* カウンターの天板 */
+.sv-face-counter-front { background: var(--sv-front); }  /* カウンターの前板 */
+.sv-face-counter-end { background: #e8d8bc; }            /* カウンター右端の側板 */
 /* 奥壁(横に並ぶ): 上端の線と腰板の帯(横方向の意匠)を持ってよい。左右には線を引かない。
    部品は接地マス(row0)から上へ2マス。腰板は接地マスの下側(床に近い側)に置く */
 .sv-piece-wall-mid {
@@ -975,10 +986,12 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 }
 .sv-piece-counter-l { border-left: 2px solid var(--sv-line); }
 .sv-piece-counter-r { border-right: 2px solid var(--sv-line); }
+/* v36-1: 上の v35-4 の矩形の色板(根の背景・枠線)は斜めでは使わない。根は面(.sv-face)を置くだけの透明な箱 */
+.sv-piece[class] { background: none; border: 0; }
 /* v35-3(§4): ?grid=1 のときだけJSが作る升目(目視判定用)。部屋の何より手前、操作は素通し */
-.sv-grid { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 9999; }
-.sv-grid-cell { position: absolute; box-sizing: border-box; border: 1px solid rgba(0, 0, 255, 0.55); }
-.sv-grid-cell span { position: absolute; left: 1px; top: 0; font: 8px monospace; color: #00f; line-height: 1; }
+.sv-grid { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 9999; overflow: visible; }
+.sv-grid polygon { fill: none; stroke: rgba(0, 0, 255, 0.6); stroke-width: 1; }
+.sv-grid text { font: 7px monospace; fill: #00f; text-anchor: middle; }
 
 /* v35: 以下、床に置く物・壁に掛ける物はすべて translate(-50%,-100%)(足元=下端中央)アンカー。
    接地点の規約を1本化した(素材仕様§2-2。v33-34の「絵ごとに実測した-88.77%等」を不要にする)。

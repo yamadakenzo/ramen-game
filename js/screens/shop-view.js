@@ -23,6 +23,14 @@ window.ShopView = (function () {
   // 決定値。物件が広くなってもこの値は縮めない。
   var CELL = 48;
 
+  // v36-1(docs/指示書/v36-1_斜め視点_座標系_指示書.md): 斜め上からの投影(カイロソフト方式)。
+  // 床のマスは画面上で幅TW×高さTHの菱形。2:1(幅の半分が高さ)の標準的なアイソメで、TW=64は
+  // 「マスの幅≒人物の背丈(PERSON_HEIGHT_CELLS×CELL=60px)」というカイロソフトの比率に合わせた値。
+  // 高さ方向(壁・カウンターの高さ、人物・什器の絵の大きさ)は従来どおりCELL=48を単位にする
+  // (絵はそのまま使う。斜めになるのは床と什器の配置だけ)。
+  // 画面座標: x(col)が増えると右下へ (TW/2, TH/2)、y(row)が増えると左下へ (-TW/2, TH/2)。
+  var TW = 64, TH = 32;
+
   // v35-3(§2、§44-7の保留を解消): 人物の見た目の背丈は「1マスの何倍か」の定数1つだけで持つ。
   // 1.25マス(60px)= 常設の寸胴(🍥、1マス=48px規約、インク実測42px)より高く、入口の開口
   // (2マス=96px)より低い、の中間。客・従業員の画面上の背丈はこの1つの値に揃え、絵ごとの
@@ -41,18 +49,24 @@ window.ShopView = (function () {
   // カウンターの端の位置も記号で書き切る(式で求めない——表を見るだけで目視検証できるように)。
   var ROOMS = {
     shotengai: {
-      cols: 12, rows: 10,
+      cols: 12, rows: 12,
+      // v36-2: 入口Dを手前(row9の正面)へ移し、店の外の道(P、rows10-11)を表に足した。
+      // 道を表の一部として持つ理由: 入口・湧き場所・行列の置き場がすべて同じマス座標で書け、
+      // 変換関数1つで済む(§43-1)。部屋の外の別座標系を持つと、出典が2つになる。
+      // 手前側の2辺(右=col11の外面、手前=row末尾)の壁は描かない(§1、PIECE_CLSの注記)。
       map: [
         "L##########R", // row0 奥壁
         "lKKKKKKKKKKr", // row1 厨房
         "lKKKKKKKKKKr", // row2 厨房
         "l(========)r", // row3 カウンター(左端+中間×8+右端)。両端が側壁に接して1本の台になる
         "lSSSSSSSSSSr", // row4 カウンター席(内側10マス=商店街のcounterSlots=10と一致)
-        "DAAAAAAAAAAr", // row5 通路。入口Dは左側壁のrow5(v33実測 col≈0,row≈5.8と整合)
+        "lAAAAAAAAAAr", // row5 通路
         "lTTTTTTTTTTr", // row6 テーブル席
         "lTTTTTTTTTTr", // row7 テーブル席
         "lAAAAAAAAAAr", // row8 通路
-        "lAAAAAAAAAAr"  // row9 通路(手前。下端は開放=壁を描かない)
+        "lAAAAADAAAAr", // row9 通路。入口D(暖簾)は正面(row9とrow10の境)のcol5
+        "PPPPPPPPPPPP", // row10 店の外の道(行列はここに並ぶ)
+        "PPPPPPPPPPPP"  // row11 道(2列目の行列)
       ]
     }
   };
@@ -67,22 +81,21 @@ window.ShopView = (function () {
   // v35: 間取りの名前付きの点。単位はマスの連続座標(マス(col,row)の中心 = (col+0.5, row+0.5))。
   // 部屋の表(ROOMS)に載らない可動物・小物の置き場所はここが唯一の出典。
   var GEO = {
-    door: { x: 0.5, y: 5.5 },   // 入口(表のD=マス(0,5))の中心
-    off: { x: -1.5, y: 5.5 },   // 湧き/退場先 = 入口の外の道(マス(-2,5))。旧「y>100%=画面外」の
-                                 // 定義は廃止(スクロールで見えても「店の外の人」として自然な位置)
+    door: { x: 5.5, y: 9.5 },   // v36-2: 入口(表のD=マス(5,9))の中心。店の正面(手前)
+    off: { x: 13.5, y: 10.5 },  // v36-2: 湧き/退場先 = 道(row10)の右端の外(画面の右下へ続く道の先)
     kitchenHome: { x: 7.5, y: 2.5 }, // 厨房担当の定位置の基準(K帯。複数人は左右にspread)
     soup: { x: 8.5, y: 1.5 },        // 寸胴/鍋(K)
     noodle: { x: 6.5, y: 1.5 },      // 茹で麺器(K。無い場合の代役も同じ位置)
     plate: { x: 6.5, y: 2.5 },       // 盛り付け台=受け渡し口の立ち位置(K。カウンターのすぐ奥)
     hallHome: { x: 5.5, y: 5.5 },    // ホール担当の定位置(A。カウンターの手前)
-    ticket: { x: 1.5, y: 5.5 },      // 券売機(A。入口のすぐ内側)
+    ticket: { x: 1.5, y: 8.5 },      // v36-2: 券売機(A。入口のある手前の通路の左端)
     counterSeatRow: 4.5,             // 丸椅子の行(表のS行)の中心。席はcol1から1マスに1脚
     // テーブル卓(2マス幅)の接地中心(T帯)。drawMaxTable=4席=2卓ぶんだけ持つ
     tableAnchors: [{ x: 3.0, y: 6.5 }, { x: 7.0, y: 6.5 }],
-    // 行列: 手前の通路(A、rows8-9)に、入口寄りから右へ並べる。GEO.queueColsで折り返す。
-    queueOrigin: { x: 1.5, y: 8.5 },
-    queueColStep: { dx: 0.7, dy: 0 },   // 列の中で1人ずつ進む方向(右へ)
-    queueRowStep: { dx: 0, dy: 0.9 },   // 列が埋まったら次列(さらに手前へ)
+    // v36-2: 行列は店の外の道(P、row10)に、入口の前から道の先(右下)へ向かって並べる。GEO.queueColsで折り返す。
+    queueOrigin: { x: 6.5, y: 10.5 },
+    queueColStep: { dx: 1.0, dy: 0 },   // 列の中で1人ずつ進む方向(道に沿って右下へ)。v36-2: 0.7→1.0マス(0.7だと隣と体が重なって数えられない。実測)
+    queueRowStep: { dx: 0, dy: 0.9 },   // 列が埋まったら次列(row11=道の手前側)
     queueCols: 4,
     drawMaxTable: 4 // テーブル側は実際の卓数より多くは描かない(絵は代表表示。v24からの既存方針)
   };
@@ -145,6 +158,7 @@ window.ShopView = (function () {
   var camOverride = null;
   var CAM_GAP = 6; // HUDと部屋の間に空ける余白(px)。元の手置き値(top-bar 70.8 → y 76)と同じ約5〜6px
   var CAM_ZOOM_MAX = 2; // 寄れる限界(素材仕様§2-1のピンチ上限。客の表情の絵文字が十分読める)
+  var CAM_INIT_S = 0.95; // v36-2 暫定の初期倍率(人物55〜60px)。道ができてから決め直す
   var hudObserver = null;
   var camTouched = false; // ユーザーが一度でもカメラを動かしたらtrue(以後HUDの変化で初期表示へ戻さない)
 
@@ -161,8 +175,9 @@ window.ShopView = (function () {
     return fit;
   }
 
-  // 部屋の画面上の大きさ(奥壁の高さ1マスぶんを上に含む)
-  function roomSize(s) { var room = roomDef(); return { w: room.cols * CELL * s, h: (room.rows + 1) * CELL * s }; }
+  // 部屋の画面上の大きさ(v36-1: 菱形の部屋の外接矩形。横=(cols+rows)×TW/2、縦=(cols+rows)×TH/2+奥壁の高さ)
+  var WALL_RISE = 2 * CELL; // 部屋の外接矩形の上端が row0 の床より上に出る量(奥壁2マスぶん)
+  function roomSize(s) { var room = roomDef(); var n = room.cols + room.rows; return { w: n * TW / 2 * s, h: (n * TH / 2 + WALL_RISE) * s }; }
   // 部屋の全体がfit矩形に丸ごと入る最大の倍率(=初期倍率、かつピンチで引ける限界)
   function fitScale(fit) {
     var r = roomSize(1);
@@ -184,14 +199,18 @@ window.ShopView = (function () {
   function fitCamera() {
     if (camOverride) { CAM = { x: camOverride.x, y: camOverride.y, s: camOverride.s }; return; }
     var fit = viewportFit();
-    var s = coverScale(fit);
+    // v36-2(§4): 暫定の初期倍率。人物の背丈が画面上で55〜60px(=60px×0.95)になる値。道ができて
+    // 縦の広がりが確定してから決め直す(coverScale/fitScaleは限界として残す)。横にはみ出す分はスクロール。
+    var s = Math.min(Math.max(CAM_INIT_S, fitScale(fit)), CAM_ZOOM_MAX);
     var r = roomSize(s);
     var fw = fit.right - fit.left, fh = fit.bottom - fit.top;
     CAM = {
       s: s,
-      x: fit.left + (r.w > fw ? 0 : (fw - r.w) / 2),          // 横にはみ出すなら入口(col0)側を左端に
-      y: fit.top + (r.h > fh ? 0 : (fh - r.h) / 2) + CELL * s  // 縦にはみ出すなら奥壁を上端に
+      // 横にはみ出すなら入口(表のD)の列が画面の中央に来るように(はみ出さなければ中央)。限界はclampCameraが掛ける
+      x: r.w > fw ? (fit.left + fw / 2 - toPxX(GEO.door.x, GEO.door.y) * s) : (fit.left + (fw - r.w) / 2),
+      y: fit.top + (r.h > fh ? 0 : (fh - r.h) / 2) + WALL_RISE * s  // 縦にはみ出すなら奥壁を上端に
     };
+    clampCamera();
   }
 
   // 見回しの限界(§6): 倍率は[初期倍率, CAM_ZOOM_MAX]。位置は「部屋がfit矩形より大きい軸では
@@ -204,9 +223,9 @@ window.ShopView = (function () {
     var r = roomSize(CAM.s);
     var lo = Math.min(fit.left, fit.right - r.w), hi = Math.max(fit.left, fit.right - r.w);
     CAM.x = Math.min(Math.max(CAM.x, lo), hi);
-    var top = CAM.y - CELL * CAM.s; // 奥壁の上端
+    var top = CAM.y - WALL_RISE * CAM.s; // 奥壁の上端
     var tlo = Math.min(fit.top, fit.bottom - r.h), thi = Math.max(fit.top, fit.bottom - r.h);
-    CAM.y = Math.min(Math.max(top, tlo), thi) + CELL * CAM.s;
+    CAM.y = Math.min(Math.max(top, tlo), thi) + WALL_RISE * CAM.s;
   }
 
   function applyCamera() {
@@ -372,14 +391,20 @@ window.ShopView = (function () {
   // 先に描く」を満たすため、静物(buildScenery時に1回)・俳優(move()のたびに)の両方がこれを通す。
   // 係数10は、移動中の小数row(例: 5.5)でも単調な整数zになるようにするため。
   // 基準値100を足しているのは、床タイル(z-index無し=0扱い)より必ず上に来るようにするため。
-  function zForRow(row) { return 100 + Math.round((row || 0) * 10); }
+  // v36-1: 奥行きは col と row の両方から決める(x+y が大きいほど画面の下=手前)。式はこの1つだけで、
+  // 部品ごとの例外のzは使わない(§46-3)。係数10は小数マスでも単調な整数になるように。
+  function zForRow(x, y) { return 100 + Math.round(((x || 0) + (y || 0)) * 10); }
 
-  // v35: マス座標→px。yは「接地マスの下端」アンカー(CSS側の translate(-50%,-100%) と対)。
-  // 素材仕様§2-2「接地マスの中心が配置先マスの中心に一致」を、全部品・全俳優で
-  // 「足元(下端中央)をマスの下端中央に置く」という1つの規約に揃えて実現する。
-  function toPxX(x) { return x * CELL; }
-  function toPxY(y) { return (y + 0.5) * CELL; } // マス中心yの属するマスの下端
-  function fromPxY(px) { return px / CELL - 0.5; }
+  // v36-1: マス座標→px(唯一の変換関数。§43-1「すべての位置はこの戻り値だけで表す」)。
+  // 接地の規約(1つ): **足元(要素の下端中央=CSSの translate(-50%,-100%))を、マスの菱形の中心に置く。**
+  // 正方形の投影では「マスの下端中央」だったが、菱形では下端は1点(下の頂点)になって面の手前に
+  // 出すぎるため、菱形の中心を接地点にする。全部品・全俳優に同じ規約を適用する。
+  // 原点: 部屋の外接矩形の左端(= (0, rows) の頂点)が left=0 になるよう、rows×TW/2 だけ右へずらす。
+  function originX() { return roomDef().rows * TW / 2; }
+  function toPxX(x, y) { return originX() + ((x || 0) - (y || 0)) * TW / 2; }
+  function toPxY(x, y) { return ((x || 0) + (y || 0)) * TH / 2; }
+  // 逆変換(一時停止からの再開で、画面上の現在地をマス座標へ戻すのに使う)
+  function fromPx(left, top) { var u = (left - originX()) / TW, v = top / TH; return { x: u + v, y: v - u }; }
 
   // 2点間を(2軸とも動く前提で)n個の等間隔点に割り付ける。旧spread()(横1軸だけ)の2D版。
   function isoSpread(n, p0, p1) {
@@ -436,8 +461,8 @@ window.ShopView = (function () {
   function resumeActor(a) {
     if (a.gone) return;
     a.el.style.transitionDuration = ""; // 一旦解除。moveが必要ならすぐ上書きする
-    var curX = parseFloat(a.el.style.left) / CELL;
-    var curY = fromPxY(parseFloat(a.el.style.top));
+    var cur = fromPx(parseFloat(a.el.style.left), parseFloat(a.el.style.top)); // v36-1: 逆変換は両軸から
+    var curX = cur.x, curY = cur.y;
     var tgtX = parseFloat(a.el.dataset.x);
     var tgtY = a.tgtY != null ? a.tgtY : curY;
     if (isNaN(tgtX)) return;
@@ -529,9 +554,9 @@ window.ShopView = (function () {
   // 静物を(x,y)(マス)に置く。z-indexはrow(y)から自動計算する(zForRow、店の躯体・俳優共通)。
   // 要素はCSS側で translate(-50%,-100%)(足元=接地マスの下端中央)にアンカーされている前提。
   function placeAt(el, x, y) {
-    el.style.left = toPxX(x) + "px";
-    el.style.top = toPxY(y) + "px";
-    el.style.zIndex = zForRow(y);
+    el.style.left = toPxX(x, y) + "px"; // v36-1: 斜めでは左右の位置もyに依る
+    el.style.top = toPxY(x, y) + "px";
+    el.style.zIndex = zForRow(x, y);
     return el;
   }
   // v35-3(チェックポイント1の回答3): 俳優(客・店員)は行の重なり順(z=row)を本体(.sv-body)だけに
@@ -539,10 +564,39 @@ window.ShopView = (function () {
   // スタッキング文脈になり、子の丼・吹き出しが部屋の物より手前へ出られない)。
   // 丼・吹き出し・評判ポップは「部屋に置かれた物」ではなく「客についた表示」なので常に手前
   // (css/style.cssの .sv-bowl/.sv-bubble/.sv-rep-pop の z-index)。
-  function setActorZ(el, y) {
+  function setActorZ(el, x, y) {
     el.style.zIndex = "";
     var body = el.querySelector(".sv-body");
-    if (body) body.style.zIndex = zForRow(y);
+    if (body) body.style.zIndex = zForRow(x, y);
+  }
+
+  // v36-1: 部品の面を菱形の辺から作る。根(.sv-piece、幅TW・高さH、足元=マスの中心)の座標系で、
+  // マスの菱形の頂点は 上(TW/2,H-TH/2) 右(TW,H) 下(TW/2,H+TH/2) 左(0,H)。見えるのは手前側の2辺
+  // (左→下: 奥壁・カウンターの前板 / 下→右: 側壁の面)を高さHだけ上へ押し出した平行四辺形と、
+  // カウンターの天板(菱形をHだけ持ち上げたもの)。面はclip-pathのpolygonで切る(仮の色板)。
+  function isoFaces(piece, sym, H) {
+    var w2 = TW / 2, h2 = TH / 2;
+    function face(cls, top, height, pts) {
+      var el = block("sv-face " + cls, { left: "0px", top: top + "px", width: TW + "px", height: height + "px" });
+      el.style.clipPath = "polygon(" + pts.map(function (p) { return p[0] + "px " + p[1] + "px"; }).join(",") + ")";
+      piece.appendChild(el);
+    }
+    // 面の座標は「根の上端を0とし、下へ正」。根の高さはH、足元(マス中心)は y=H。
+    // back面(左→下の辺): 奥壁・角の立面、カウンターの前板
+    function back(cls) { face(cls, 0, H + h2, [[0, H], [w2, H + h2], [w2, h2], [0, 0]]); }
+    // side面(下→右の辺): 側壁・角・入口の立面、カウンターの右端の側板
+    function side(cls) { face(cls, 0, H + h2, [[w2, H + h2], [TW, H], [TW, 0], [w2, h2]]); }
+    // 天板: 菱形をHだけ持ち上げたもの
+    function top(cls) { face(cls, -h2, TH, [[w2, 0], [TW, h2], [w2, TH], [0, h2]]); }
+    switch (sym) {
+      case "#": back("sv-face-wall"); break;
+      case "L": back("sv-face-wall"); side("sv-face-wall-side"); break;
+      case "R": back("sv-face-wall"); break;      // v36-2: 右角は奥壁の面だけ(col11側の面は外面=描かない)
+      case "l": side("sv-face-wall-side"); break;  // v36-2: r(col11)は部品なし(手前側の壁は描かない)
+      case "D": back("sv-face-door"); break;       // v36-2: 入口は正面(row9/row10の境=y+0.5の辺)に立つ暖簾
+      case "(": case "=": back("sv-face-counter-front"); top("sv-face-counter-top"); break;
+      case ")": back("sv-face-counter-front"); side("sv-face-counter-end"); top("sv-face-counter-top"); break;
+    }
   }
 
   function buildScenery() {
@@ -560,7 +614,9 @@ window.ShopView = (function () {
     cameraEl = block("sv-camera", {});
     // v35-3(§2): 人物系の大きさの基準(客の1em)。PERSON_HEIGHT_CELLSから作る(CSSには書かない)
     cameraEl.style.fontSize = custFontPx() + "px";
-    fitCamera();
+    // v36-2: ユーザーがカメラを動かした後に舞台を組み直しても(席の購入・雇用・設備購入)初期表示へ戻さない。
+    // 限界に収め直すだけ(watchHudと同じ規則)。組み直しのたびに拡大が解除される実害があった
+    if (camTouched) clampCamera(); else fitCamera();
     applyCamera();
     stage.appendChild(cameraEl);
     watchHud();
@@ -571,7 +627,7 @@ window.ShopView = (function () {
     // 記号→床の色クラス(壁マスには床を敷かない。壁の絵が接地マスごと覆う前提<素材仕様§3-2>)
     // v35-4: 床は本素材の画像(img/stage/floor_wood.webp / floor_tile.webp、1マス48pxに縮小して敷く)。
     // 第2段階の区画ごとの色分け(wood-s/wood-t)は目視判定用だったので廃止し、木目とタイルの2種だけ。
-    var FLOOR_CLS = { "K": "tile", "S": "wood", "A": "wood", "T": "wood", "(": "tile", "=": "tile", ")": "tile", "D": "wood" };
+    var FLOOR_CLS = { "K": "tile", "S": "wood", "A": "wood", "T": "wood", "(": "tile", "=": "tile", ")": "tile", "D": "wood", "P": "road" }; // v36-2: P=店の外の道
     // 記号→高さのある部品 [色クラス, 高さ(マス)]。カウンターは1.2マス
     // (素材仕様§3-3「台の絵は下1マス強」。1.5マスで作ったら、奥のrow2に立つ店員が
     // 頭しか見えなくなるのを実際のスクリーンショットで確認し、1マス強へ直した)。
@@ -580,10 +636,19 @@ window.ShopView = (function () {
     // ある限り、高い部品は必ず1つ奥の部品より後に描かれるので手前に出る(部品ごとの例外のzは不要)。
     // 側壁の帯の部品まで2マスにすると、入口が上下両方の隣(row4・row6)と重なり、どちらの描画順でも
     // 片方に半分隠される(実測で踏んだ)。奥壁(#)は横に並ぶだけなので2マスのまま。
+    // v36-2(§1): 手前側の壁は描かない。根拠: 斜めの投影で見えるのは「奥の2辺(row0側・col0側)の内側の面」と
+    // 「手前の2辺(row末尾側・col11側)の外側の面」で、外側の面はプレイヤーに背を向けて店の中を隠すだけ。
+    // よって col11 の側壁 r は部品を持たず(表には厚みとして残す)、角 R は奥壁の面だけを持つ。
+    // v36-2(§2): 高さの単位は従来どおりCELL=48pxだが、斜めでは行の奥行き差が TH/2=16px しかないため
+    // 「立っている物の高さ÷16px」がそのまま隠す行数になる。
+    //   カウンター 0.6マス=28.8px → 1行奥の人物(60px)の足元12.8pxだけ隠す(2行奥は隠さない)。
+    //   1.2マスのままだと57.6px → 1行奥の人物を41.6px隠して頭と丼だけになる(v36-1で実測)。
+    //   入口(暖簾) 1マス=48px → 2行奥まで隠す(col5のrow7-8は卓の無い通路なので実害なし)。
+    //   奥壁 2マス=96px → 6行ぶんだが奥壁の向こうには何も無い。側壁 1マス=48px(最奥のzなので何も隠さない)。
     var PIECE_CLS = {
       "L": ["wall-corner", 2], "#": ["wall-mid", 2], "R": ["wall-corner", 2],
-      "l": ["wall-side", 1], "r": ["wall-side", 1], "D": ["door", 2],
-      "(": ["counter-l", 1.2], "=": ["counter-mid", 1.2], ")": ["counter-r", 1.2]
+      "l": ["wall-side", 1], "D": ["door", 1],
+      "(": ["counter-l", 0.6], "=": ["counter-mid", 0.6], ")": ["counter-r", 0.6]
     };
     // v35-3(§1、§44-5の「許容」を解消): 重なりの規則は1行——
     // 「壁(側壁・奥壁・入口)は部屋の縁に沿って連続する1枚の面なので手前の行を隠さない(zは部屋の最奥で固定)／
@@ -591,51 +656,46 @@ window.ShopView = (function () {
     // 壁を行ごとに切ってあるのは描画の都合にすぎず、row6の側壁の上半分がrow5の入口や客を覆うのは
     // 「手前の壁の陰」ではなく単なる描画順の事故だった(v35-3調査報告 §1)。
     var WALL_SYMS = "L#RlrD";
-    var WALL_Z = zForRow(-1); // 床(z無し=0)より上、部屋の中の何(row0以上)より奥
+    var WALL_Z = zForRow(-1, 0); // 床(z無し=0)より上、部屋の中の何(奥行き0以上)より奥
+    // v36-1: 床タイルは菱形(CSSのclip-path)。位置は変換関数の戻り値(マスの中心)に
+    // translate(-50%,-50%)で中心合わせ。横2px・縦1px大きくして隣と重ねる(§46-4の小数pxの隙間は斜めでも起きる)
     for (var row = 0; row < room.rows; row++) {
       for (var col = 0; col < room.cols; col++) {
         var sym = room.map[row].charAt(col);
         var fcls = FLOOR_CLS[sym];
         if (fcls) {
-          // 床タイルはtop-left直置き(接地アンカー不要の平面)。z無し(0扱い=必ず一番奥)
-          // v35-4: 1px大きく敷いて隣と重ねる(画像は4辺シームレスなので重なった1pxは隣の最初の1pxと同じ絵)。
-          // ぴったりCELLで敷くと、カメラの倍率でマスの境界が小数pxに落ちたとき1px未満の隙間に舞台の地
-          // (濃茶)が透けて、床に縦横の細い線が出る(実測: 境界の列だけ明度が20〜25低かった)
           cameraEl.appendChild(block("sv-tile sv-tile-" + fcls, {
-            left: (col * CELL) + "px", top: (row * CELL) + "px",
-            width: (CELL + 1) + "px", height: (CELL + 1) + "px"
+            left: toPxX(col + 0.5, row + 0.5) + "px", top: toPxY(col + 0.5, row + 0.5) + "px",
+            width: (TW + 2) + "px", height: (TH + 1) + "px"
           }));
         }
       }
     }
-    // 高さのある部品(壁・カウンター)は床の後に、**奥の行から手前の行へ**描く(v35-4、§46)。
-    // 壁は全部同じz(WALL_Z)なので重なり順はDOMの追加順で決まる(§43-5と同じ性質)。高さのある部品
-    // (入口など)は1つ奥の部品より後に描かれるので手前に出る。帯の部品(側壁l/r)は1マスなので
-    // 手前の行の部品が高い部品を覆うことはない(PIECE_CLSの注記)。カウンターはz=rowなので順序に依らない。
+    // 高さのある部品(壁・カウンター)は床の後に、**奥から手前へ(奥行き x+y の昇順)**描く(§46-3の規則を
+    // 斜めに一般化)。壁は全部同じz(WALL_Z)なので重なり順はDOMの追加順で決まる(§43-5と同じ性質)。
+    // v36-1: 各部品の根は placeAt(マスの中心に足元)で置き、面(壁の立面・カウンターの天板と前板)は
+    // 根の子として isoFaces() が菱形の辺から作る。斜めでは隣り合う壁の面は横に並ぶだけで重ならない。
+    var pieces = [];
     for (var row = 0; row < room.rows; row++) {
       for (var col = 0; col < room.cols; col++) {
         var sym = room.map[row].charAt(col);
-        var pcls = PIECE_CLS[sym];
-        if (pcls) {
-          // v35-4: 床タイルと同じ理由で、横に1pxずつ・上に1px大きく描いて隣と重ねる(倍率で境界が小数pxに
-          // 落ちたときの隙間線を消す。実測: 奥壁の継ぎ目の列が #c4b7a3、側壁が #ebddc6 に沈んでいた)
-          var piece = block("sv-piece sv-piece-" + pcls[0], {
-            width: (CELL + 2) + "px", height: (pcls[1] * CELL + 1) + "px"
-          });
-          placeAt(piece, col + 0.5, row + 0.5); // 接地マス=このマス。絵はそこから上へ伸びる
-          if (WALL_SYMS.indexOf(sym) >= 0) piece.style.zIndex = WALL_Z;
-          // v35-4: 側壁・角・入口の左右(内側の縁の縦線をどちら側に引くか)。CSSの .sv-piece-side-l / -r
-          if ("LlD".indexOf(sym) >= 0) piece.classList.add("sv-piece-side-l");
-          if ("Rr".indexOf(sym) >= 0) piece.classList.add("sv-piece-side-r");
-          cameraEl.appendChild(piece);
-        }
+        if (PIECE_CLS[sym]) pieces.push({ sym: sym, col: col, row: row });
       }
     }
+    pieces.sort(function (a, b) { return (a.col + a.row) - (b.col + b.row); });
+    pieces.forEach(function (p) {
+      var pcls = PIECE_CLS[p.sym];
+      var piece = block("sv-piece sv-piece-" + pcls[0], { width: TW + "px", height: (pcls[1] * CELL) + "px" });
+      isoFaces(piece, p.sym, pcls[1] * CELL);
+      placeAt(piece, p.col + 0.5, p.row + 0.5); // 足元(根の下端中央)=マスの菱形の中心
+      if (WALL_SYMS.indexOf(p.sym) >= 0) piece.style.zIndex = WALL_Z;
+      cameraEl.appendChild(piece);
+    });
 
     // 電灯・ダクト・壁の案内・店名看板は奥壁の面(row0の壁が上へ伸びた部分=部屋の外の負のrow)に
     // 掛ける。yが負のままzForRow()を通すと壁(row0)より奥のzになってしまうため、
     // 「壁に掛かっている物は壁のすぐ手前」としてzだけrow0.6相当を明示的に与える。
-    var wallZ = zForRow(0.6);
+    var wallZ = zForRow(0, 0.6);
     var lampSpots = has("bright_light") ? [{ x: 3.0, y: -0.1 }, { x: 6.5, y: -0.3 }, { x: 9.0, y: -0.1 }] : [{ x: 6.5, y: -0.3 }];
     lampSpots.forEach(function (spot) {
       var el = block("sv-lamp", {}, [AI.node(stageDef(null, "💡"))]);
@@ -667,7 +727,7 @@ window.ShopView = (function () {
     // zは台(row3)より手前を明示する(yを台の見た目の上面<row3.1>に置くとzForRowでは台より奥になるため)。
     orderPileEl = block("sv-order-pile", {});
     placeAt(orderPileEl, GEO.plate.x, 3.1);
-    orderPileEl.style.zIndex = zForRow(3.6);
+    orderPileEl.style.zIndex = zForRow(GEO.plate.x, 3.6);
     cameraEl.appendChild(orderPileEl);
     if (has("multilingual")) {
       var signEl = block("sv-wall-sign", {}, [AI.node(U.findById(EQUIP, "multilingual"))]);
@@ -757,15 +817,28 @@ window.ShopView = (function () {
     // v35-3(§4): ?grid=1 のときだけ、マスの境界線と col,row 番号を部屋に重ねる(目視判定の道具。
     // カメラ層の子なのでスクロール・ピンチでも部屋と一緒に動く。通常プレイには出ない)。
     if (gridDebug) {
-      var gridEl = block("sv-grid", {});
-      for (var gr = -1; gr < room.rows; gr++) {
+      // v36-1: 升目も変換関数から作る(菱形)。SVGの多角形+番号を1枚に描く
+      var NS = "http://www.w3.org/2000/svg";
+      var rs = roomSize(1);
+      var svg = document.createElementNS(NS, "svg");
+      svg.setAttribute("class", "sv-grid");
+      svg.setAttribute("width", rs.w); svg.setAttribute("height", rs.h);
+      svg.style.top = (-WALL_RISE) + "px";
+      for (var gr = 0; gr < room.rows; gr++) {
         for (var gc = 0; gc < room.cols; gc++) {
-          gridEl.appendChild(block("sv-grid-cell", {
-            left: (gc * CELL) + "px", top: (gr * CELL) + "px", width: CELL + "px", height: CELL + "px"
-          }, [h("span", { text: gc + "," + gr })]));
+          var pts = [[gc, gr], [gc + 1, gr], [gc + 1, gr + 1], [gc, gr + 1]].map(function (c) {
+            return toPxX(c[0], c[1]) + "," + (toPxY(c[0], c[1]) + WALL_RISE);
+          }).join(" ");
+          var poly = document.createElementNS(NS, "polygon");
+          poly.setAttribute("points", pts);
+          svg.appendChild(poly);
+          var t = document.createElementNS(NS, "text");
+          t.setAttribute("x", toPxX(gc + 0.5, gr + 0.5)); t.setAttribute("y", toPxY(gc + 0.5, gr + 0.5) + WALL_RISE + 3);
+          t.textContent = gc + "," + gr;
+          svg.appendChild(t);
         }
       }
-      cameraEl.appendChild(gridEl);
+      cameraEl.appendChild(svg);
     }
 
     stage.className = "shop-stage" + (has("bright_light") ? " bright" : "");
@@ -820,7 +893,7 @@ window.ShopView = (function () {
       ]);
       el.style.fontSize = staffFontEm() + "em"; // v35-3(§2): 客と同じ背丈になる倍率(定数1つから導出)
       placeAt(el, home.x, home.y);
-      setActorZ(el, home.y);
+      setActorZ(el, home.x, home.y);
       el.dataset.x = home.x;
       actorLayer.appendChild(el);
       w.el = el; w.gone = false; w.busy = false; w.homeX = home.x; w.homeY = home.y; w.curY = home.y;
@@ -1160,7 +1233,7 @@ window.ShopView = (function () {
       h("span", { className: "sv-bubble", text: "" })
     ]);
     placeAt(el, GEO.off.x, GEO.off.y);
-    setActorZ(el, GEO.off.y);
+    setActorZ(el, GEO.off.x, GEO.off.y);
     var a = {
       id: ++custSeq, // v15-1: 客ごとのID。注文・丼はこの客への参照(actor自体)で1対1に結び付ける
       segId: segId, el: el, seat: null, queued: false, gone: false,
@@ -1199,8 +1272,9 @@ window.ShopView = (function () {
   function move(a, x, y, ms) {
     if (a.gone) return;
     a.el.style.transitionDuration = Math.max(16, ms / spd()) + "ms";
-    a.el.style.left = toPxX(x) + "px";
-    if (y != null) { a.el.style.top = toPxY(y) + "px"; a.tgtY = y; setActorZ(a.el, y); }
+    var ty = y != null ? y : (a.tgtY != null ? a.tgtY : 0); // v36-1: 左右の位置もyに依るので、yを動かさない移動でも現在のyで変換する
+    a.el.style.left = toPxX(x, ty) + "px";
+    if (y != null) { a.el.style.top = toPxY(x, y) + "px"; a.tgtY = y; setActorZ(a.el, x, y); }
     a.el.classList.toggle("flip", x > (parseFloat(a.el.dataset.x || GEO.off.x)));
     a.el.dataset.x = x; // 単位はマス(px変換前の値。距離計算・向きの判定はマスのまま行う)
   }

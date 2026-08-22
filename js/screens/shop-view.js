@@ -1341,14 +1341,59 @@ window.ShopView = (function () {
 
   // v32: y座標も動かすため、z-indexをここで一括更新する(奥にあるものほど先に描く=手前にいる
   // ものが後で描かれて重なった相手を隠す、をzForRow()で機械的に満たす)。
+  // v36-4(docs/完了/v36-4_右隣の建物を抜けて見える客_修正指示書.md、§49): 移動中の z は**足元の現在位置**から
+  // 決める。以前は歩き出しの瞬間に到着点の z を書いて歩行中は固定していたため、歩道を右から左へ歩いて入店する客が
+  // 到着点(5.5,10.5)の z=260 のまま右隣の建物(z 310〜340)の手前を通り、建物の裏に隠れて「建物の中から出てくる」
+  // ように見えた(v36-4調査報告)。位置(left/top)の CSS transition には触れず、rAF で z だけを追従させる。
   function move(a, x, y, ms) {
     if (a.gone) return;
-    a.el.style.transitionDuration = Math.max(16, ms / spd()) + "ms";
+    var dur = Math.max(16, ms / spd());
+    a.el.style.transitionDuration = dur + "ms";
     var ty = y != null ? y : (a.tgtY != null ? a.tgtY : 0); // v36-1: 左右の位置もyに依るので、yを動かさない移動でも現在のyで変換する
     a.el.style.left = toPxX(x, ty) + "px";
-    if (y != null) { a.el.style.top = toPxY(x, y) + "px"; a.tgtY = y; setActorZ(a.el, x, y); }
+    if (y != null) { a.el.style.top = toPxY(x, y) + "px"; a.tgtY = y; }
     a.el.classList.toggle("flip", x > (parseFloat(a.el.dataset.x || GEO.off.x)));
     a.el.dataset.x = x; // 単位はマス(px変換前の値。距離計算・向きの判定はマスのまま行う)
+    trackZ(a, dur);
+  }
+
+  // v36-4: 移動中の俳優の z を毎フレーム足元の実位置(getComputedStyle の left/top = transition 途中の値。
+  // pinActor と同じ読み方)から更新する。transition が終わる時刻(zUntil)を過ぎたら到着点の z を書いて追跡から外す。
+  // 追跡する俳優が無いときは rAF を回さない(行列が伸びたときの負荷は「動いている人数×getComputedStyle 1回」だけ)。
+  var zTracked = [];
+  var zRaf = null;
+  function applyZFromLayout(a) {
+    var cs = getComputedStyle(a.el);
+    var cur = fromPx(parseFloat(cs.left), parseFloat(cs.top));
+    setActorZ(a.el, cur.x, cur.y);
+  }
+  function trackZ(a, dur) {
+    applyZFromLayout(a); // 歩き出しの瞬間は出発点の z(到着点の z ではない)
+    a.zUntil = performance.now() + dur + 32; // 終端は transition の完了後に到着点の z へ揃える(+2フレームの余裕)
+    if (zTracked.indexOf(a) < 0) zTracked.push(a);
+    if (zRaf == null) zRaf = requestAnimationFrame(stepZ);
+  }
+  function stepZ() {
+    zRaf = null;
+    var now = performance.now();
+    for (var i = zTracked.length - 1; i >= 0; i--) {
+      var a = zTracked[i];
+      if (a.gone || !a.el.parentNode) { zTracked.splice(i, 1); continue; }
+      if (now >= a.zUntil || frozen) {
+        // 到着(または一時停止でピン留め)。到着点(dataset.x, tgtY)の z で確定する。一時停止中はピン留めされた
+        // 位置の z のまま止め、再開時の move() が再び追跡を始める
+        if (frozen) applyZFromLayout(a); else setActorZ(a.el, parseFloat(a.el.dataset.x), a.tgtY != null ? a.tgtY : 0);
+        zTracked.splice(i, 1);
+        continue;
+      }
+      applyZFromLayout(a);
+    }
+    if (zTracked.length && !frozen) zRaf = requestAnimationFrame(stepZ);
+  }
+  function stopZTracking() {
+    if (zRaf != null) cancelAnimationFrame(zRaf);
+    zRaf = null;
+    zTracked = [];
   }
 
   // v32: 斜め上視点では移動が斜めになるため、x・y両方の距離を合成した直線距離で歩行時間を計算する。
@@ -1687,6 +1732,7 @@ window.ShopView = (function () {
 
   function destroy() {
     clearTimers();
+    stopZTracking(); // v36-4
     if (hudObserver) { hudObserver.disconnect(); hudObserver = null; }
     // v35-3(§5): 舞台のDOMも取り除く(#screen-setupの背景に残った古い.shop-stageが、営業画面へ
     // 移った後も非表示のまま残って要素の計測・計数に引っかかっていた。v35-3調査報告 3-b)

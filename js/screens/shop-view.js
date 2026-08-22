@@ -49,7 +49,7 @@ window.ShopView = (function () {
   // カウンターの端の位置も記号で書き切る(式で求めない——表を見るだけで目視検証できるように)。
   var ROOMS = {
     shotengai: {
-      cols: 12, rows: 12,
+      cols: 12, rows: 10,
       // v36-2: 入口Dを手前(row9の正面)へ移し、店の外の道(P、rows10-11)を表に足した。
       // 道を表の一部として持つ理由: 入口・湧き場所・行列の置き場がすべて同じマス座標で書け、
       // 変換関数1つで済む(§43-1)。部屋の外の別座標系を持つと、出典が2つになる。
@@ -64,10 +64,38 @@ window.ShopView = (function () {
         "lTTTTTTTTTTr", // row6 テーブル席
         "lTTTTTTTTTTr", // row7 テーブル席
         "lAAAAAAAAAAr", // row8 通路
-        "lAAAAADAAAAr", // row9 通路。入口D(暖簾)は正面(row9とrow10の境)のcol5
-        "PPPPPPPPPPPP", // row10 店の外の道(行列はここに並ぶ)
-        "PPPPPPPPPPPP"  // row11 道(2列目の行列)
-      ]
+        "lAAAAADAAAAr"  // row9 通路。入口D(暖簾)は正面(row9とrow10の境)のcol5
+      ],
+      // v36-3: 店の外(町)。同じマス座標で、col0=店のcol-3、row0=店のrow0 から始まる表(店の区画 '.' は描かない)。
+      // 記号: N=隣の建物(2マス高) F=塀(0.5マス) W=歩道 C=車道 B=向かいの建物(1.5マス高) .=なし
+      // 配置の根拠:
+      //  - 左隣(cols-3〜-1)は店より奥(x+yが小さい)なので店を隠さない。
+      //  - 右隣は店より手前(x+yが大きい)で、建物の高さ÷16pxの行数だけ店の右側を覆う(§47-4)。rows0-7は
+      //    0.5マスの塀(覆うのは壁の列col11だけ)、rows8-9だけ2マスの建物(覆うのは卓の無いT/A帯の(9,6)(10,7)(11,8))。
+      //  - 向かいの建物(rows15-16)は1.5マス。2マスだと歩道(rows10-11)の行列まで覆う。なお向かいの建物が店に向ける
+      //    正面(-y側)はこの投影では視線と逆向きで見えない(見えるのは背面と側面)。
+      town: {
+        col0: -3, row0: 0,
+        map: [
+          "NNN............FFF", // row0
+          "NNN............FFF", // row1
+          "NNN............FFF", // row2
+          "NNN............FFF", // row3
+          "NNN............FFF", // row4
+          "NNN............FFF", // row5
+          "NNN............FFF", // row6
+          "NNN............FFF", // row7
+          "NNN............NNN", // row8 右隣の建物(手前の2行だけ)
+          "NNN............NNN", // row9
+          "WWWWWWWWWWWWWWWWWW", // row10 歩道(行列)
+          "WWWWWWWWWWWWWWWWWW", // row11 歩道(行列の2列目)
+          "CCCCCCCCCCCCCCCCCC", // row12 車道
+          "CCCCCCCCCCCCCCCCCC", // row13 車道
+          "WWWWWWWWWWWWWWWWWW", // row14 向かいの歩道
+          "BBBBBBBBBBBBBBBBBB", // row15 向かいの建物
+          "BBBBBBBBBBBBBBBBBB"  // row16 向かいの建物
+        ]
+      }
     }
   };
   // 商店街以外の物件は今回対象外で、商店街の表を流用しているだけ(未対応の明示。v35-2指示書の指定)。
@@ -82,7 +110,13 @@ window.ShopView = (function () {
   // 部屋の表(ROOMS)に載らない可動物・小物の置き場所はここが唯一の出典。
   var GEO = {
     door: { x: 5.5, y: 9.5 },   // v36-2: 入口(表のD=マス(5,9))の中心。店の正面(手前)
-    off: { x: 13.5, y: 10.5 },  // v36-2: 湧き/退場先 = 道(row10)の右端の外(画面の右下へ続く道の先)
+    off: { x: 15.5, y: 10.5 },  // v36-3: 湧き/退場先 = 歩道(row10)の右端の外(右隣の建物の先。通りの向こうへ消える)
+    // v36-3: 店の中の動線(入口から席まで、壁・什器を通り抜けない道筋)。入口の列(col5)は卓(cols2-4・6-8)の間の
+    // 通路で、row5(A)がカウンター席の前の通路、row8(A)が卓の手前の通路。席との行き来は必ずこの3本を経由する
+    lane: { x: 5.5 },        // 入口の列(奥へ向かう通路)
+    aisleRow: 5.5,           // カウンター席の前の通路(row5)
+    frontRow: 8.5,           // 卓の手前の通路(row8)
+    walkRow: 10.5,           // 歩道(row10)。入口を出たら歩道に出てから通りの先へ
     kitchenHome: { x: 7.5, y: 2.5 }, // 厨房担当の定位置の基準(K帯。複数人は左右にspread)
     soup: { x: 8.5, y: 1.5 },        // 寸胴/鍋(K)
     noodle: { x: 6.5, y: 1.5 },      // 茹で麺器(K。無い場合の代役も同じ位置)
@@ -176,8 +210,21 @@ window.ShopView = (function () {
   }
 
   // 部屋の画面上の大きさ(v36-1: 菱形の部屋の外接矩形。横=(cols+rows)×TW/2、縦=(cols+rows)×TH/2+奥壁の高さ)
-  var WALL_RISE = 2 * CELL; // 部屋の外接矩形の上端が row0 の床より上に出る量(奥壁2マスぶん)
-  function roomSize(s) { var room = roomDef(); var n = room.cols + room.rows; return { w: n * TW / 2 * s, h: (n * TH / 2 + WALL_RISE) * s }; }
+  var WALL_RISE = 2 * CELL; // 外接矩形の上端が最奥のマスの床より上に出る量(奥壁・隣の建物2マスぶん)
+  // v36-3: 外接矩形は店(ROOMS.map)と町(ROOMS.town)を合わせた範囲
+  function roomExtent() {
+    var room = roomDef();
+    var e = { colMin: 0, colMax: room.cols - 1, rowMin: 0, rowMax: room.rows - 1 };
+    if (room.town) {
+      e.colMin = Math.min(e.colMin, room.town.col0); e.rowMin = Math.min(e.rowMin, room.town.row0);
+      e.colMax = Math.max(e.colMax, room.town.col0 + room.town.map[0].length - 1);
+      e.rowMax = Math.max(e.rowMax, room.town.row0 + room.town.map.length - 1);
+    }
+    return e;
+  }
+  function roomSize(s) { var e = roomExtent(); var n = (e.colMax + 1 - e.colMin) + (e.rowMax + 1 - e.rowMin); return { w: n * TW / 2 * s, h: (n * TH / 2 + WALL_RISE) * s }; }
+  // 外接矩形の上端から、CAM.y(マス(0,0)の菱形の上辺=top 0)までの距離(倍率1)
+  function roomRise() { var e = roomExtent(); return WALL_RISE - (e.colMin + e.rowMin) * TH / 2; }
   // 部屋の全体がfit矩形に丸ごと入る最大の倍率(=初期倍率、かつピンチで引ける限界)
   function fitScale(fit) {
     var r = roomSize(1);
@@ -208,7 +255,7 @@ window.ShopView = (function () {
       s: s,
       // 横にはみ出すなら入口(表のD)の列が画面の中央に来るように(はみ出さなければ中央)。限界はclampCameraが掛ける
       x: r.w > fw ? (fit.left + fw / 2 - toPxX(GEO.door.x, GEO.door.y) * s) : (fit.left + (fw - r.w) / 2),
-      y: fit.top + (r.h > fh ? 0 : (fh - r.h) / 2) + WALL_RISE * s  // 縦にはみ出すなら奥壁を上端に
+      y: fit.top + (r.h > fh ? 0 : (fh - r.h) / 2) + roomRise() * s  // 縦にはみ出すなら奥壁を上端に
     };
     clampCamera();
   }
@@ -223,9 +270,9 @@ window.ShopView = (function () {
     var r = roomSize(CAM.s);
     var lo = Math.min(fit.left, fit.right - r.w), hi = Math.max(fit.left, fit.right - r.w);
     CAM.x = Math.min(Math.max(CAM.x, lo), hi);
-    var top = CAM.y - WALL_RISE * CAM.s; // 奥壁の上端
+    var top = CAM.y - roomRise() * CAM.s; // 外接矩形の上端
     var tlo = Math.min(fit.top, fit.bottom - r.h), thi = Math.max(fit.top, fit.bottom - r.h);
-    CAM.y = Math.min(Math.max(top, tlo), thi) + WALL_RISE * CAM.s;
+    CAM.y = Math.min(Math.max(top, tlo), thi) + roomRise() * CAM.s;
   }
 
   function applyCamera() {
@@ -400,7 +447,7 @@ window.ShopView = (function () {
   // 正方形の投影では「マスの下端中央」だったが、菱形では下端は1点(下の頂点)になって面の手前に
   // 出すぎるため、菱形の中心を接地点にする。全部品・全俳優に同じ規約を適用する。
   // 原点: 部屋の外接矩形の左端(= (0, rows) の頂点)が left=0 になるよう、rows×TW/2 だけ右へずらす。
-  function originX() { return roomDef().rows * TW / 2; }
+  function originX() { var e = roomExtent(); return (e.rowMax + 1 - e.colMin) * TW / 2; } // 外接矩形の左端(頂点(colMin,rowMax+1))が left=0
   function toPxX(x, y) { return originX() + ((x || 0) - (y || 0)) * TW / 2; }
   function toPxY(x, y) { return ((x || 0) + (y || 0)) * TH / 2; }
   // 逆変換(一時停止からの再開で、画面上の現在地をマス座標へ戻すのに使う)
@@ -596,6 +643,10 @@ window.ShopView = (function () {
       case "D": back("sv-face-door"); break;       // v36-2: 入口は正面(row9/row10の境=y+0.5の辺)に立つ暖簾
       case "(": case "=": back("sv-face-counter-front"); top("sv-face-counter-top"); break;
       case ")": back("sv-face-counter-front"); side("sv-face-counter-end"); top("sv-face-counter-top"); break;
+      // v36-3 町: 建物・塀は箱(正面=back面、右側面=side面、屋根=top)。隣り合うマスの重なりは奥行き順の描画で隠れる
+      case "N": back("sv-face-bldg"); side("sv-face-bldg-side"); top("sv-face-roof"); break;
+      case "F": back("sv-face-fence"); side("sv-face-fence-side"); top("sv-face-fence-top"); break;
+      case "B": back("sv-face-far"); side("sv-face-far-side"); top("sv-face-far-roof"); break;
     }
   }
 
@@ -627,7 +678,10 @@ window.ShopView = (function () {
     // 記号→床の色クラス(壁マスには床を敷かない。壁の絵が接地マスごと覆う前提<素材仕様§3-2>)
     // v35-4: 床は本素材の画像(img/stage/floor_wood.webp / floor_tile.webp、1マス48pxに縮小して敷く)。
     // 第2段階の区画ごとの色分け(wood-s/wood-t)は目視判定用だったので廃止し、木目とタイルの2種だけ。
-    var FLOOR_CLS = { "K": "tile", "S": "wood", "A": "wood", "T": "wood", "(": "tile", "=": "tile", ")": "tile", "D": "wood", "P": "road" }; // v36-2: P=店の外の道
+    var FLOOR_CLS = { "K": "tile", "S": "wood", "A": "wood", "T": "wood", "(": "tile", "=": "tile", ")": "tile", "D": "wood" };
+    // v36-3: 町の記号→地面の色クラスと、高さのある部品 [面の色クラス, 高さ(マス)]
+    var TOWN_FLOOR = { "W": "walk", "C": "road", "N": "lot", "F": "lot", "B": "lot" };
+    var TOWN_PIECE = { "N": ["bldg", 2], "F": ["fence", 0.5], "B": ["far", 1.5] };
     // 記号→高さのある部品 [色クラス, 高さ(マス)]。カウンターは1.2マス
     // (素材仕様§3-3「台の絵は下1マス強」。1.5マスで作ったら、奥のrow2に立つ店員が
     // 頭しか見えなくなるのを実際のスクリーンショットで確認し、1マス強へ直した)。
@@ -679,16 +733,34 @@ window.ShopView = (function () {
     for (var row = 0; row < room.rows; row++) {
       for (var col = 0; col < room.cols; col++) {
         var sym = room.map[row].charAt(col);
-        if (PIECE_CLS[sym]) pieces.push({ sym: sym, col: col, row: row });
+        if (PIECE_CLS[sym]) pieces.push({ sym: sym, col: col, row: row, cls: PIECE_CLS[sym] });
+      }
+    }
+    // v36-3: 町(ROOMS.town)。地面は店の床と同じ菱形、建物・塀は店の什器と同じ面の作り(isoFaces)。
+    // 建物のzは奥行き(z=col+row)=部屋の中の物と同じ扱い(店の壁のように最奥固定にはしない。右隣は
+    // 物理的に店より手前にあるので、隠すものは隠す。その範囲は表のコメントに計算してある)
+    if (room.town) {
+      for (var tr = 0; tr < room.town.map.length; tr++) {
+        for (var tc = 0; tc < room.town.map[tr].length; tc++) {
+          var tsym = room.town.map[tr].charAt(tc);
+          var gcol = room.town.col0 + tc, grow = room.town.row0 + tr;
+          if (TOWN_FLOOR[tsym]) {
+            cameraEl.appendChild(block("sv-tile sv-tile-" + TOWN_FLOOR[tsym], {
+              left: toPxX(gcol + 0.5, grow + 0.5) + "px", top: toPxY(gcol + 0.5, grow + 0.5) + "px",
+              width: (TW + 2) + "px", height: (TH + 1) + "px"
+            }));
+          }
+          if (TOWN_PIECE[tsym]) pieces.push({ sym: tsym, col: gcol, row: grow, cls: TOWN_PIECE[tsym], town: true });
+        }
       }
     }
     pieces.sort(function (a, b) { return (a.col + a.row) - (b.col + b.row); });
     pieces.forEach(function (p) {
-      var pcls = PIECE_CLS[p.sym];
+      var pcls = p.cls;
       var piece = block("sv-piece sv-piece-" + pcls[0], { width: TW + "px", height: (pcls[1] * CELL) + "px" });
       isoFaces(piece, p.sym, pcls[1] * CELL);
       placeAt(piece, p.col + 0.5, p.row + 0.5); // 足元(根の下端中央)=マスの菱形の中心
-      if (WALL_SYMS.indexOf(p.sym) >= 0) piece.style.zIndex = WALL_Z;
+      if (!p.town && WALL_SYMS.indexOf(p.sym) >= 0) piece.style.zIndex = WALL_Z;
       cameraEl.appendChild(piece);
     });
 
@@ -823,17 +895,17 @@ window.ShopView = (function () {
       var svg = document.createElementNS(NS, "svg");
       svg.setAttribute("class", "sv-grid");
       svg.setAttribute("width", rs.w); svg.setAttribute("height", rs.h);
-      svg.style.top = (-WALL_RISE) + "px";
+      svg.style.top = (-roomRise()) + "px";
       for (var gr = 0; gr < room.rows; gr++) {
         for (var gc = 0; gc < room.cols; gc++) {
           var pts = [[gc, gr], [gc + 1, gr], [gc + 1, gr + 1], [gc, gr + 1]].map(function (c) {
-            return toPxX(c[0], c[1]) + "," + (toPxY(c[0], c[1]) + WALL_RISE);
+            return toPxX(c[0], c[1]) + "," + (toPxY(c[0], c[1]) + roomRise());
           }).join(" ");
           var poly = document.createElementNS(NS, "polygon");
           poly.setAttribute("points", pts);
           svg.appendChild(poly);
           var t = document.createElementNS(NS, "text");
-          t.setAttribute("x", toPxX(gc + 0.5, gr + 0.5)); t.setAttribute("y", toPxY(gc + 0.5, gr + 0.5) + WALL_RISE + 3);
+          t.setAttribute("x", toPxX(gc + 0.5, gr + 0.5)); t.setAttribute("y", toPxY(gc + 0.5, gr + 0.5) + roomRise() + 3);
           t.textContent = gc + "," + gr;
           svg.appendChild(t);
         }
@@ -1286,14 +1358,40 @@ window.ShopView = (function () {
     return Math.sqrt(dx * dx + dy * dy) * gm(minPerCell || WALK_MIN_PER_CELL);
   }
 
+  // v36-3: 経由点を順に歩く(各区間は move() + later())。合計の所要msを返す。状態遷移の判断(いつ帰るか・
+  // いつ座るか)は呼び出し側のまま——変わるのは道筋だけ。一時停止はmove()単位で効く(pinActor/resumeActor)。
+  function walkVia(a, pts, minPerCell, done) {
+    var fromX = parseFloat(a.el.dataset.x != null ? a.el.dataset.x : GEO.off.x);
+    var fromY = a.tgtY != null ? a.tgtY : GEO.off.y;
+    var legs = [], total = 0;
+    pts.forEach(function (p) { var ms = walkMs2(fromX, fromY, p.x, p.y, minPerCell); legs.push({ p: p, ms: ms }); total += ms; fromX = p.x; fromY = p.y; });
+    function step(i) {
+      if (a.gone) return;
+      if (i >= legs.length) { if (done) done(); return; }
+      move(a, legs[i].p.x, legs[i].p.y, legs[i].ms);
+      later(function () { step(i + 1); }, legs[i].ms);
+    }
+    step(0);
+    return total;
+  }
+  // 入口→席の道筋(壁・什器を通り抜けない)。カウンター席: 入口の列を奥へ→カウンター前の通路を横へ→席。
+  // 卓の席: 入口の列を奥へ→卓の手前の通路を横へ→席。帰りはこの逆順+歩道へ出て通りの先(off)へ。
+  function routeDoorToSeat(seat) {
+    if (seat.kind === "counter") return [{ x: GEO.lane.x, y: GEO.frontRow }, { x: GEO.lane.x, y: GEO.aisleRow }, { x: seat.x, y: GEO.aisleRow }, { x: seat.x, y: seat.y }];
+    return [{ x: GEO.lane.x, y: GEO.frontRow }, { x: seat.x, y: GEO.frontRow }, { x: seat.x, y: seat.y }];
+  }
+  function routeSeatToOff(seat) {
+    var back = routeDoorToSeat(seat).slice(0, -1).reverse(); // 席の1つ手前から入口側へ戻る
+    return back.concat([{ x: GEO.door.x, y: GEO.door.y }, { x: GEO.door.x, y: GEO.walkRow }, { x: GEO.off.x, y: GEO.off.y }]);
+  }
+
   function spawnCustomer(segId) {
     var a = makeActor(segId);
     // 初期位置を確定させてから移動させる。requestAnimationFrame だと
     // タブが非表示のときにコールバックが来ず、客が湧いた位置で固まる。
     void a.el.offsetWidth;
-    var ms = walkMs2(GEO.off.x, GEO.off.y, GEO.door.x, GEO.door.y);
-    move(a, GEO.door.x, GEO.door.y, ms);
-    later(function () { arriveDoor(a); }, ms);
+    // v36-3: 歩道を歩いて入口の前に来てから入口へ(建物の前を通り抜けない)
+    walkVia(a, [{ x: GEO.door.x, y: GEO.walkRow }, { x: GEO.door.x, y: GEO.door.y }], null, function () { arriveDoor(a); });
   }
 
   function freeSeat() {
@@ -1379,13 +1477,9 @@ window.ShopView = (function () {
     // 方式に変わったため、着席イベントを数えるコールバック(onEnterCb)は廃止した。
     a.orderedAt = nowLabel(); // v15-1: 着席が決まった瞬間=注文発生(既存のplaceOrderと同じ瞬間)
     placeOrder(seat, a); // v13-1: 入店=注文発生。手が空いている厨房担当がいなければ席で待ったままになる
-    var fromX = parseFloat(a.el.dataset.x || GEO.door.x);
-    var fromY = a.tgtY != null ? a.tgtY : GEO.door.y;
-    // v32: 横から見た旧版は「席のx手前まで歩く→縦にsitYまで座る」の2段階だったが、斜め上視点は
-    // 席のx・yへ1本の斜め移動で向かう(そのぶんSIT_MINは「座る間合い」の一拍としてタイマーだけ残す)。
-    var ms = walkMs2(fromX, fromY, seat.x, seat.y, SEAT_WALK_MIN_PER_CELL) + gm(ENTER_EXTRA_MIN);
-    move(a, seat.x, seat.y, ms);
-    later(function () {
+    // v36-3: 入口→通路→席の道筋を歩く(壁・什器を通り抜けない)。着席の処理は到着後+ENTER_EXTRA_MINの一拍
+    walkVia(a, routeDoorToSeat(seat), SEAT_WALK_MIN_PER_CELL, function () { later(afterArrive, gm(ENTER_EXTRA_MIN) + gm(SIT_MIN)); }); // 尺は旧「歩行+ENTER_EXTRA+SIT」と同じ内訳
+    function afterArrive() {
       if (a.gone) return;
       a.seatedAt = nowLabel();
       setBubbleText(a, "🕐");
@@ -1403,7 +1497,7 @@ window.ShopView = (function () {
       // 「丼待ち」ではないため)。数値・タイミング定数は一切変えていない、状態機械の
       // 整合性だけを直す修正。
       if (!a.eatingStarted) a.waiting = true;
-    }, ms + gm(SIT_MIN));
+    }
   }
 
   // v14-5: 丼が実際に届いた瞬間(runSoloCycle/runHallCycle/runKitchenCycleのdeliverステップ)にだけ
@@ -1444,9 +1538,7 @@ window.ShopView = (function () {
         if (a.gone) return;
         seat.occupant = null;
         a.seat = null;
-        var ms = walkMs2(seat.x, seat.y, GEO.off.x, GEO.off.y, SEAT_WALK_MIN_PER_CELL);
-        move(a, GEO.off.x, GEO.off.y, ms);
-        later(function () { removeActor(a); }, ms);
+        walkVia(a, routeSeatToOff(seat), SEAT_WALK_MIN_PER_CELL, function () { removeActor(a); }); // v36-3: 入口を通って歩道へ
         pullFromQueue();
       }, gm(LEAVE_WAIT_MIN));
     });
@@ -1468,9 +1560,7 @@ window.ShopView = (function () {
       if (a.gone) return;
       seat.occupant = null;
       a.seat = null;
-      var ms = walkMs2(seat.x, seat.y, GEO.off.x, GEO.off.y, SEAT_WALK_MIN_PER_CELL);
-      move(a, GEO.off.x, GEO.off.y, ms);
-      later(function () { removeActor(a); }, ms);
+      walkVia(a, routeSeatToOff(seat), SEAT_WALK_MIN_PER_CELL, function () { removeActor(a); }); // v36-3: 入口を通って歩道へ
       pullFromQueue();
     }, gm(LEAVE_WAIT_MIN));
   }

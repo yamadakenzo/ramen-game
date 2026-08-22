@@ -948,7 +948,9 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .sv-tile { position: absolute; transform: translate(-50%, -50%); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
 .sv-tile-wood { background: #d9a648; } /* S/A/T/D 客席の木目床(仮) */
 .sv-tile-tile { background: #cfe3d6; } /* K 厨房のタイル床(仮) */
-.sv-tile-road { background: #b3aa9c; } /* P 店の外の道(仮) v36-2 */
+.sv-tile-walk { background: #d6d0c4; } /* W 歩道(仮) v36-3 */
+.sv-tile-road { background: #8d8880; } /* C 車道(仮) v36-3 */
+.sv-tile-lot  { background: #c4bdb0; } /* N/F/B 建物・塀の敷地(仮) v36-3 */
 /* 高さのある部品(壁・カウンター)。接地はtranslate(-50%,-100%)=足元アンカーで全部品共通(素材仕様§2-2)。
    --sv-line: 輪郭線の濃茶 / --sv-wall: 壁の生成り / --sv-wood: 天板・腰板の橙茶 / --sv-front: カウンター前板 */
 .sv-piece { position: absolute; transform: translate(-50%, -100%); box-sizing: border-box;
@@ -961,6 +963,16 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .sv-face-counter-top { background: var(--sv-wood); }     /* カウンターの天板 */
 .sv-face-counter-front { background: var(--sv-front); }  /* カウンターの前板 */
 .sv-face-counter-end { background: #e8d8bc; }            /* カウンター右端の側板 */
+/* v36-3 町(仮の色板): 隣の建物・塀・向かいの建物 */
+.sv-face-bldg { background: #efe0c2; }        /* 隣の建物の正面 */
+.sv-face-bldg-side { background: #d9c7a4; }   /* 隣の建物の側面 */
+.sv-face-roof { background: #8a6a52; }        /* 屋根 */
+.sv-face-fence { background: #a07a52; }       /* 塀 */
+.sv-face-fence-side { background: #8a6844; }
+.sv-face-fence-top { background: #b08a60; }
+.sv-face-far { background: #d8cdb8; }         /* 向かいの建物(背面) */
+.sv-face-far-side { background: #c2b59e; }
+.sv-face-far-roof { background: #7a6450; }
 /* 奥壁(横に並ぶ): 上端の線と腰板の帯(横方向の意匠)を持ってよい。左右には線を引かない。
    部品は接地マス(row0)から上へ2マス。腰板は接地マスの下側(床に近い側)に置く */
 .sv-piece-wall-mid {

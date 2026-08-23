@@ -40,6 +40,23 @@ window.ShopView = (function () {
   var CUST_VISIBLE_RATIO = 0.8047;  // 客の絵(img/segment/*.webp): 見た目の高さ/キャンバス高さ
   var STAFF_VISIBLE_RATIO = 0.7883; // 従業員の絵(img/character/*.webp): 同上
   function custFontPx() { return PERSON_HEIGHT_CELLS * CELL / CUST_VISIBLE_RATIO; }
+  // v37-1(試作): 歩行2コマ(img/segment/walk_a/walk_b.webp、151×256)。客層1種だけに試験適用する。
+  // 絵は「下端=キャンバス下端」で切り出してあり、見た目の高さ/キャンバス高さ=1.0000(α>8で実測、§43-7と同じ測り方)。
+  // 客の1em(=custFontPx)は80.47%の絵に合わせた値なので、本体のfont-sizeを比率の比で縮めて背丈60pxに揃える。
+  // 切り替えは時間ではなく移動量基準: 足元の実位置がWALK_FRAME_CELLSマス進むごとにA/Bを入れ替える。
+  var WALK_SEG_ID = "regular";         // 試験適用する客層(チュートリアル開始の物件shotengaiで最初に湧く客層)
+  var WALK_VISIBLE_RATIO = 1.0;        // walk_a/b.webp: 見た目の高さ/キャンバス高さ(実測 256/256)
+  var WALK_FRAME_CELLS = 1.0;          // 何マス進むごとにコマを替えるか(目視で遅ければ0.5へ)
+  var WALK_FRAMES = ["segment/walk_a", "segment/walk_b"];
+  function walkFontEm() { return CUST_VISIBLE_RATIO / WALK_VISIBLE_RATIO; }
+  function walkImgDef(def, i) { return { img: WALK_FRAMES[i], emoji: def.emoji, name: def.name }; }
+  function setWalkFrame(a, i) {
+    if (!a.walk || a.walk.frame === i) return;
+    a.walk.frame = i;
+    // <img>の作り方(?v=__BUILD__の付け方・読めないときの絵文字フォールバック)はAI.nodeに任せ、要素ごと差し替える
+    var next = AI.node(walkImgDef(a.walk.def, i));
+    a.body.replaceChild(next, a.body.firstChild);
+  }
   function staffFontEm() { return CUST_VISIBLE_RATIO / STAFF_VISIBLE_RATIO; } // .sv-camera(=客の1em)に対する従業員の倍率
 
   // v35(v35-2指示書 §1-1): 部屋の表。区画は数式ではなく人が書いた文字の表で持つ(§43-2の教訓)。
@@ -1299,9 +1316,10 @@ window.ShopView = (function () {
 
   function makeActor(segId) {
     var def = segDef(segId);
+    var useWalk = segId === WALK_SEG_ID && def && def.img;
     var el = h("div", { className: "sv-cust" }, [
       h("span", { className: "sv-bowl" }, [AI.node(stageDef("bowl", "🍜"))]),
-      h("span", { className: "sv-body" }, [AI.node(def || stageDef(null, "🧑"))]),
+      h("span", { className: "sv-body" }, [AI.node(useWalk ? walkImgDef(def, 0) : def || stageDef(null, "🧑"))]),
       h("span", { className: "sv-bubble", text: "" })
     ]);
     placeAt(el, GEO.off.x, GEO.off.y);
@@ -1321,9 +1339,14 @@ window.ShopView = (function () {
       // v26(追補§B-2): 同じ理由で、湧いた時点の週番号も固定で持たせる(priceOwedと同じ経路)。
       spawnWeek: traffic.week || 0,
       body: el.querySelector(".sv-body"),
+      walk: null, // v37-1: 歩行2コマの状態(適用する客層だけ非null)
       bowl: el.querySelector(".sv-bowl"),
       bubble: el.querySelector(".sv-bubble")
     };
+    if (useWalk) {
+      a.body.style.fontSize = walkFontEm() + "em";
+      a.walk = { frame: 0, def: def, acc: 0, last: null };
+    }
     actorLayer.appendChild(el);
     actors.push(a);
     return a;
@@ -1366,6 +1389,24 @@ window.ShopView = (function () {
     var cs = getComputedStyle(a.el);
     var cur = fromPx(parseFloat(cs.left), parseFloat(cs.top));
     setActorZ(a.el, cur.x, cur.y);
+    stepWalk(a, cur);
+  }
+  // v37-1: 歩行コマ。zの追跡と同じ実位置(cur、マス)から進んだ距離を積み、WALK_FRAME_CELLSごとにA/Bを入れ替える。
+  // 追跡から外れる(到着・一時停止)ときはAに戻す(stopWalk)。
+  function stepWalk(a, cur) {
+    if (!a.walk) return;
+    var w = a.walk;
+    if (w.last) {
+      var dx = cur.x - w.last.x, dy = cur.y - w.last.y;
+      w.acc += Math.sqrt(dx * dx + dy * dy);
+      if (w.acc >= WALK_FRAME_CELLS) { w.acc -= WALK_FRAME_CELLS; setWalkFrame(a, w.frame ? 0 : 1); }
+    }
+    w.last = cur;
+  }
+  function stopWalk(a) {
+    if (!a.walk) return;
+    a.walk.last = null; a.walk.acc = 0;
+    setWalkFrame(a, 0);
   }
   function trackZ(a, dur) {
     applyZFromLayout(a); // 歩き出しの瞬間は出発点の z(到着点の z ではない)
@@ -1383,6 +1424,7 @@ window.ShopView = (function () {
         // 到着(または一時停止でピン留め)。到着点(dataset.x, tgtY)の z で確定する。一時停止中はピン留めされた
         // 位置の z のまま止め、再開時の move() が再び追跡を始める
         if (frozen) applyZFromLayout(a); else setActorZ(a.el, parseFloat(a.el.dataset.x), a.tgtY != null ? a.tgtY : 0);
+        stopWalk(a);
         zTracked.splice(i, 1);
         continue;
       }

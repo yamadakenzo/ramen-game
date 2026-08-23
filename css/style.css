@@ -1060,7 +1060,9 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   font-size: 1em; line-height: 1; will-change: left, top;
 }
 .sv-cust .sv-body, .sv-staff .sv-body { position: absolute; left: 0; top: 0; transform: translate(-50%, -100%); }
-.sv-cust.flip .sv-body { transform: scaleX(-1) translate(-50%, -100%); }
+/* v37-1(報告書§5): 反転は translate の後(CSSは右から適用されるので先に scaleX(-1)、次に translate)。旧 scaleX(-1) translate(...) は
+   transform-origin(箱の中心)を軸に translate 後の箱まで反転され、本体が足元の点から右へ1本体幅ずれていた。 */
+.sv-cust.flip .sv-body { transform: translate(-50%, -100%) scaleX(-1); }
 .sv-cust .sv-bowl {
   position: absolute; left: 0; top: -2.38em; font-size: 0.65em; z-index: 1000; /* 旧 top:-0.85em(本体上端基準) */
   color: var(--c-down); /* 画像読み込み失敗時の絵文字フォールバック用。「注文を抱えている」印象で厨房の丼の山と揃える */

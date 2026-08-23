@@ -48,13 +48,20 @@ window.ShopView = (function () {
   var WALK_VISIBLE_RATIO = 1.0;        // walk_a/b.webp: 見た目の高さ/キャンバス高さ(実測 256/256)
   var WALK_FRAME_CELLS = 1.0;          // 何マス進むごとにコマを替えるか(目視で遅ければ0.5へ)
   var WALK_FRAMES = ["segment/walk_a", "segment/walk_b"];
+  // v37-2: 奥向き(画面上方向へ進む)の背中2コマ。切り出しは§50-4と同じ規則の共通枠(y=294〜1786・幅720px)で、
+  // 比率はB基準1.0(=正面と同じ)なのでfont-sizeは共用。Aは靴の角度の差で下端2px(60px時0.8px)だけ上がるが許容(調査報告)。
+  var WALK_BACK_FRAMES = ["segment/walk_back_a", "segment/walk_back_b"];
+  var WALK_BACK_EPS = 0.01; // 1フレームの|Δ(x+y)|がこれ未満なら向きを更新しない(transition終端の揺れ対策)
   function walkFontEm() { return CUST_VISIBLE_RATIO / WALK_VISIBLE_RATIO; }
   function walkImgDef(def, i) { return { img: WALK_FRAMES[i], emoji: def.emoji, name: def.name }; }
   function setWalkFrame(a, i) {
-    if (!a.walk || a.walk.frame === i) return;
-    a.walk.frame = i;
+    if (!a.walk) return;
+    var frames = a.walk.back ? WALK_BACK_FRAMES : WALK_FRAMES;
+    var key = (a.walk.back ? "b" : "f") + i; // 向きが変わったときはコマ番号が同じでも描き直す
+    if (a.walk.key === key) return;
+    a.walk.frame = i; a.walk.key = key;
     // <img>の作り方(?v=__BUILD__の付け方・読めないときの絵文字フォールバック)はAI.nodeに任せ、要素ごと差し替える
-    var next = AI.node(walkImgDef(a.walk.def, i));
+    var next = AI.node({ img: frames[i], emoji: a.walk.def.emoji, name: a.walk.def.name });
     a.body.replaceChild(next, a.body.firstChild);
   }
   function staffFontEm() { return CUST_VISIBLE_RATIO / STAFF_VISIBLE_RATIO; } // .sv-camera(=客の1em)に対する従業員の倍率
@@ -1345,7 +1352,7 @@ window.ShopView = (function () {
     };
     if (useWalk) {
       a.body.style.fontSize = walkFontEm() + "em";
-      a.walk = { frame: 0, def: def, acc: 0, last: null };
+      a.walk = { frame: 0, key: "f0", back: false, def: def, acc: 0, last: null };
     }
     actorLayer.appendChild(el);
     actors.push(a);
@@ -1398,6 +1405,9 @@ window.ShopView = (function () {
     var w = a.walk;
     if (w.last) {
       var dx = cur.x - w.last.x, dy = cur.y - w.last.y;
+      // v37-2: 画面の上下は toPxY=(x+y)×TH/2 なので、Δ(x+y)<0 が「奥向き(画面上方向)」。閾値未満は向きを保つ
+      var dv = dx + dy;
+      if (Math.abs(dv) >= WALK_BACK_EPS && (dv < 0) !== w.back) { w.back = dv < 0; setWalkFrame(a, w.frame); }
       w.acc += Math.sqrt(dx * dx + dy * dy);
       if (w.acc >= WALK_FRAME_CELLS) { w.acc -= WALK_FRAME_CELLS; setWalkFrame(a, w.frame ? 0 : 1); }
     }
@@ -1406,6 +1416,7 @@ window.ShopView = (function () {
   function stopWalk(a) {
     if (!a.walk) return;
     a.walk.last = null; a.walk.acc = 0;
+    a.walk.back = false; // 停止・着席は従来どおり正面walk_a固定
     setWalkFrame(a, 0);
   }
   function trackZ(a, dur) {

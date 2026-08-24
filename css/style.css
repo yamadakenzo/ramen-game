@@ -519,6 +519,8 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   .tap-continue.show { animation: none; opacity: 1; }
   .sv-stool-pop { animation: none; opacity: 1; }
   .sv-stool-sparkle { animation: none; opacity: 0; }
+  /* v37-3: コイン演出も止める(基底opacity:0のまま出さず、JSの削除タイマーだけが走って消える) */
+  .sv-coin-fx .sv-coin, .sv-coin-fx .sv-coin-spark { animation: none; opacity: 0; }
   .fab-develop-in { animation: none; }
   /* 実機フィードバック対応(2026-08-14): .fab-develop-glow(脈動グロー)はここでは止めない。
      出現バウンス(.fab-develop-in、拡大縮小を伴う動き)は他の項目と同様reduced-motionで止めるが、
@@ -1094,6 +1096,48 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 }
 .sv-rep-pop.good { color: var(--c-up); }
 .sv-rep-pop.bad { color: var(--c-down); }
+/* v37-3: 会計時のコイン演出。JS(spawnCoinFx)がactorLayer直下に置く大きさ0の箱(足元の点)。
+   zはzForRow()を使わない演出専用の固定値——付属物(丼・吹き出し・評判ポップ)の1000より手前の1200。
+   金色・白〜淡黄はUIの4色パレットの対象外(4色はパネルの規則で、画面内エフェクトには適用しない)。
+   画像は使わずCSSの図形だけ(コイン=radial-gradientの円、キラキラ=clip-pathの4方向スター)。 */
+.sv-coin-fx {
+  position: absolute; width: 0; height: 0;
+  pointer-events: none; z-index: 1200;
+}
+.sv-coin-fx .sv-coin {
+  position: absolute; left: 0; top: -0.9em;
+  width: 0.36em; height: 0.36em; margin-left: -0.18em;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffe9a3, #f2c02e 55%, #c58f10);
+  border: 0.04em solid #a8770a;
+  box-shadow: 0 0 0.16em rgba(255, 216, 106, 0.9);
+  opacity: 0;
+  animation: svCoinRise 0.8s ease-out forwards;
+}
+@keyframes svCoinRise {
+  0%   { opacity: 0; transform: translateY(0) scale(0.7); }
+  15%  { opacity: 1; transform: translateY(-0.08em) scale(1); }
+  70%  { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-0.85em) scale(1); }
+}
+/* キラキラ4点: 遅延は最長0.15s+0.5s=0.65sで、削除タイマー(JSのCOIN_FX_MS=0.85s)内に必ず完走する */
+.sv-coin-fx .sv-coin-spark {
+  position: absolute; width: 0.14em; height: 0.14em;
+  background: #fffbe6; box-shadow: 0 0 0.1em #ffe9a3;
+  clip-path: polygon(50% 0, 65% 35%, 100% 50%, 65% 65%, 50% 100%, 35% 65%, 0 50%, 35% 35%);
+  opacity: 0;
+  animation: svCoinSpark 0.5s ease-out forwards;
+}
+.sv-coin-fx .s1 { left: -0.42em; top: -1.15em; animation-delay: 0.05s; }
+.sv-coin-fx .s2 { left:  0.30em; top: -1.28em; animation-delay: 0.15s; }
+.sv-coin-fx .s3 { left: -0.28em; top: -0.55em; animation-delay: 0.12s; }
+.sv-coin-fx .s4 { left:  0.24em; top: -0.72em; }
+@keyframes svCoinSpark {
+  0%   { opacity: 0; transform: scale(0.3) rotate(-15deg); }
+  40%  { opacity: 1; transform: scale(1.1) rotate(10deg); }
+  100% { opacity: 0; transform: scale(0.6) rotate(0deg); }
+}
+
 @keyframes svRepPop {
   0% { opacity: 0; transform: translateX(-50%) translateY(0); }
   15% { opacity: 1; }

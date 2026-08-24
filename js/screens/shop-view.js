@@ -1321,6 +1321,30 @@ window.ShopView = (function () {
     }, POPUP_MS);
   }
 
+  // ---------- v37-3: 会計時のコイン演出(表示のみ) ----------
+  // 会計を済ませた客(finishMeal=食べ終わった客だけ。行列で諦めた客・週切替で片付けた客は
+  // 支払いが無いので出さない)が席を立つ瞬間に、コイン1枚+キラキラを客の現在位置に出す。
+  // 数値(所持金・売上)や状態遷移には一切影響しない、純粋な表示(§大原則)。
+  // 要素は客のelにはぶら下げず actorLayer 直下へ独立して置く——客が先にremoveActorされても
+  // 演出は完走してから自分で消えるし、同時に複数の客が退店してもそれぞれ独立する。
+  // zはCSSの固定値(.sv-coin-fxのz-index:1200=付属物の1000より手前)。zForRow()には触らない。
+  // 時間は評判ポップ(POPUP_MS)と同じく実秒固定(later()を使わない=ゲーム速度・一時停止と連動させない)。
+  var COIN_FX_MS = 850; // CSSアニメーション0.8sの完走後に確実にDOMから削除する
+  function spawnCoinFx(a) {
+    if (!actorLayer || !a || !a.el) return;
+    var fx = h("div", { className: "sv-coin-fx" }, [
+      h("span", { className: "sv-coin" }),
+      h("span", { className: "sv-coin-spark s1" }),
+      h("span", { className: "sv-coin-spark s2" }),
+      h("span", { className: "sv-coin-spark s3" }),
+      h("span", { className: "sv-coin-spark s4" })
+    ]);
+    fx.style.left = a.el.style.left; // 客の現在位置(足元の点)をそのまま使う。移動はしない
+    fx.style.top = a.el.style.top;
+    actorLayer.appendChild(fx);
+    setTimeout(function () { if (fx.parentNode) fx.parentNode.removeChild(fx); }, COIN_FX_MS);
+  }
+
   function makeActor(segId) {
     var def = segDef(segId);
     var useWalk = segId === WALK_SEG_ID && def && def.img;
@@ -1656,6 +1680,7 @@ window.ShopView = (function () {
     var seat = a.seat;
     later(function () {
       if (a.gone) return;
+      spawnCoinFx(a); // v37-3: 会計時のコイン演出(席を立つ瞬間、客の現在位置に。表示のみ)
       seat.occupant = null;
       a.seat = null;
       walkVia(a, routeSeatToOff(seat), SEAT_WALK_MIN_PER_CELL, function () { removeActor(a); }); // v36-3: 入口を通って歩道へ

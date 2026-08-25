@@ -1,111 +1,326 @@
-// オープニング(v30: 動画版。video/opening.mp4を全画面自動再生し、endedまたはスキップで
-// onFinishを呼ぶ。動画が読み込めない/再生できない環境向けに、旧テキスト4画面を
-// renderTextFallback()として残してある(§4-2、消さない)。
+// オープニング(v38-1: 画像+CSS/JS版。docs/指示書/v38-1_オープニング刷新_指示書.md)。
+// v30の動画版(video/opening.mp4、object-fit:containの上下黒帯)と、そのフォールバックだった
+// 旧テキスト4画面(renderTextFallback)は廃止した。
+//
+// 構成は2段:
+//   renderCinematic(onDone)    … 約10秒のシネマティック(商店街→店構え→厨房→丼→ズーム→白フラッシュ)。
+//                                右上のスキップで即 onDone(=タイトル画面へ。setupへ直行ではない)。
+//   renderTitle(onStart, opts) … タイトル画面(ロゴ落下・TAP TO START)。フレーム全体タップで onStart。
+//                                左下「オープニングをもう一度見る」で opts.onReplay(頭から再生)。
+// render(onFinish) が両者をつなぐ(呼び出し元は js/main.js の goToPhase("opening") の1か所)。
+// 2周目以降(localStorageの既視フラグあり)はシネマティックを省略してタイトル画面へ直行する。
+//
+// アニメーションは可視化のみ: 切替の"時刻"はJS(単一スケジューラ、setTimeoutは常に1本)、
+// 見た目の動きは css/style.css の CSSアニメーション。秒数はJSがCSS変数(--d 等)で流し込むだけで、
+// JSがアニメの中間値を読んで何かを決めることはしない。数値・ゲームロジック・状態遷移には触れない。
 window.ScreenOpening = (function () {
   var h = window.UI.h;
 
-  var VIDEO_SRC = "video/opening.mp4";
+  // ---- 2周目判定 ----
+  // 通常セーブ(ramen_v10_save)とは別、周回引き継ぎ(ramen_meta)にも入れない独立キー。
+  // セーブ内に置くと「はじめから」の clearSave() で消えて毎回流れてしまい、ramen_meta は
+  // 「履歴と関係だけ」の器(META_VERSION に巻き込まれる)なので、どちらにも混ぜない。
+  var SEEN_KEY = "ramen_opening_seen";
+  function hasSeen() {
+    try { return localStorage.getItem(SEEN_KEY) === "1"; } catch (e) { return false; }
+  }
+  function markSeen() {
+    try { localStorage.setItem(SEEN_KEY, "1"); } catch (e) { /* 保存できない環境では毎回再生されるだけ */ }
+  }
 
-  var PAGES = [
-    "……いつからだろう、自分の店を持ちたいと思うようになったのは。",
-    "修行先の厨房で、湯気の向こうに小さな暖簾が見えた気がした。",
-    "貯金と、いくらかの借金と、覚悟。それだけを持って、この街に来た。",
-    "さあ、店を開けよう。"
-  ];
+  // ---- 画像 ----
+  // js/asset-image.js と同じキャッシュ対策(?v=20260825053944)。tools/deploy-pages.sh が公開時に置換する。
+  var BUILD_V = "20260825053944";
+  var DIR = "img/opening/";
+  function src(name) { return DIR + name + ".webp?v=" + BUILD_V; }
+  // 画像の参照はこのテーブル1か所だけ。他所でファイル名を書かない。
+  // bowl の4K版は不採用(アップスケーラーが平塗りにテクスチャを足して画風が崩れる。2Kをブラウザで
+  // 拡大する方がきれい。docs/設計判断記録.md §54参照)。2048×2048 のまま。
+  var IMG = {
+    street: src("street"),         // 1536×2752 商店街(カット①)
+    storefront: src("storefront"), // 1536×2752 店構え・暖簾なし(カット②・タイトル画面)
+    norenA: src("noren_a"),        // 860×663 透過 暖簾2コマ
+    norenB: src("noren_b"),
+    kitchen: src("kitchen"),       // 1536×2752 厨房・人なし(カット③)
+    chefA: src("chef_a"),          // 1080×1193 透過 主人公の湯切り2コマ
+    chefB: src("chef_b"),
+    bowl: src("bowl")              // 2048×2048 丼・真上(カット④、スープ中心は 50%,47.5%)
+  };
 
-  // ---- 旧テキスト4画面(v14以前の仮実装。動画版のフォールバックとして残す) ----
-  function renderTextFallback(onFinish) {
+  // 先読み。指定した画像すべての load/error を待ってから cb を呼ぶ(error でも待ち続けないよう、
+  // 成否を問わず"決着"で数える)。決着は画像ごとにモジュール内で1回だけ持つので、シネマティック(8枚)
+  // の後にタイトル画面(3枚)が続いても二重に読まず、既に決着済みなら cb は同期で呼ばれる。
+  //   ALL_KEYS   … シネマティック開始前(読み込み中は黒のまま)
+  //   TITLE_KEYS … 2周目のタイトル直行時(コールドロードで店構え・暖簾がポップインしないように)
+  var ALL_KEYS = Object.keys(IMG);
+  var TITLE_KEYS = ["storefront", "norenA", "norenB"];
+  var settled = {};   // key -> true(決着済み)
+  var loading = {};   // key -> 決着待ちの cb 配列(読み込み中のみ)
+  function loadOne(key, cb) {
+    if (settled[key]) { cb(); return; }
+    if (loading[key]) { loading[key].push(cb); return; }
+    loading[key] = [cb];
+    function settle() {
+      settled[key] = true;
+      var cbs = loading[key]; loading[key] = null;
+      cbs.forEach(function (f) { f(); });
+    }
+    var im = new Image();
+    im.onload = settle;
+    im.onerror = settle;
+    im.src = IMG[key];
+  }
+  function preload(keys, cb) {
+    var left = keys.length;
+    keys.forEach(function (k) {
+      loadOne(k, function () { left--; if (left === 0) cb(); });
+    });
+  }
+
+  // ---- タイムライン(秒) ----
+  // ここだけ直せば全体がずれる。各カットの開始時刻は CUT_DUR を順に積算して求める(下の buildTimeline)。
+  var CUT_DUR = { street: 2.5, storefront: 2.5, kitchen: 2.5, bowl: 1.5 };
+  var T = {
+    fadeIn: 0.4,      // カット①: 黒からのフェードイン
+    driftStreet: 1.08, // カット①: 背景 scale(1)→scale(1.08)(カットの長さぶん linear)
+    driftStore: 1.04,  // カット②: 背景 scale(1)→scale(1.04)
+    norenStep: 0.4,   // 暖簾のコマ間隔
+    chefStep: 0.35,   // 主人公のコマ間隔
+    cutIn: 0.35,      // カットイン: 帯の通過時間
+    // カットイン: 帯に対する次カット(クリップ)の時間差。指示書の初期値は0.08sだったが、同じイージングの
+    // 帯が抜けた後もクリップが動き続けて旧カットが見えるため0にし、「帯が先行・カットが追従」は
+    // css/style.css 側の幾何(クリップの直線が帯の後端に乗る)で作っている。
+    cutInLag: 0,
+    zoom: 1.0,        // 丼ズーム(カット④の末尾に続く)
+    flash: 0.15,      // 白フラッシュ(ズーム終端に重ねる。opacity 0→1)
+    flashOut: 0.3,    // タイトル画面の上で白が消える時間
+    logoDelay: 0.2,   // タイトル画面表示からロゴ落下開始まで
+    logoDrop: 1.0,    // ロゴ落下バウンド
+    subDelay: 1.2,    // タイトル画面表示からサブタイトル/TAP表示まで
+    subFade: 0.4      // サブタイトル/TAP のフェードイン
+  };
+
+  // ---- 単一スケジューラ ----
+  // events: [{at: 秒, run: fn}]。performance.now() 基準で「次のイベントまで」の setTimeout を
+  // 1本だけ回す。stop() で残りを全部捨てられる(スキップ用)。run() の中から stop() を呼んでもよい。
+  function makeScheduler(events) {
+    var list = events.slice().sort(function (a, b) { return a.at - b.at; });
+    var i = 0, t0 = 0, timer = null, stopped = false;
+    function elapsed() { return performance.now() - t0; }
+    function step() {
+      timer = null;
+      while (!stopped && i < list.length && list[i].at * 1000 <= elapsed() + 1) {
+        var ev = list[i]; i++;
+        ev.run();
+      }
+      if (!stopped && i < list.length) {
+        timer = setTimeout(step, Math.max(0, list[i].at * 1000 - elapsed()));
+      }
+    }
+    return {
+      start: function () { t0 = performance.now(); step(); },
+      stop: function () { stopped = true; if (timer) clearTimeout(timer); timer = null; }
+    };
+  }
+
+  // ---- DOM部品 ----
+  function img(className, s) {
+    return h("img", { className: className, src: s, alt: "", draggable: "false" });
+  }
+  function setVar(el, name, val) { el.style.setProperty(name, val); return el; }
+
+  // 2コマ交互(暖簾・主人公)。a/bを重ね、CSSの steps(2) で片方ずつ見せる。
+  function frames(className, a, b, step) {
+    var el = h("div", { className: "op-frames " + className }, [
+      img("op-frame op-frame-a", a),
+      img("op-frame op-frame-b", b)
+    ]);
+    return setVar(el, "--step", step + "s");
+  }
+
+  // 1カット。背景(cover)+レイヤーを .op-pic(画像基準の箱)>.op-zoom に積む。
+  //   opts.drift: 到達倍率(背景のゆっくりズーム。省略で静止)  opts.dur: そのカットの長さ(秒)
+  function makeCut(bgSrc, layers, opts) {
+    opts = opts || {};
+    var zoom = h("div", { className: "op-zoom" + (opts.drift ? " op-drift" : "") },
+      [img("op-bg", bgSrc)].concat(layers || []));
+    if (opts.drift) { setVar(zoom, "--to", String(opts.drift)); setVar(zoom, "--d", opts.dur + "s"); }
+    var pic = h("div", { className: "op-pic" }, [zoom]);
+    return h("div", { className: "op-cut" + (opts.className ? " " + opts.className : "") }, [pic]);
+  }
+  function norenLayer() { return frames("op-noren", IMG.norenA, IMG.norenB, T.norenStep); }
+  function chefLayer() { return frames("op-chef", IMG.chefA, IMG.chefB, T.chefStep); }
+  // 店構え+暖簾はカット②とタイトル画面で共通
+  function storefrontCut(opts) { return makeCut(IMG.storefront, [norenLayer()], opts); }
+
+  function skipButton(onSkip) {
+    // 右上に常設。js/screens/setup.js の .setup-skip と同じクラス・見た目(css/style.css)を流用。
+    return h("button", { className: "btn small setup-skip", text: "スキップ", onclick: onSkip });
+  }
+
+  // ---- シネマティック ----
+  // onDone は「タイムラインの終端(白フラッシュの下でタイトルへ)」か「スキップ」のどちらか片方から
+  // 必ず1回だけ呼ぶ(done フラグで防御。v30の finish() と同じ)。
+  function renderCinematic(onDone) {
     var root = document.getElementById("screen-opening");
     window.UI.clear(root);
-    var idx = 0;
+    var done = false;
+    var sched = null;
+
+    var stage = h("div", { className: "op-stage" });
+    root.appendChild(stage);
+    root.appendChild(skipButton(function () { finish(null); }));
+
+    // flash: 白フラッシュの要素。タイトルへ差し替えた後も(root がクリアされるので)付け直して
+    // 0.3s で消す。スキップ時は null(白なしで即タイトル)。
+    function finish(flash) {
+      if (done) return;
+      done = true;
+      if (sched) sched.stop();
+      onDone();
+      if (flash) {
+        root.appendChild(flash);
+        flash.classList.remove("op-in");
+        setVar(flash, "--d", T.flashOut + "s");
+        flash.classList.add("op-out");
+        setTimeout(function () { if (flash.parentNode) flash.parentNode.removeChild(flash); }, T.flashOut * 1000 + 50);
+      }
+    }
+
+    // カットイン: 帯(.op-band)が斜めに通過し、その直後を追って次カットがクリップで広がる。
+    // dir: "rtl"=右上→左下 / "ltr"=左下→右上。帯・クリップは pointer-events:none、終わったら
+    // タイムラインのイベントで除去する(animationend には頼らない=時刻はすべてJSが持つ)。
+    var current = null;
+    function showCut(cut) {
+      stage.appendChild(cut);
+      current = cut;
+    }
+    function cutIn(dir, nextCut) {
+      var band = setVar(h("div", { className: "op-band op-" + dir }), "--d", T.cutIn + "s");
+      stage.appendChild(band);
+      nextCut.classList.add("op-wipe-" + dir);
+      setVar(nextCut, "--d", T.cutIn + "s");
+      setVar(nextCut, "--lag", T.cutInLag + "s");
+      var prev = current;
+      showCut(nextCut);
+      return function cleanup() {
+        if (band.parentNode) band.parentNode.removeChild(band);
+        if (prev && prev.parentNode) prev.parentNode.removeChild(prev);
+        nextCut.classList.remove("op-wipe-" + dir);
+      };
+    }
+
+    function buildTimeline() {
+      var ev = [];
+      var t = 0;
+      var cleanup = null;
+      function addCutIn(at, dir, makeNext) {
+        ev.push({ at: at, run: function () { cleanup = cutIn(dir, makeNext()); } });
+        // 帯(0.35s)+遅れ(0.08s)が終わった後に片付ける
+        ev.push({ at: at + T.cutIn + T.cutInLag + 0.05, run: function () { if (cleanup) cleanup(); cleanup = null; } });
+      }
+
+      // カット① 商店街: 黒からフェードイン、背景 scale(1)→scale(1.08) を linear
+      ev.push({ at: 0, run: function () {
+        var c = makeCut(IMG.street, [], { drift: T.driftStreet, dur: CUT_DUR.street, className: "op-fade-in" });
+        setVar(c, "--d", T.fadeIn + "s");
+        showCut(c);
+      } });
+      t += CUT_DUR.street;
+      // カットイン①(右上→左下) → カット② 店構え+暖簾
+      addCutIn(t, "rtl", function () { return storefrontCut({ drift: T.driftStore, dur: CUT_DUR.storefront }); });
+      t += CUT_DUR.storefront;
+      // カットイン②(左下→右上) → カット③ 厨房+主人公(背景は静止)
+      addCutIn(t, "ltr", function () { return makeCut(IMG.kitchen, [chefLayer()]); });
+      t += CUT_DUR.kitchen;
+      // カットイン③(右上→左下) → カット④ 丼(静止)
+      var bowlImg = img("op-bowl", IMG.bowl);
+      addCutIn(t, "rtl", function () {
+        return h("div", { className: "op-cut op-cut-bowl" }, [h("div", { className: "op-bowl-wrap" }, [bowlImg])]);
+      });
+      t += CUT_DUR.bowl;
+      // ズーム(1.0s)。終端に白フラッシュ(0.15s)を重ね、白の下でタイトル画面へ差し替える。
+      ev.push({ at: t, run: function () { setVar(bowlImg, "--d", T.zoom + "s"); bowlImg.classList.add("op-zooming"); } });
+      var flash = setVar(h("div", { className: "op-flash" }), "--d", T.flash + "s");
+      ev.push({ at: t + T.zoom - T.flash, run: function () { stage.appendChild(flash); flash.classList.add("op-in"); } });
+      ev.push({ at: t + T.zoom, run: function () { finish(flash); } });
+      return ev;
+    }
+
+    preload(ALL_KEYS, function () {
+      if (done) return; // 読み込み中にスキップされた
+      sched = makeScheduler(buildTimeline());
+      sched.start();
+    });
+  }
+
+  // ---- タイトル画面 ----
+  // opts.onReplay: 「オープニングをもう一度見る」の処理(省略で非表示)。
+  // onStart はユーザー操作(タップ)起点なので、将来BGMを入れる場合はここが再生開始の起点になる
+  // (自動再生制限に掛からない。今回はBGM/SEの基盤自体が無いので入れていない)。
+  function renderTitle(onStart, opts) {
+    opts = opts || {};
+    var root = document.getElementById("screen-opening");
+    window.UI.clear(root);
+    // 店構え・暖簾の3枚が決着してから組み立てる。シネマティックの直後(白フラッシュの下)は8枚とも
+    // 決着済みなので同期で進み、白の下で差し替わる。2周目のタイトル直行だけが実際に待つ
+    // (待っている間は枠の地色のまま)。
+    preload(TITLE_KEYS, function () { buildTitle(root, onStart, opts); });
+  }
+
+  function buildTitle(root, onStart, opts) {
+    var started = false;
+    markSeen(); // タイトル画面が初めて表示された時点で既視扱い(2周目以降はシネマティック省略)
+
+    function start() {
+      if (started) return;
+      started = true;
+      window.UI.clear(root); // 非表示になっても暖簾のコマ送りなどが残らないよう片付ける
+      onStart();
+    }
+
+    var logo = h("div", { className: "op-logo" }, [h("span", { text: "RAMEN" }), h("span", { text: "DREAM" })]);
+    var sub = h("div", { className: "op-sub", text: "どんぶりちゃん" });
+    var tap = h("div", { className: "op-tap", text: "TAP TO START" });
+    var children = [
+      storefrontCut(),
+      h("div", { className: "op-logo-pos" }, [logo]),
+      sub, tap
+    ];
+    if (opts.onReplay) {
+      children.push(h("button", {
+        className: "op-replay", text: "オープニングをもう一度見る",
+        onclick: function (e) { e.stopPropagation(); if (started) return; started = true; opts.onReplay(); }
+      }));
+    }
+    var stage = h("div", { className: "op-stage op-title", onclick: start }, children);
+    root.appendChild(stage);
+
+    // ロゴ落下(+0.2s)とサブタイトル/TAP(+1.2s)。タイトル画面内の演出なので、シネマティックとは
+    // 別の(短い)スケジューラを1本回す。start() 後に発火しても、外れたDOMにクラスが付くだけ。
+    setVar(logo, "--d", T.logoDrop + "s");
+    setVar(sub, "--d", T.subFade + "s");
+    setVar(tap, "--d", T.subFade + "s");
+    var sched = makeScheduler([
+      { at: T.logoDelay, run: function () { logo.classList.add("op-drop"); } },
+      { at: T.subDelay, run: function () { sub.classList.add("op-show"); tap.classList.add("op-show"); } }
+    ]);
+    sched.start();
+  }
+
+  // ---- 入口 ----
+  // onFinish(=setupへ)は必ず1回だけ。「もう一度見る」で何周してもこの finished で守る。
+  function render(onFinish) {
     var finished = false;
     function finish() {
       if (finished) return;
       finished = true;
       onFinish();
     }
-
-    function draw() {
-      window.UI.clear(root);
-      var box = h("div", { className: "opening-box" }, [
-        h("p", { text: PAGES[idx] }),
-        h("div", { className: "opening-actions" }, [
-          h("button", {
-            className: "btn", text: "スキップ",
-            onclick: function () { finish(); }
-          }),
-          h("button", {
-            className: "btn primary",
-            text: idx < PAGES.length - 1 ? "つづける" : "開業準備へ",
-            onclick: function () {
-              if (idx < PAGES.length - 1) { idx++; draw(); }
-              else finish();
-            }
-          })
-        ])
-      ]);
-      root.appendChild(box);
-    }
-    draw();
+    function showTitle() { renderTitle(finish, { onReplay: playCinematic }); }
+    function playCinematic() { renderCinematic(showTitle); }
+    if (hasSeen()) showTitle(); else playCinematic();
   }
 
-  // ---- v30: 動画版 ----
-  // onFinishは「再生完了(ended)」か「スキップボタン」のどちらか片方だけから、必ず1回呼ぶ
-  // (両方から呼ばれる競合を避けるため、finish()自体をfinished/fellBackの2フラグで防御する)。
-  function renderVideo(onFinish) {
-    var root = document.getElementById("screen-opening");
-    window.UI.clear(root);
-    var finished = false;
-    var fellBack = false;
-
-    function finish() {
-      if (finished || fellBack) return;
-      finished = true;
-      onFinish();
-    }
-
-    // 動画ファイルが無い・デコードできない等でerrorイベントを拾った場合、旧テキスト版へ
-    // 切り替える(§4-2)。renderTextFallbackがroot内をクリアするので、動画要素・スキップ
-    // ボタンはこの時点でDOMから外れる(以後finish()が呼ばれても上のガードで無視される)。
-    function fallback() {
-      if (finished || fellBack) return;
-      fellBack = true;
-      renderTextFallback(onFinish);
-    }
-
-    var video = document.createElement("video");
-    video.className = "opening-video";
-    video.src = VIDEO_SRC;
-    // 自動再生制限対策(§4-1)。属性・プロパティ両方で明示する。
-    video.autoplay = true;
-    video.muted = true;
-    video.playsInline = true;
-    video.setAttribute("playsinline", "");
-    video.setAttribute("muted", "");
-    video.addEventListener("ended", finish);
-    video.addEventListener("error", fallback);
-    root.appendChild(video);
-
-    // 右上に常設のスキップボタン。js/screens/setup.js の .setup-skip と同じ見た目・挙動
-    // (position: absolute; top:8px; right:8px、css/style.css)をそのまま流用する。
-    root.appendChild(h("button", {
-      className: "btn small setup-skip", text: "スキップ",
-      onclick: function () { finish(); }
-    }));
-
-    // muted+autoplayなら通常はここで再生が始まる。play()自体が例外・rejectを返しても
-    // (=自動再生ポリシーで止められても)、それはerrorイベントとは別物なので黙って無視する
-    // (その場合でもスキップボタンで先へ進める)。
-    var playResult = video.play();
-    if (playResult && typeof playResult.catch === "function") {
-      playResult.catch(function () {});
-    }
-  }
-
-  function render(onFinish) {
-    // 2周目以降の扱いは未確定(§4-3、謙蔵さんに要確認)。現時点では毎回動画を再生する。
-    renderVideo(onFinish);
-  }
-
-  return { render: render };
+  return { render: render, renderCinematic: renderCinematic, renderTitle: renderTitle };
 })();

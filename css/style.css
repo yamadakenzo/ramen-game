@@ -91,6 +91,9 @@
      v14-1: 文字そのもの(--fs-*)はここから切り離してある。frame-wは絵文字・アイコン・
      店の絵の寸法にのみ使う(掛け算のスケール基準)。 */
   --frame-w: min(100vw, calc(100svh * 9 / 16));
+  /* v38-1: 9:16換算のフレーム高。オープニング(js/screens/opening.js)のレイヤー寸法の基準。
+     実際の枠の高さは100svh(スマホでは9:16より縦長になり得る)で、これはあくまで幅からの換算値。 */
+  --frame-h: calc(var(--frame-w) * 16 / 9);
 }
 
 * { box-sizing: border-box; }
@@ -232,14 +235,173 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 .opening-actions { display: flex; gap: 10px; justify-content: center; margin-top: 16px; }
 
-/* v30: オープニング動画(js/screens/opening.js)。position:absolute; inset:0 は#screen-openingの
-   padding(上記20px)の影響を受けない(絶対配置はpaddingボックスまで広がる、.setup-bgと同じ手口)ので、
-   これだけで画面いっぱいに敷ける。テキスト版フォールバック(.opening-box)とは共存しない。
-   object-fitはcontainにする(実機確認で判明: このゲームの実フレームは9:16縦長(--frame-w、
-   min(100vw, 100svh*9/16))だが、動画素材は16:9横長。coverだと横幅の32%しか映らず、
-   05〜08で焼き込んだテキストが左右で切れる。containなら上下に黒帯が入るが、テキスト・
-   キャラとも一切欠けない。謙蔵さんの判断でcontainを採用(v30、docs/設計判断記録.md参照)。 */
-.opening-video { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; object-fit: contain; background: #000; }
+/* ================================================================
+   v38-1: オープニング(画像+CSS/JS版、js/screens/opening.js)。v30の動画版(.opening-video、
+   object-fit:containの上下黒帯)は廃止した(docs/指示書/v38-1_オープニング刷新_指示書.md)。
+   - 座標・寸法はすべてフレーム基準(--frame-w / --frame-h、または親要素の%)。px固定は書かない
+     (右上のスキップボタンは既存の.setup-skipをそのまま流用するので、その8pxだけは例外)。
+   - 切替の"時刻"はJS側の単一スケジューラが決め、見た目の動きはここのCSSアニメーションだけ。
+     秒数はJSがCSS変数(--d 等)で流し込む。JSがアニメの中間値を読むことはしない。
+   - 色は指示書指定の3色(クリーム #FFF3D6 / 濃茶 #4A2A1A / 提灯の赤 #D9432F)と、黒地・丼の余白色。
+     オープニングは画像アセット(イラスト)の層なので、UIの4色相ルール(§41)の対象外として扱う。
+   .op-stage は #screen-opening の padding(20px)の影響を受けない(絶対配置はpaddingボックスまで
+   広がる、旧.opening-video / .setup-bg と同じ手口)。
+   ================================================================ */
+.op-stage { position: absolute; inset: 0; overflow: hidden; background: #000; }
+
+/* 1カット = フレームいっぱい(.op-cut)。背景画像の比(1536×2752)で「cover」する箱(.op-pic)を
+   自前で作り、その中に%座標でレイヤー(暖簾・主人公)を積む。画像の特定位置(店構えの棒、コンロ前)に
+   合わせるには、フレーム基準ではなく画像基準の%が要るため。
+   枠は横幅=--frame-w、高さ=100svh(9:16か、それより縦長)。箱の高さは「枠の高さ」と「画像比で
+   幅を枠幅に合わせたときの高さ」の大きい方、幅は aspect-ratio から決まる(=常に枠幅以上)。 */
+.op-cut { position: absolute; inset: 0; overflow: hidden; }
+.op-pic {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  height: max(100%, calc(var(--frame-w) * 2752 / 1536));
+  aspect-ratio: 1536 / 2752;
+}
+/* 背景のゆっくりズームは .op-pic 自体ではなくこの内箱に掛ける(.op-picのtransformは中央寄せ用)。
+   暖簾などのレイヤーも内箱の子なので背景と一緒にズームする。 */
+.op-zoom { position: absolute; inset: 0; transform-origin: 50% 50%; }
+.op-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.op-cut img { pointer-events: none; user-select: none; -webkit-user-drag: none; }
+
+/* カット①: 黒からのフェードイン */
+.op-cut.op-fade-in { animation: opFadeIn var(--d, 0.4s) ease-out both; }
+@keyframes opFadeIn { from { opacity: 0; } to { opacity: 1; } }
+/* 背景のゆっくりズーム(--to: 到達倍率、--d: 秒。どちらもJSがタイムラインから流し込む) */
+.op-zoom.op-drift { animation: opDrift var(--d, 2.5s) linear both; }
+@keyframes opDrift { from { transform: scale(1); } to { transform: scale(var(--to, 1.08)); } }
+
+/* 2コマ交互(暖簾・主人公)。a/bの2枚を重ね、steps(2)で片方ずつ不透明にする(--step: 1コマの秒)。
+   bはaと同じアニメを逆再生するだけで、常にどちらか一方だけが見える。 */
+.op-frames { position: absolute; }
+.op-frame { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
+.op-frame-a { animation: opFlip calc(var(--step, 0.4s) * 2) steps(2, jump-none) infinite; }
+.op-frame-b { animation: opFlip calc(var(--step, 0.4s) * 2) steps(2, jump-none) infinite reverse; }
+@keyframes opFlip { from { opacity: 1; } to { opacity: 0; } }
+/* 暖簾(カット②・タイトル画面共通)。店構え画像の棒(y=27.5〜28.2%、x=9.2〜88.7%)に、暖簾画像の
+   棒(上端、x=0.2〜93.6%)を重ねる。初期値は指示書§2-3、実測で調整する。 */
+.op-noren { left: 9%; top: 27.3%; width: 85%; aspect-ratio: 860 / 663; }
+/* 主人公(カット③)。コンロ(左寄り)の手前の床に立たせる。指示書の初期値は高さ42%・足元y≈68%だったが、
+   厨房画像を実測するとコンロ前面の下端が y≈78%、その下が床なので、足元を y=85% に下げた。
+   高さは、頭がコンロ上の寸胴(y≈30〜48%)と湯気を隠さないよう 36%(頭頂 y≈49%)にした。 */
+.op-chef { left: 38%; bottom: 15%; height: 38%; aspect-ratio: 1080 / 1193; transform: translateX(-50%); }
+
+/* カット④: 丼(正方形画像をフレーム幅100%・上下中央)。上下の余白は丼画像の縁の木目色
+   (実測 #553834)で埋める。ズームは cubic-bezier(0.7,0,1,1) で最初ゆっくり最後に一気。
+   transform-origin はスープの中心(画像の 50%, 47.5%)。はみ出しは .op-cut の overflow:hidden が切る。 */
+.op-cut-bowl { background: #553834; }
+.op-bowl-wrap { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); }
+.op-bowl { display: block; width: 100%; height: auto; transform-origin: 50% 47.5%; }
+.op-bowl.op-zooming { animation: opBowlZoom var(--d, 1s) cubic-bezier(0.7, 0, 1, 1) forwards; }
+@keyframes opBowlZoom { from { transform: scale(1); } to { transform: scale(3.2); } }
+
+/* 白フラッシュ。ズーム終端に重ねて全面白にし(op-in)、その下でタイトル画面へ差し替えてから消す(op-out)。
+   z-index はスキップボタン(.setup-skip: 30)より上。 */
+.op-flash { position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 40; pointer-events: none; }
+.op-flash.op-in { animation: opFlashIn var(--d, 0.15s) linear forwards; }
+.op-flash.op-out { animation: opFlashOut var(--d, 0.3s) linear forwards; }
+@keyframes opFlashIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes opFlashOut { from { opacity: 1; } to { opacity: 0; } }
+
+/* ---- カットイン(斜めに差し込む帯) ----
+   帯(.op-band): 幅60%(進行方向の厚み)×高さ200%(斜めでも枠を縦に覆う長さ)の矩形を -20° 回転させ、
+   斜めに通過させる。回転後の translateX は帯自身の横軸(=20°傾いた方向)に沿うので、
+   rtl(+→-)が右上→左下、ltr(-→+)が左下→右上になる。
+   次カット(.op-wipe-*): clip-path の4点多角形を、帯と同じ傾き(top側が bottom側より --op-slant だけ
+   左=tan20°×枠の実高)の直線で切り、帯と同じ duration で全面へ広げる。カット側だけ --lag 遅らせて
+   帯が先行・カットが追従。both で遅延中もクリップ済み(=まだ見えない)にする。
+   --op-slant は --frame-h(9:16換算)ではなく枠の実高(100svh、#app と同じ)から出す。スマホでは枠が
+   9:16より縦長になるため、換算値だと直線の角度が帯の20°とずれて隙間が見えるため。
+   「帯が先行・カットが追従」は時間差ではなく幾何で作る: クリップの直線が常に帯の後端(trailing edge)に
+   乗るよう、帯とクリップに同じ duration・同じイージング・同じ移動量(枠幅の2.42倍)を与え、クリップの
+   直線の始点を帯の後端の始点(枠の外側、枠幅の0.64倍)に合わせてある。これでカットは帯の厚み(枠幅の
+   60%、約0.09s相当)だけ遅れて現れる。指示書の「カット側だけ0.08s遅延」を時間差(animation-delay)で
+   実装すると、同じイージングの帯が0.35sで抜けた後もクリップが動き続け、帯の無いところで旧カットが
+   見えてしまう(実測で確認)ため、JS側の遅延(--lag)は0にしてある。
+   最初の実装(帯を枠の1.6倍幅・±115%移動)では帯だけ3倍速く通り過ぎてクリップの途中で消えた。
+   帯もクリップも pointer-events:none で、終わったらJS側(タイムライン)がDOMから外す。 */
+.op-stage { --op-slant: calc(100svh * 0.364); }
+.op-band {
+  position: absolute; left: 50%; top: 50%; width: 60%; height: 200%;
+  background: #D9432F; z-index: 20; pointer-events: none;
+}
+.op-band.op-rtl { animation: opBandRtl var(--d, 0.35s) cubic-bezier(0.4, 0, 0.2, 1) both; }
+.op-band.op-ltr { animation: opBandLtr var(--d, 0.35s) cubic-bezier(0.4, 0, 0.2, 1) both; }
+/* translateX の%は帯自身の幅(枠幅の60%)基準。190%≈枠幅の1.14倍(前端が枠の外側0.84倍、右上の枠外)
+   → -213%≈-1.28倍(後端が枠の外側0.98倍、左下の枠外)。移動量 403%×0.6 = 枠幅の2.42倍 */
+@keyframes opBandRtl {
+  from { transform: translate(-50%, -50%) rotate(-20deg) translateX(190%); }
+  to   { transform: translate(-50%, -50%) rotate(-20deg) translateX(-213%); }
+}
+@keyframes opBandLtr {
+  from { transform: translate(-50%, -50%) rotate(-20deg) translateX(-190%); }
+  to   { transform: translate(-50%, -50%) rotate(-20deg) translateX(213%); }
+}
+.op-cut.op-wipe-rtl, .op-cut.op-wipe-ltr { pointer-events: none; }
+.op-cut.op-wipe-rtl { animation: opWipeRtl var(--d, 0.35s) cubic-bezier(0.4, 0, 0.2, 1) var(--lag, 0s) both; }
+.op-cut.op-wipe-ltr { animation: opWipeLtr var(--d, 0.35s) cubic-bezier(0.4, 0, 0.2, 1) var(--lag, 0s) both; }
+/* rtl: 見える領域は直線の右側。直線(上端x / 下端x=上端+slant)が右端の外(164%)から左端の外(-15%)へ
+   動く。100%→164% の 64% が帯の厚み(60%)÷cos20°で、始点で直線が帯の後端に一致する。 */
+@keyframes opWipeRtl {
+  from { clip-path: polygon(164% 0, 300% 0, 300% 100%, calc(164% + var(--op-slant)) 100%); }
+  to   { clip-path: polygon(calc(-15% - var(--op-slant)) 0, 300% 0, 300% 100%, -15% 100%); }
+}
+/* ltr: 見える領域は直線の左側。直線が左端の外(-64%)から右端の外(115%)へ動く */
+@keyframes opWipeLtr {
+  from { clip-path: polygon(-300% 0, calc(-64% - var(--op-slant)) 0, -64% 100%, -300% 100%); }
+  to   { clip-path: polygon(-300% 0, 115% 0, calc(115% + var(--op-slant)) 100%, -300% 100%); }
+}
+
+/* ---- タイトル画面 ----
+   背景は店構え+暖簾(カット②と同じ部品、静止)。ロゴ・サブタイトル・TAP TO START はすべてDOMテキスト
+   (生成画像に文字は入れない方針)。フォントは M PLUS Rounded 1c の700(同梱は400/700のみ。900は無いので
+   合成ボールドにせず、太さは -webkit-text-stroke で補う。paint-order で縁取りを文字の下に描く)。
+   影は右下へ赤(#D9432F)のベタ落ち(グラデ・ぼかし禁止、既存画風どおり)。
+   フレーム全体がタップ可能(.op-stage.op-title の onclick)。 */
+.op-title { cursor: pointer; }
+.op-logo-pos { position: absolute; left: 0; right: 0; top: 30%; transform: translateY(-50%); text-align: center; pointer-events: none; }
+.op-logo {
+  display: inline-block; opacity: 0; transform-origin: 50% 100%;
+  font-weight: 700; font-size: calc(var(--frame-w) * 0.17); line-height: 1.05; letter-spacing: 0.06em;
+  color: #FFF3D6;
+  -webkit-text-stroke: calc(var(--frame-w) * 0.016) #4A2A1A; paint-order: stroke fill;
+  text-shadow: calc(var(--frame-w) * 0.022) calc(var(--frame-w) * 0.022) 0 #D9432F;
+}
+.op-logo span { display: block; }
+/* 落下バウンド(指示書§2-5)。0%で上方(-140%)から落ちて55%で着地、65%で潰れ、78%で小さく跳ね、
+   88%着地、94%で微小に跳ねて100%で静止。forwards で最終姿勢を保つ。 */
+.op-logo.op-drop { animation: opLogoDrop var(--d, 1s) forwards; }
+@keyframes opLogoDrop {
+  0%   { transform: translateY(-140%) scale(1, 1); opacity: 0; animation-timing-function: ease-in; }
+  12%  { opacity: 1; }
+  55%  { transform: translateY(0) scale(1, 1); animation-timing-function: ease-out; }
+  65%  { transform: translateY(0) scale(1.08, 0.88); animation-timing-function: ease-out; }
+  78%  { transform: translateY(-10%) scale(1, 1); animation-timing-function: ease-in; }
+  88%  { transform: translateY(0) scale(1, 1); animation-timing-function: ease-out; }
+  94%  { transform: translateY(-3%) scale(1, 1); animation-timing-function: ease-in; }
+  100% { transform: translateY(0) scale(1, 1); opacity: 1; }
+}
+.op-sub, .op-tap {
+  position: absolute; left: 0; right: 0; text-align: center; opacity: 0; pointer-events: none;
+  font-weight: 700; color: #FFF3D6; paint-order: stroke fill;
+}
+/* サブタイトル: ロゴ(2段、約0.36×frame-w の高さ、中心が上から30%)のすぐ下 */
+.op-sub { top: calc(30% + var(--frame-w) * 0.2); font-size: calc(var(--frame-w) * 0.06); -webkit-text-stroke: calc(var(--frame-w) * 0.006) #4A2A1A; }
+.op-tap { bottom: 20%; font-size: calc(var(--frame-w) * 0.05); letter-spacing: 0.12em; -webkit-text-stroke: calc(var(--frame-w) * 0.005) #4A2A1A; }
+.op-sub.op-show { animation: opFadeIn var(--d, 0.4s) ease-out forwards; }
+/* TAP TO START: フェードイン後に点滅(opacity 1↔0.25、周期1.0s)。後に書いたアニメが勝つので、
+   フェードインが終わった時点(--d 後)から点滅が上書きする。 */
+.op-tap.op-show { animation: opFadeIn var(--d, 0.4s) ease-out forwards, opTapBlink 1s ease-in-out var(--d, 0.4s) infinite; }
+@keyframes opTapBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+/* 左下「オープニングをもう一度見る」(2周目以降の再生用)。小さく、背景なし。.btn は使わない(画面の絵に馴染ませる) */
+.op-replay {
+  position: absolute; left: 3%; bottom: 3%; z-index: 5;
+  background: none; border: 0; padding: 2% 3%; cursor: pointer;
+  font-family: inherit; font-weight: 700; font-size: calc(var(--frame-w) * 0.032);
+  color: #FFF3D6; -webkit-text-stroke: calc(var(--frame-w) * 0.004) #4A2A1A; paint-order: stroke fill;
+}
 
 /* ================= 案内役(開業フェーズ/営業中) ================= */
 .guide-bar {

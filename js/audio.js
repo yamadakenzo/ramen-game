@@ -9,12 +9,12 @@
 //   - ミュートは localStorage の独立キー ramen_audio("on"|"off"、無ければオン)。通常セーブ(ramen_v10_save)
 //     にも周回引き継ぎ(ramen_meta)にも混ぜない(消える・巻き込まれる理由は js/screens/opening.js の
 //     SEEN_KEY と同じ)。
-//   - 音源の参照はこのファイルの SE テーブル1か所だけ。?v=20260825131137 は tools/deploy-pages.sh が公開時に
+//   - 音源の参照はこのファイルの SE テーブル1か所だけ。?v=20260825134331 は tools/deploy-pages.sh が公開時に
 //     置換する(sed の対象にこのファイルを足してある。忘れると v30 の video/ 取りこぼしと同じ事故になる)。
 // 名前は window.GameAudio。window.Audio はブラウザ組み込みのコンストラクタなので使わない。
 window.GameAudio = (function () {
   var KEY = "ramen_audio";
-  var BUILD_V = "20260825131137";
+  var BUILD_V = "20260825134331";
   var DIR = "audio/";
   // 仮のSE(tools/gen-se.js が合成した短い減衰音、約4KB)。本番の音源に差し替えるときはここだけ変える。
   // slide: メニューの札が定位置にはまった瞬間に1回(Swiper の slideChangeTransitionEnd、§7-3。ドラッグ中・移動中では鳴らさない)。

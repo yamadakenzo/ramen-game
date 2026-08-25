@@ -405,7 +405,7 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    - カルーセルは Swiper.js(js/vendor/swiper/swiper-bundle.min.css を index.html で先に読み込む)の coverflow。
      札の位置・傾き・奥行き・暗さ(slideShadows)は Swiper が transform と opacity だけで動かす。ここには札そのものの
      見た目だけを書く(§7-1: 毎フレーム触ってよいのは transform と opacity のみ)。
-   - 札の絵は仮(.menu-card-pic はベタ塗りの空箱)。看板イラストは実機で比率を確定してから後日生成する(§5-3)。
+   - 札の絵(v38-3): .menu-card-pic の中に img/menu/*.webp(透過)。面の地(--m-pic)は絵の後ろに残る。
    ================================================================ */
 #screen-menu { padding: 0; }
 .menu-root {
@@ -417,7 +417,7 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
      --m-panel / --m-panel-text / --m-panel-border / --m-overlay  下位画面のパネルと背面   --m-note  注記の文字 */
   --m-bg: #2F8FE6; --m-bg-image: linear-gradient(180deg, #6FD0FF 0%, #2F8FE6 55%, #1E63C4 100%);
   --m-text: #FFFFFF; --m-text-shadow: 0 calc(var(--frame-w) * 0.008) 0 #143A78;
-  --m-card: #FFFFFF; --m-card-border: #143A78; --m-card-line: calc(var(--frame-w) * 0.008); --m-pic: #EAF4FF;
+  --m-card: #FFFFFF; --m-card-border: #143A78; --m-card-line: calc(var(--frame-w) * 0.008); --m-pic: #FFFFFF; /* v38-3: 絵の面の地は白(生成画像の内部に残る白=湯気・光沢が水色の上では浮くため) */
   --m-band: #FFC63A; --m-band-text: #1B2B4A;
   --m-shadow: 0 calc(var(--frame-w) * 0.03) calc(var(--frame-w) * 0.05) rgba(10, 40, 90, 0.45);
   --m-shadow-side: 0 calc(var(--frame-w) * 0.012) calc(var(--frame-w) * 0.025) rgba(10, 40, 90, 0.35);
@@ -463,7 +463,16 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 }
 .menu-card.swiper-slide-active { box-shadow: var(--m-shadow); } /* 中央の札だけ大きい影(クラス切替時の1回だけ塗り直る) */
 /* 札の中身: 上が絵(仮の空箱)、下に帯+札名(文字は画像に入れない方針)。札名はこの帯だけ(§7-4) */
-.menu-card-pic { flex: 1; margin: 6% 6% 0; background: var(--m-pic); border-radius: calc(var(--frame-w) * 0.015); }
+.menu-card-pic {
+  flex: 1; margin: 6% 6% 0; background: var(--m-pic); border-radius: calc(var(--frame-w) * 0.015);
+  display: flex; align-items: center; justify-content: center; overflow: hidden; min-height: 0;
+}
+/* v38-3: 札の絵(img/menu/*.webp、透過、比 0.926 で切ってある)。面の中央に contain。ドラッグは Swiper が受けるので
+   画像自身はポインタを取らず、ブラウザのネイティブな画像ドラッグも起こさない */
+.menu-card-pic img {
+  width: 100%; height: 100%; object-fit: contain; display: block;
+  pointer-events: none; user-select: none; -webkit-user-drag: none;
+}
 .menu-card-band {
   flex: 0 0 auto; margin-top: 6%; padding: 6% 2%;
   background: var(--m-band); color: var(--m-band-text); font-weight: 700; font-size: calc(var(--frame-w) * 0.05); line-height: 1.2;

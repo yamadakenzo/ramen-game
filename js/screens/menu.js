@@ -9,18 +9,21 @@
 // このメニューが書くのは「止まっている札の番号」だけで、ゲーム側へ渡るのは決定した瞬間のそれ(handlers.onContinue /
 // onNewGame)のみ。
 // 配色は theme-a「はっきり」で確定(§7-4)。CSS 変数 --m-* は css/style.css の .menu-root 直下。
-// 札の絵は今回も仮(ベタ塗り+DOMテキスト)。看板イラストは実機で比率を確定してから後日生成する(§5-3)。
+// 札の絵(v38-3): 各札の .menu-card-pic に AssetImage.node(def) の <img>(img/menu/*.webp、透過)。読み込みに失敗したら
+// AssetImage が空のテキストノードに差し替えるので、v38-2 までの無地の面に戻るだけで札は崩れない。
 // 「続きから」札の3状態(有効なセーブ/無し/形式不一致)は GameState.hasSave()/hasIncompatibleSave() で
 // 決める(旧 js/main.js の showResumeChoice()/showVersionMismatchNotice() の役割を引き取った)。
 window.ScreenMenu = (function () {
   var h = window.UI.h;
 
+  // v38-3: img は img/ 配下の拡張子なしパス(js/asset-image.js の AssetImage.node と同じ流儀。?v=__BUILD__ はそちらが付ける)。
+  // 絵は img/menu/*.webp(源PNGは docs/素材検討/menu/、共通枠で切って縁の白を透過、docs/完了/v38-3_確認/make_menu_webp.js)。
   var CARDS = [
-    { id: "continue", label: "続きから" }, // 有効なセーブが無ければ「はじめから」(render() で差し替える)
-    { id: "compendium", label: "図鑑" },
-    { id: "records", label: "記録" },
-    { id: "opening", label: "オープニング" },
-    { id: "settings", label: "設定" }
+    { id: "continue", label: "続きから", img: "menu/start" }, // 有効なセーブが無ければ「はじめから」(render() で差し替える)
+    { id: "compendium", label: "図鑑", img: "menu/book" },
+    { id: "records", label: "記録", img: "menu/record" },
+    { id: "opening", label: "オープニング", img: "menu/opening" },
+    { id: "settings", label: "設定", img: "menu/settings" }
   ];
   var MISMATCH_TEXT = "セーブデータの形式が変わったため、最初から始まります。"; // 旧 showVersionMismatchNotice() と同文
 
@@ -163,7 +166,7 @@ window.ScreenMenu = (function () {
     // 器へ泡立って来るので、器が細くても脇の札からのドラッグは効く。
     var slides = CARDS.map(function (c, i) {
       return h("div", { className: "swiper-slide menu-card", "data-index": String(i) }, [
-        h("div", { className: "menu-card-pic" }),                 // 仮: 看板イラストが入る予定の面(§5-3)
+        h("div", { className: "menu-card-pic" }, [window.AssetImage.node({ img: c.img, name: c.label, emoji: "" })]),
         h("div", { className: "menu-card-band", text: c.label })  // 札名はこの帯だけ(下の大きい文字は §7-4 で廃止)
       ]);
     });

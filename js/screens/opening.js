@@ -3,11 +3,14 @@
 // 旧テキスト4画面(renderTextFallback)は廃止した。
 //
 // 構成は2段:
-//   renderCinematic(onDone)    … 約10秒のシネマティック(商店街→店構え→厨房→丼→ズーム→白フラッシュ)。
-//                                右上のスキップで即 onDone(=タイトル画面へ。setupへ直行ではない)。
-//   renderTitle(onStart, opts) … タイトル画面(ロゴ落下・TAP TO START)。フレーム全体タップで onStart。
-//                                左下「オープニングをもう一度見る」で opts.onReplay(頭から再生)。
-// render(onFinish) が両者をつなぐ(呼び出し元は js/main.js の goToPhase("opening") の1か所)。
+//   renderCinematic(onDone) … 約10秒のシネマティック(商店街→店構え→厨房→丼→ズーム→白フラッシュ)。
+//                             右上のスキップで即 onDone(=タイトル画面へ。setupへ直行ではない)。
+//                             v38-2: モードメニューの「オープニング」札(js/screens/menu.js)からも直接呼ばれる
+//                             (その場合の onDone はメニューへ戻る。描画先は変わらず #screen-opening)。
+//   renderTitle(onStart)    … タイトル画面(ロゴ落下・TAP TO START)。フレーム全体タップで onStart。
+//                             v38-2: 左下「オープニングをもう一度見る」はメニューの「オープニング」札へ移設し廃止。
+// render(onFinish) が両者をつなぐ(呼び出し元は js/main.js の goToPhase("opening") の1か所。onFinish の先は
+// v38-2 からモードメニュー。setup へは進まない)。
 // 2周目以降(localStorageの既視フラグあり)はシネマティックを省略してタイトル画面へ直行する。
 //
 // アニメーションは可視化のみ: 切替の"時刻"はJS(単一スケジューラ、setTimeoutは常に1本)、
@@ -29,8 +32,8 @@ window.ScreenOpening = (function () {
   }
 
   // ---- 画像 ----
-  // js/asset-image.js と同じキャッシュ対策(?v=20260825053944)。tools/deploy-pages.sh が公開時に置換する。
-  var BUILD_V = "20260825053944";
+  // js/asset-image.js と同じキャッシュ対策(?v=20260825131137)。tools/deploy-pages.sh が公開時に置換する。
+  var BUILD_V = "20260825131137";
   var DIR = "img/opening/";
   function src(name) { return DIR + name + ".webp?v=" + BUILD_V; }
   // 画像の参照はこのテーブル1か所だけ。他所でファイル名を書かない。
@@ -255,20 +258,18 @@ window.ScreenOpening = (function () {
   }
 
   // ---- タイトル画面 ----
-  // opts.onReplay: 「オープニングをもう一度見る」の処理(省略で非表示)。
-  // onStart はユーザー操作(タップ)起点なので、将来BGMを入れる場合はここが再生開始の起点になる
-  // (自動再生制限に掛からない。今回はBGM/SEの基盤自体が無いので入れていない)。
-  function renderTitle(onStart, opts) {
-    opts = opts || {};
+  // onStart はユーザー操作(タップ)起点なので、音の再生開始の起点にできる(自動再生制限に掛からない)。
+  // v38-2: この先のモードメニューで効果音(js/audio.js)が鳴り始める。BGMはまだ無い。
+  function renderTitle(onStart) {
     var root = document.getElementById("screen-opening");
     window.UI.clear(root);
     // 店構え・暖簾の3枚が決着してから組み立てる。シネマティックの直後(白フラッシュの下)は8枚とも
     // 決着済みなので同期で進み、白の下で差し替わる。2周目のタイトル直行だけが実際に待つ
     // (待っている間は枠の地色のまま)。
-    preload(TITLE_KEYS, function () { buildTitle(root, onStart, opts); });
+    preload(TITLE_KEYS, function () { buildTitle(root, onStart); });
   }
 
-  function buildTitle(root, onStart, opts) {
+  function buildTitle(root, onStart) {
     var started = false;
     markSeen(); // タイトル画面が初めて表示された時点で既視扱い(2周目以降はシネマティック省略)
 
@@ -287,12 +288,6 @@ window.ScreenOpening = (function () {
       h("div", { className: "op-logo-pos" }, [logo]),
       sub, tap
     ];
-    if (opts.onReplay) {
-      children.push(h("button", {
-        className: "op-replay", text: "オープニングをもう一度見る",
-        onclick: function (e) { e.stopPropagation(); if (started) return; started = true; opts.onReplay(); }
-      }));
-    }
     var stage = h("div", { className: "op-stage op-title", onclick: start }, children);
     root.appendChild(stage);
 
@@ -309,7 +304,7 @@ window.ScreenOpening = (function () {
   }
 
   // ---- 入口 ----
-  // onFinish(=setupへ)は必ず1回だけ。「もう一度見る」で何周してもこの finished で守る。
+  // onFinish(v38-2 からはモードメニューへ)は必ず1回だけ(finished で守る)。
   function render(onFinish) {
     var finished = false;
     function finish() {
@@ -317,9 +312,8 @@ window.ScreenOpening = (function () {
       finished = true;
       onFinish();
     }
-    function showTitle() { renderTitle(finish, { onReplay: playCinematic }); }
-    function playCinematic() { renderCinematic(showTitle); }
-    if (hasSeen()) showTitle(); else playCinematic();
+    function showTitle() { renderTitle(finish); }
+    if (hasSeen()) showTitle(); else renderCinematic(showTitle);
   }
 
   return { render: render, renderCinematic: renderCinematic, renderTitle: renderTitle };

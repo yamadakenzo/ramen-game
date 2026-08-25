@@ -1,13 +1,34 @@
-// エントリポイント: セーブの検出とフェーズ遷移
+// エントリポイント: フェーズ遷移
+// v38-2(docs/指示書/v38-2_モードメニュー_指示書.md §5-1): 起動時の分岐を一本化した。
+// 以前は init() がセーブの有無で showResumeChoice()(続きから/はじめから)・showVersionMismatchNotice()
+// (形式不一致)を出し分けていて、セーブがあるとタイトル画面に到達しなかった。今はセーブの有無に
+// かかわらず常に goToPhase("opening") から入り、その3状態の出し分けはモードメニューの「続きから/はじめから」札
+// (js/screens/menu.js)が担う。setup 以降の経路は触っていない。
 (function () {
   function goToPhase(phase) {
     var state = window.GameState.get();
     if (phase === "opening") {
       window.UI.showScreen("opening");
-      window.ScreenOpening.render(function () {
-        state.phase = "setup";
-        window.GameState.save();
-        goToPhase("setup");
+      // オープニング(タイトル画面のタップ)の先はモードメニュー。ここではセーブしない
+      // (「はじめから」を選ぶまで state.phase は "opening" のまま。セーブ有無の判定を汚さないため)。
+      window.ScreenOpening.render(function () { goToPhase("menu"); });
+    } else if (phase === "menu") {
+      // メニューは state を持たない通過点。state.phase に "menu" は書かず、goToPhase だけで入る
+      // (SAVE_VERSION も上げない)。
+      window.UI.showScreen("menu");
+      window.ScreenMenu.render({
+        // 「続きから」: 有効なセーブを読んで、その phase(setup/loop/result)へ。
+        // 読めなかった(直前に消えた等)場合は最初から。
+        onContinue: function () {
+          if (window.GameState.load()) {
+            var p = window.GameState.get().phase;
+            goToPhase(p === "opening" ? "setup" : p);
+          } else {
+            startNew();
+          }
+        },
+        // 「はじめから」: セーブを消して最初から。
+        onNewGame: startNew
       });
     } else if (phase === "setup") {
       window.UI.showScreen("setup");
@@ -33,66 +54,19 @@
     }
   }
 
-  function showResumeChoice() {
-    var h = window.UI.h;
-    var root = document.getElementById("screen-opening");
-    window.UI.clear(root);
-    root.appendChild(h("div", { className: "opening-box" }, [
-      h("p", { text: "前回の途中経過が残っている。続きから始めるか？" }),
-      h("div", { className: "opening-actions" }, [
-        h("button", {
-          className: "btn", text: "はじめから",
-          onclick: function () {
-            window.GameState.clearSave();
-            window.GameState.reset();
-            goToPhase("opening");
-          }
-        }),
-        h("button", {
-          className: "btn primary", text: "続きから",
-          onclick: function () {
-            if (window.GameState.load()) goToPhase(window.GameState.get().phase);
-            else { window.GameState.reset(); goToPhase("opening"); }
-          }
-        })
-      ])
-    ]));
-    window.UI.showScreen("opening");
-  }
-
-  // STEP1(docs/新設計/01_STEP1_新システム用データ基盤_修正版.md §1-2): セーブはあるが
-  // バージョンが合わない場合、無言で破棄せず一言知らせてから始める。showResumeChoice()と
-  // 同じ作り(opening-box/opening-actions)を流用し、confirm()等のネイティブダイアログは使わない。
-  function showVersionMismatchNotice() {
-    var h = window.UI.h;
-    var root = document.getElementById("screen-opening");
-    window.UI.clear(root);
-    root.appendChild(h("div", { className: "opening-box" }, [
-      h("p", { text: "セーブデータの形式が変わったため、最初から始まります。" }),
-      h("div", { className: "opening-actions" }, [
-        h("button", {
-          className: "btn primary", text: "はじめる",
-          onclick: function () {
-            window.GameState.clearSave();
-            window.GameState.reset();
-            goToPhase("opening");
-          }
-        })
-      ])
-    ]));
-    window.UI.showScreen("opening");
+  // 最初から始める。旧 showResumeChoice() の「はじめから」(clearSave+reset)と、旧 opening 完了時に
+  // やっていた phase="setup"+save をここに寄せた(セーブが最初に作られるのはこの瞬間)。
+  function startNew() {
+    window.GameState.clearSave();
+    window.GameState.reset();
+    var state = window.GameState.get();
+    state.phase = "setup";
+    window.GameState.save();
+    goToPhase("setup");
   }
 
   function init() {
-    if (window.GameState.hasIncompatibleSave()) {
-      showVersionMismatchNotice();
-      return;
-    }
-    if (window.GameState.hasSave()) {
-      showResumeChoice();
-      return;
-    }
-    window.GameState.reset();
+    // セーブの有無にかかわらず、常にオープニング(2周目以降はタイトル画面へ直行)から入る(§5-1)。
     goToPhase("opening");
   }
 

@@ -395,13 +395,133 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    フェードインが終わった時点(--d 後)から点滅が上書きする。 */
 .op-tap.op-show { animation: opFadeIn var(--d, 0.4s) ease-out forwards, opTapBlink 1s ease-in-out var(--d, 0.4s) infinite; }
 @keyframes opTapBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
-/* 左下「オープニングをもう一度見る」(2周目以降の再生用)。小さく、背景なし。.btn は使わない(画面の絵に馴染ませる) */
-.op-replay {
-  position: absolute; left: 3%; bottom: 3%; z-index: 5;
-  background: none; border: 0; padding: 2% 3%; cursor: pointer;
-  font-family: inherit; font-weight: 700; font-size: calc(var(--frame-w) * 0.032);
-  color: #FFF3D6; -webkit-text-stroke: calc(var(--frame-w) * 0.004) #4A2A1A; paint-order: stroke fill;
+
+/* ================================================================
+   v38-2: モードメニュー(js/screens/menu.js、docs/指示書/v38-2_モードメニュー_指示書.md §5〜§7)
+   - タイトル画面と本編の間の画面。配色は theme-a「はっきり」で確定(§7-4): 空色〜青の地、白い札、濃い文字、
+     暖色(黄〜橙)のアクセント。メニュー専用の CSS 変数 --m-* を .menu-root 直下に置く。既存の --c-*(4色相)も
+     オープニングの3色も使わない。この画面ではグラデーション・ぼかし影の禁止を解除している(§6-3)。
+   - 座標・寸法はフレーム基準(--frame-w、または親の%)。px固定は書かない(文字の --fs-* は既存どおりpx)。
+   - カルーセルは Swiper.js(js/vendor/swiper/swiper-bundle.min.css を index.html で先に読み込む)の coverflow。
+     札の位置・傾き・奥行き・暗さ(slideShadows)は Swiper が transform と opacity だけで動かす。ここには札そのものの
+     見た目だけを書く(§7-1: 毎フレーム触ってよいのは transform と opacity のみ)。
+   - 札の絵は仮(.menu-card-pic はベタ塗りの空箱)。看板イラストは実機で比率を確定してから後日生成する(§5-3)。
+   ================================================================ */
+#screen-menu { padding: 0; }
+.menu-root {
+  /* theme-a「はっきり」。変数の意味:
+     --m-bg / --m-bg-image  地(色 / グラデーション)   --m-text / --m-text-shadow  見出しの文字と影
+     --m-card / --m-card-border / --m-card-line  札の面・枠色・枠の太さ   --m-pic  札の絵の面(仮)
+     --m-band / --m-band-text  札の帯とその文字   --m-shadow / --m-shadow-side  中央の札の影 / 脇の札・ボタンの影
+     --m-accent / --m-accent-text / --m-accent-border  「決定」「閉じる」   --m-btn / --m-btn-fg / --m-btn-border  矢印
+     --m-panel / --m-panel-text / --m-panel-border / --m-overlay  下位画面のパネルと背面   --m-note  注記の文字 */
+  --m-bg: #2F8FE6; --m-bg-image: linear-gradient(180deg, #6FD0FF 0%, #2F8FE6 55%, #1E63C4 100%);
+  --m-text: #FFFFFF; --m-text-shadow: 0 calc(var(--frame-w) * 0.008) 0 #143A78;
+  --m-card: #FFFFFF; --m-card-border: #143A78; --m-card-line: calc(var(--frame-w) * 0.008); --m-pic: #EAF4FF;
+  --m-band: #FFC63A; --m-band-text: #1B2B4A;
+  --m-shadow: 0 calc(var(--frame-w) * 0.03) calc(var(--frame-w) * 0.05) rgba(10, 40, 90, 0.45);
+  --m-shadow-side: 0 calc(var(--frame-w) * 0.012) calc(var(--frame-w) * 0.025) rgba(10, 40, 90, 0.35);
+  --m-accent: #FF8A1F; --m-accent-text: #FFFFFF; --m-accent-border: #143A78;
+  --m-btn: #FFFFFF; --m-btn-fg: #143A78; --m-btn-border: #143A78;
+  --m-panel: #FFFFFF; --m-panel-text: #1B2B4A; --m-panel-border: #143A78; --m-overlay: rgba(20, 58, 120, 0.7);
+  --m-note: rgba(255, 255, 255, 0.9);
 }
+.menu-stage {
+  position: absolute; inset: 0; overflow: hidden;
+  background: var(--m-bg); background-image: var(--m-bg-image);
+  user-select: none; -webkit-user-select: none;
+  --menu-card-w: calc(var(--frame-w) * 0.40);
+  --menu-card-h: calc(var(--frame-w) * 0.40 * 4 / 3);   /* 札は3:4の縦長(仮。実機で確定する) */
+}
+.menu-head {
+  position: absolute; left: 0; right: 0; top: 6%; text-align: center; pointer-events: none;
+  font-weight: 700; font-size: calc(var(--frame-w) * 0.07); letter-spacing: 0.08em; line-height: 1.2;
+  color: var(--m-text); text-shadow: var(--m-text-shadow);
+}
+
+/* ---- カルーセル(Swiper coverflow、§7-3) ----
+   .menu-swiper-clip(枠幅、overflow:hidden)が枠の外へはみ出す札を切る。その中の .swiper は札1枚ぶんの幅で中央に置き、
+   overflow:visible(Swiper 既定の hidden を上書き)で脇の札を外へ描かせる。器を札幅にする理由は js/screens/menu.js の
+   build() のコメント(centeredSlides の snap 位置を 0 始まりにして freeMode の吸着を正しくする)。
+   slidesPerView:'auto' なので札の幅はここの .swiper-slide で決める。centeredSlides で中央揃え、
+   coverflow は Y 軸回転+translateZ なので札の中心の高さは常に揃う。 */
+.menu-swiper-clip {
+  position: absolute; left: 0; right: 0; top: 47%; transform: translateY(-50%);
+  height: var(--menu-card-h); overflow: hidden;
+}
+.menu-swiper {
+  position: relative; width: var(--menu-card-w); height: 100%; margin: 0 auto; overflow: visible;
+}
+.menu-swiper .swiper-slide {
+  width: var(--menu-card-w); height: var(--menu-card-h);
+}
+.menu-card {
+  background: var(--m-card); border: var(--m-card-line) solid var(--m-card-border); border-radius: calc(var(--frame-w) * 0.025);
+  box-shadow: var(--m-shadow-side);
+  overflow: hidden; display: flex; flex-direction: column;
+  cursor: pointer;
+}
+.menu-card.swiper-slide-active { box-shadow: var(--m-shadow); } /* 中央の札だけ大きい影(クラス切替時の1回だけ塗り直る) */
+/* 札の中身: 上が絵(仮の空箱)、下に帯+札名(文字は画像に入れない方針)。札名はこの帯だけ(§7-4) */
+.menu-card-pic { flex: 1; margin: 6% 6% 0; background: var(--m-pic); border-radius: calc(var(--frame-w) * 0.015); }
+.menu-card-band {
+  flex: 0 0 auto; margin-top: 6%; padding: 6% 2%;
+  background: var(--m-band); color: var(--m-band-text); font-weight: 700; font-size: calc(var(--frame-w) * 0.05); line-height: 1.2;
+  text-align: center; white-space: nowrap;
+}
+/* Swiper の暗色の板(slideShadows)。角丸に沿って切れるよう札側に overflow:hidden がある。濃さは Swiper が opacity で動かす */
+.menu-card .swiper-slide-shadow-left, .menu-card .swiper-slide-shadow-right { border-radius: inherit; }
+
+/* ---- 札の下: 注記(形式不一致の一言)・操作(矢印・決定) ----
+   札の下端 = 47% + h/2(h は札の高さ)。そこからフレーム幅基準で下へ並べる。 */
+.menu-note {
+  position: absolute; left: 8%; right: 8%; top: calc(47% + var(--menu-card-h) * 0.5 + var(--frame-w) * 0.05);
+  text-align: center; pointer-events: none; min-height: 1.5em;
+  font-size: var(--fs-note); line-height: 1.5; color: var(--m-note);
+}
+.menu-nav {
+  position: absolute; left: 0; right: 0; bottom: 7%;
+  display: flex; justify-content: center; align-items: center; gap: calc(var(--frame-w) * 0.06);
+}
+/* 矢印: 丸いボタンの中にCSSで描いた山形(記号や絵文字フォントに頼らない)。端では Swiper が .swiper-button-disabled を付ける */
+.menu-arrow {
+  position: relative; width: calc(var(--frame-w) * 0.13); height: calc(var(--frame-w) * 0.13); padding: 0;
+  border-radius: 50%; background: var(--m-btn); border: calc(var(--frame-w) * 0.006) solid var(--m-btn-border); cursor: pointer;
+  box-shadow: var(--m-shadow-side);
+  touch-action: manipulation;
+}
+.menu-arrow::before {
+  content: ""; position: absolute; top: 50%; left: 50%; width: 30%; height: 30%;
+  border-left: calc(var(--frame-w) * 0.01) solid var(--m-btn-fg); border-bottom: calc(var(--frame-w) * 0.01) solid var(--m-btn-fg);
+}
+.menu-arrow.menu-prev::before { transform: translate(-30%, -50%) rotate(45deg); }
+.menu-arrow.menu-next::before { transform: translate(-70%, -50%) rotate(-135deg); }
+.menu-arrow.swiper-button-disabled { opacity: 0.4; cursor: default; }
+.menu-arrow:active, .menu-btn:active { transform: translate(1px, 1px); }
+.menu-btn {
+  font-family: inherit; font-weight: 700; font-size: var(--fs-label); line-height: 1.4;
+  padding: calc(var(--frame-w) * 0.025) calc(var(--frame-w) * 0.09);
+  background: var(--m-accent); color: var(--m-accent-text); border: calc(var(--frame-w) * 0.006) solid var(--m-accent-border); border-radius: var(--r);
+  box-shadow: var(--m-shadow-side); cursor: pointer;
+  touch-action: manipulation;
+}
+
+/* ---- 下位画面(図鑑/記録/設定)。メニューの上に被せる1枚のパネル。図鑑・記録の中身は次バージョン ---- */
+.menu-sub {
+  position: absolute; inset: 0; z-index: 200; padding: 8%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--m-overlay);
+}
+.menu-sub-panel {
+  width: 100%; padding: 6% 6% 5%; text-align: center; color: var(--m-panel-text);
+  background: var(--m-panel); border: calc(var(--frame-w) * 0.006) solid var(--m-panel-border); border-radius: calc(var(--frame-w) * 0.03);
+  box-shadow: var(--m-shadow);
+}
+.menu-sub-title { font-weight: 700; font-size: var(--fs-heading); line-height: 1.3; margin-bottom: 4%; }
+.menu-sub-body { font-size: var(--fs-body); margin-bottom: 6%; }
+.menu-sub-body p { margin: 0; }
+/* 設定の1行(効果音: オン/オフ)。中身は本編UIの部品(.pixel-panel/.btn、--c-*)。§5-2 の例外、§6-4/§7-5 で据え置き */
+.menu-settings-row { display: flex; justify-content: space-between; align-items: center; text-align: left; font-size: var(--fs-label); font-weight: 700; }
 
 /* ================= 案内役(開業フェーズ/営業中) ================= */
 .guide-bar {

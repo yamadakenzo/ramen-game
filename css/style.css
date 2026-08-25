@@ -1065,6 +1065,9 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 /* v37-1(報告書§5): 反転は translate の後(CSSは右から適用されるので先に scaleX(-1)、次に translate)。旧 scaleX(-1) translate(...) は
    transform-origin(箱の中心)を軸に translate 後の箱まで反転され、本体が足元の点から右へ1本体幅ずれていた。 */
 .sv-cust.flip .sv-body { transform: translate(-50%, -100%) scaleX(-1); }
+/* v37-4: 歩行2コマを持つ従業員(根に .walk。今はゆうただけ)にも同じ順で反転を掛ける。.flip クラスは move() が
+   全俳優に付けるので、.walk で限定しないと立ち絵のままの他の従業員まで反転する。 */
+.sv-staff.walk.flip .sv-body { transform: translate(-50%, -100%) scaleX(-1); }
 .sv-cust .sv-bowl {
   position: absolute; left: 0; top: -2.38em; font-size: 0.65em; z-index: 1000; /* 旧 top:-0.85em(本体上端基準) */
   color: var(--c-down); /* 画像読み込み失敗時の絵文字フォールバック用。「注文を抱えている」印象で厨房の丼の山と揃える */
@@ -1157,6 +1160,12 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   transform: translateX(-50%) scale(0); transition: transform 200ms ease;
 }
 .sv-staff.carrying .sv-bowl { transform: translateX(-50%) scale(1); }
+/* v37-4(§53): 歩行素材(比率1.0)の従業員は立ち絵(78.83%、下余白10.55%)にあった足元の浮き 8.0px(60px時)が消えて
+   頭頂が 8px 下がるので、丼も同じだけ下げて「丼の底が頭のすぐ上」の見え方を保つ。
+   旧(立ち絵): 底=足元-69.4px、頭頂=足元-68.1px(隙間1.3px) → 調整前(新素材・丼そのまま): 頭頂=足元-60px(隙間9.4px)
+   → 調整後: 底=足元-61.2px、頭頂=足元-60px(隙間1.2px)。
+   丼の em(0.6×根)で 8.2px=0.18em ぶん。他の従業員(立ち絵)は -2.52em のまま。 */
+.sv-staff.walk .sv-bowl { top: -2.34em; }
 
 /* v13-1: 誰も取っていない注文(丼)が厨房に積まれて見える列。 */
 .sv-order-pile { position: absolute; transform: translate(-50%, -100%); display: flex; gap: 2px; } /* v35: 足元アンカー */

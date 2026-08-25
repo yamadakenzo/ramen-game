@@ -53,11 +53,20 @@ window.ShopView = (function () {
   var WALK_BACK_FRAMES = ["segment/walk_back_a", "segment/walk_back_b"];
   var WALK_BACK_EPS = 0.01; // 1フレームの|Δ(x+y)|がこれ未満なら向きを更新しない(transition終端の揺れ対策)
   function walkFontEm() { return CUST_VISIBLE_RATIO / WALK_VISIBLE_RATIO; }
-  function walkImgDef(def, i) { return { img: WALK_FRAMES[i], emoji: def.emoji, name: def.name }; }
+  // v37-4: 従業員ゆうたの正面2コマ(img/character/walk_yuta_a/b.webp、159×256)。切り出しは§50-4/§51-1と同じ型
+  // (2体共通の枠 y=379〜1669・幅800px・各体の中心で横中央揃え・下端=キャンバス下端)なので比率は客の歩行素材と同じ1.0。
+  // 従業員の1em(根の font-size = staffFontEm() em)は78.83%の絵向けなので、本体は 0.7883/1.0 em で背丈60pxに揃う。
+  // 店内表示は停止中・作業中も walk_a 固定(立ち絵 yuta.webp は店内では使わない。カード・パネル側は w.def のまま)。
+  // 奥向き(背中)の素材は v37-5。今回は Δ(x+y)<0 でも正面コマのまま(walk.frames を固定で持つ俳優は向きを見ない)。
+  var WALK_STAFF_ID = "yuta";
+  var WALK_STAFF_FRAMES = ["character/walk_yuta_a", "character/walk_yuta_b"];
+  function staffWalkFontEm() { return STAFF_VISIBLE_RATIO / WALK_VISIBLE_RATIO; }
+  function walkImgDef(def, i, frames) { return { img: (frames || WALK_FRAMES)[i], emoji: def.emoji, name: def.name }; }
   function setWalkFrame(a, i) {
     if (!a.walk) return;
-    var frames = a.walk.back ? WALK_BACK_FRAMES : WALK_FRAMES;
-    var key = (a.walk.back ? "b" : "f") + i; // 向きが変わったときはコマ番号が同じでも描き直す
+    var back = !a.walk.frames && a.walk.back; // v37-4: 正面固定の素材(従業員)は向きを見ない
+    var frames = a.walk.frames || (back ? WALK_BACK_FRAMES : WALK_FRAMES);
+    var key = (back ? "b" : "f") + i; // 向きが変わったときはコマ番号が同じでも描き直す
     if (a.walk.key === key) return;
     a.walk.frame = i; a.walk.key = key;
     // <img>の作り方(?v=__BUILD__の付け方・読めないときの絵文字フォールバック)はAI.nodeに任せ、要素ごと差し替える
@@ -983,8 +992,11 @@ window.ShopView = (function () {
     var kIdx = 0;
     workers.forEach(function (w) {
       var home = w.role === "hall" ? GEO.hallHome : (kitchenSpots[kIdx++] || GEO.kitchenHome);
-      var el = h("div", { className: "sv-staff" }, [
-        h("span", { className: "sv-body" }, [AI.node(w.def)]),
+      // v37-4: ゆうただけ歩行2コマ。根に印クラス .walk を付け、CSS の反転(.sv-staff.walk.flip .sv-body)をこの1人に限る
+      // (.flip クラス自体は move() が俳優の種類を問わず付けている。他の従業員は CSS が無いので反転しない)
+      var useWalk = w.id === WALK_STAFF_ID;
+      var el = h("div", { className: "sv-staff" + (useWalk ? " walk" : "") }, [
+        h("span", { className: "sv-body" }, [AI.node(useWalk ? walkImgDef(w.def, 0, WALK_STAFF_FRAMES) : w.def)]),
         h("span", { className: "sv-bowl" }, [AI.node(stageDef("bowl", "🍜"))])
       ]);
       el.style.fontSize = staffFontEm() + "em"; // v35-3(§2): 客と同じ背丈になる倍率(定数1つから導出)
@@ -993,6 +1005,12 @@ window.ShopView = (function () {
       el.dataset.x = home.x;
       actorLayer.appendChild(el);
       w.el = el; w.gone = false; w.busy = false; w.homeX = home.x; w.homeY = home.y; w.curY = home.y;
+      w.body = el.querySelector(".sv-body");
+      w.walk = null; // v37-4: 歩行2コマの状態(客の a.walk と同じ形。ゆうた以外は null のまま=従来どおり)
+      if (useWalk) {
+        w.body.style.fontSize = staffWalkFontEm() + "em";
+        w.walk = { frame: 0, key: "f0", back: false, def: w.def, acc: 0, last: null, frames: WALK_STAFF_FRAMES };
+      }
       kitchenWorkers.push(w);
       staffActors.push(el);
     });

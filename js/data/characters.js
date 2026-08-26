@@ -7,13 +7,18 @@ window.DATA.characters = {
   //  - 「担当者が1年間ずっと店に出入りする」設定に無理がある
   //  - 人間の立ち絵は本番制作コストが最も高い
   // 素性は作り込まない。「この店を見守っている丼」以上の説明を持たせない。
-  // v31 §3-1(imgフィールドの意味はrecipes.js冒頭コメント参照): どんぶりちゃんは表情差分6種が
-  // 用意済み(img/character/donburi_normal〜sad.webp)だが、今回参照するのはnormalのみ
-  // (v31指示書 質問1回答: 表情を切り替える仕組みはまだ作らない)。idは"donburi"のままなので
-  // imgのファイル名はidと一致しない特別扱い(donburi_normal)。
+  // v31 §3-1(imgフィールドの意味はrecipes.js冒頭コメント参照): どんぶりちゃんは表情差分が
+  // 用意されているが、この共通の定義が指すのは normal の1枚だけ。idは"donburi"のままなので
+  // imgのファイル名はidと一致しない特別扱い(donburi-normal)。
+  // v43(docs/指示書/v43_立ち絵とチュートリアル画面_指示書.md §2): 絵を「麺が髪の毛の少女」から
+  // 「丼そのものの擬人化」へ差し替えた。新しい絵は img/char/donburi-{normal,happy,sad}.webp、
+  // 旧6種は docs/素材検討/char/旧/ へ退避した(削除していない)。旧ファイルを img/ から動かした
+  // ので、ここのパスも新しい絵へ向け替えている(向け替えないと営業ループの吹き出し
+  // <js/screens/guide.js>が404を出す)。**表情を切り替えるのはチュートリアル画面だけ**で、
+  // その対応表は js/screens/setup.js の FACE_IMG / LINE_FACE が持つ。
   "guide": {
     "id": "donburi", "name": "どんぶりちゃん", "name_en": "Donburi", "emoji": "🍜",
-    "img": "character/donburi_normal",
+    "img": "char/donburi-normal",
     "role": "見守り役",
     "personality": "明るい・断定的・世話焼き",
     "tone": "「決めよう」「大丈夫」"

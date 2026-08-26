@@ -611,109 +611,164 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .guide-bubble .guide-face { font-size: calc(var(--frame-w) * 0.07); padding: 2px; }
 .guide-bubble .guide-line { font-size: var(--fs-note); min-height: 0; }
 
-/* ================= 開業フェーズ(v20: 会話イベント) =================
+/* ================= 開業フェーズ(v20: 会話イベント → v43: 作り直し) =================
    v19までの「セリフ+次へ」の素っ気ない画面を、どんぶりちゃんが喋っている会話イベントに
-   見せ替える(docs/指示書/v20_ラーメン屋_修正指示書.md §3・§4)。数値・state の形・
-   commitTutorialAndStart()の副作用5点は一切変えていない(演出のみ)。
-   v14で固定した4色パレットの外に出ない。グラデーション・ぼかしshadowは使わない。 */
-#screen-setup { padding: 0; }
+   見せ替えたのがv20〜v24。数値・state の形・commitTutorialAndStart()の副作用5点は
+   一度も変えていない(演出のみ)。
 
-/* v19→v20でも位置は変えない(既存のスキップボタンの置き場所を維持)。z-indexだけ、後から
-   足したカード演出オーバーレイ(.card-reveal-overlay)の上に来るよう引き上げた。 */
-.setup-skip { position: absolute; top: 8px; right: 8px; z-index: 30; }
+   v43(docs/指示書/v43_立ち絵とチュートリアル画面_指示書.md):
+   - §7 v14の「UIは生成り・濃茶・朱・緑の4色相のみ」という方針は、本編UIに対して撤回された。
+     この画面はモードメニュー(theme-a「はっきり」、.menu-root の --m-*)側の明るい配色へ寄せる。
+     ただし**変数は #screen-setup の中だけに閉じた --t-* として持つ**。共通の --c-* は
+     1つも書き換えない(営業ループのUIを巻き込まないため。指示書§7)。値はメニューの
+     --m-* と同じものを使い、意味の対応が分かるようコメントに元の名前を書いてある。
+   - §3 立ち絵は枠を外して大きくし、パネルの上縁から上へはみ出させる(.setup-char)。
+   - §5 パネルはメニューの札と同じ語彙(白いカード・角丸・ベタずらしの影・下の色帯に抜き文字)。
+
+   v44(docs/指示書/v44_背景と席演出の差し戻し_指示書.md): v43 §6「チュートリアル中は部屋を
+   表示しない」は判断が誤っていたので差し戻した。実機で見ると今の店内はすでに絵として成立して
+   おり、隠す必要が無かった。背景は ShopView の店内描画へ戻し、暫定の無地背景(--t-bg /
+   --t-bg-image)と、背景イラストへ差し替えるための仕込みは**削除した**(§2「そのための仕込みも
+   残さないこと」)。席のプレゼント演出(.setup-panel.hidden / .seat-reveal-layer)も v24 の形に戻した。
+   **配色は今回いじらない**(§4)。パネル・帯の --t-* はそのまま。
+   ================================================================= */
+#screen-setup {
+  padding: 0;
+  /* 意味(→ は .menu-root の対応する変数):
+     --t-card / --t-card-border / --t-card-line  カードの面・枠色・枠の太さ   → --m-card / --m-card-border / --m-card-line
+     --t-band / --t-band-text  下の色帯とその抜き文字                        → --m-accent / --m-accent-text
+     --t-text / --t-text-sub   カードの上に置く文字(本文 / 副次)             → --m-panel-text
+     --t-radius  角丸        --t-shadow  ベタずらしの影(ぼかさない)
+     --t-char-overhang  立ち絵がカードの上縁から上へはみ出す量(§3)
+     (v44: 地の色 --t-bg / --t-bg-image は削除。背景は ShopView が描く) */
+  --t-card: #FFFFFF;
+  --t-card-border: #143A78;
+  --t-card-line: calc(var(--frame-w) * 0.008);
+  --t-band: #FF8A1F;
+  --t-band-text: #FFFFFF;
+  --t-text: #1B2B4A;
+  --t-text-sub: rgba(27, 43, 74, 0.62);
+  --t-radius: calc(var(--frame-w) * 0.035);
+  --t-shadow: calc(var(--frame-w) * 0.018) calc(var(--frame-w) * 0.018) 0 rgba(20, 58, 120, 0.35);
+  --t-char-overhang: calc(var(--frame-w) * 0.22);
+}
 
 /* v20 §2-1: 背景は店の断面図(ShopView)を静止画として置く。ShopView.mount()自体は
    タイマー・湧きループを一切起動しないため(調査済み)、ここではただの絶対配置の入れ物でよい。
-   念のためjs側でsetPaused(true)も掛けている(js/screens/setup.js)。 */
+   念のためjs側でsetPaused(true)も掛けている(js/screens/setup.js)。
+   v44 §2: v43で一度これを明るい無地に置き換えたが、判断が誤りだったので元に戻した。 */
 .setup-bg { position: absolute; inset: 0; z-index: 1; overflow: hidden; }
 
-/* v21(docs/完了/旧文書/v21_ラーメン屋_修正指示書.md §3-1): どんぶりちゃんの絵と会話ウインドウを
-   1枚の外枠(.setup-panel)にまとめる。枠線・角丸・影はv20の.setup-windowが使っていた実値を
-   そのまま流用(§2-2で読み取った値、新しい値は作っていない)。
-   z-indexはCardRevealのオーバーレイ(z-index:15、#app直下のフルスクリーン)より下、
-   .setup-skip(z-index:30)より下になるよう、旧.setup-windowと同じ10のまま据え置く
-   (ユーザー指示)。
-   v21続報1: 「上段は残りの高さを全部取る」指示は実機でパネルが画面いっぱいまで広がり、
-   枠線が画面の縁と区別できなくなる副作用が出たため撤回された。画面下寄せの固定サイズ
-   (高さ52%・下端14px浮かせ・左右14px余白)に差し替えた。
-   v21続報2: 下寄せだと上下の余白が非対称に見えたため、画面垂直中央へ変更。
-   高さ52%はそのまま、`top: 24%`(残り48%を上下で均等割り=24%ずつ)にして
-   上下の余白を揃えた(ユーザー指示)。 */
+/* 位置はv19から変えていない(既存のスキップボタンの置き場所を維持)。z-indexはカード演出
+   オーバーレイ(.card-reveal-overlay: 15)より上。v43で色だけこの画面の配色に合わせた
+   (共通の .btn は --c-* のままなので、ここでの上書きは #screen-setup の中に閉じている)。 */
+.setup-skip {
+  position: absolute; top: 8px; right: 8px; z-index: 30;
+  background: var(--t-card); color: var(--t-text);
+  border: var(--t-card-line) solid var(--t-card-border);
+  box-shadow: calc(var(--frame-w) * 0.008) calc(var(--frame-w) * 0.008) 0 rgba(20, 58, 120, 0.35);
+}
+
+/* v43 §5: 会話パネル。メニューの札(.menu-card)と同じ語彙 = 白いカード・角丸・ベタずらしの影。
+   v21〜v42の「透明な上段 + 生成りの下段 + 細い区切り線」という構成はやめた。
+   縦の並びは 上段(立ち絵が立つ面) / セリフ / 名前の色帯 の3つ。
+   **overflow を掛けない**こと: 立ち絵(.setup-char)がカードの上縁から上へはみ出すので、
+   ここで切ると§3の指示が成立しない。下端の角丸は色帯側で自分で丸めている。
+   z-index はカード演出オーバーレイ(15)より下、.setup-skip(30)より下。 */
 .setup-panel {
-  position: absolute; left: 14px; right: 14px; top: 24%; height: 52%;
+  position: absolute; left: 5%; right: 5%; top: 32%; height: 48%;
   z-index: 10;
   display: flex; flex-direction: column;
-  background: transparent;
-  border: 2px solid var(--c-ink);
-  border-radius: var(--r);
-  box-shadow: 0 2px 0 var(--c-ink-16);
+  background: var(--t-card);
+  border: var(--t-card-line) solid var(--t-card-border);
+  border-radius: var(--t-radius);
+  box-shadow: var(--t-shadow);
+  color: var(--t-text);
   cursor: pointer;
 }
 /* v24(指示書§3-2手順1): 席の演出中は会話パネルを消し、背景の断面図を全面に見せる。
-   半透明は使わない(display:noneで完全に消す)。 */
+   半透明は使わない(display:noneで完全に消す)。v44 §3 で復活。 */
 .setup-panel.hidden { display: none; }
-/* 上段: どんぶりちゃんの絵が乗る面。
-   v21初回: 背景透過(店の断面図が透けて見える)にしていた。
-   v21続報2: 実機で見ると断面図が透けることで上段の可読性・まとまりが弱く見えたため、
-   不透明のベタ塗りに変更(ユーザー指示。半透明rgba()/opacityは使わない)。
-   色は`:root`の色変数を全て洗い出したうえで選定した(下記コメント参照)。
-   下段(.setup-panel-body)と同じ`var(--c-panel)`ではなく、あえて`var(--c-bg)`
-   (「生成り・地」、#EFE4CBというやや濃いベージュ)を使い、区切り線(border-top)だけで
-   上下の面を分けている。`var(--c-bg)`は`#app`自体の地色や店内ビュー(`.sv-stage`/`.sv-sky`)、
-   既存の下シート(`.sheet`、同じく52%高さでborder-top区切り)でも使われている「部屋の地」を
-   表す色で、`var(--c-panel)`は逆にカード・パネルの「面」を表す色として使い分けられている
-   (既存の使い分けの踏襲。新しい色変数は追加していない)。
-   丼が区切り線に接触して見えた(align-items: flex-endだったため)ので、
-   上下左右とも中央(center/center)に置くよう変更(ユーザー指示、続報1で対応済み)。 */
+/* 上段: 立ち絵が立つ面。カードの地(白)がそのまま面になる。絵の側に線・箱・背景色は付けない(§3)。 */
 .setup-panel-top {
+  position: relative;
   flex: 1 1 auto; min-height: 0;
-  background: var(--c-bg);
-  display: flex; align-items: center; justify-content: center;
 }
-/* v21続報1: パネルを画面いっぱいから52%高さに縮めたことで上段も縮んだため、比率を再調整。
-   scratchpad配下のPlaywrightで実測(480×853のリファレンスviewport): 上段の高さ321.5px。
-   目安の0.55〜0.6の中間(0.575)に合わせるとcharの高さ約184.9px、frame-w(479.8px)に対する
-   係数は0.385。0.4→0.385に調整した。
-   v21続報2: 上段を不透明にしても上段の実高さ(ジオメトリ)自体は変わらないため、係数は
-   0.385のまま据え置いた(実機のスクリーンショットで見た目に違和感が無いことを確認済み)。
-   固定ビューポートを超えないことは§5で実測確認する。 */
-.setup-char { font-size: calc(var(--frame-w) * 0.385); line-height: 1; display: block; }
-/* §3-4(v20由来、v21でも維持): 文字を送っている間だけ上下に小さく揺れる(周期0.4秒)。svEatと
-   同じease-in-out系に速さを揃える。v21 §2-1の調査で既に.setup-char本体に付いていたことを
-   確認済みのため、適用先の変更は不要(外枠.setup-panelごと揺れることはない)。 */
-@keyframes setupCharBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+/* v43 §3: 立ち絵。上段の高さいっぱい + 上へ --t-char-overhang ぶんはみ出す大きさで、
+   足を上段の下端(bottom:0)に着ける。3枚は共通枠で切り出してあり足の位置と大きさが
+   揃っているので(指示書§2)、表情ごとの位置調整はしない。同じ場所に同じ大きさで重ね、
+   .on の付け替えだけで切り替える。
+   絵はタップを取らない(パネル全体の onclick でセリフを進めるため)。 */
+.setup-char {
+  position: absolute; left: 50%; bottom: 0;
+  transform: translate(-50%, 0);
+  height: calc(100% + var(--t-char-overhang));
+  aspect-ratio: 470 / 495;   /* 素材の実寸。width を書かずにここから決める */
+  max-width: 96%;
+  z-index: 2;                /* パネルより手前に描く(§3) */
+  display: block; line-height: 1; text-align: center;
+  pointer-events: none; user-select: none; -webkit-user-select: none;
+}
+/* .emoji-font img(1em角)より詳細度を1つ上げて上書きする。読み込みに失敗したときだけ
+   js/asset-image.js が<img>を絵文字のテキストノードへ差し替えるので、その場合は
+   このルールは効かず .setup-char 自身の font-size で出る。 */
+.setup-char.emoji-font img {
+  position: absolute; left: 0; top: 0;
+  width: 100%; height: 100%;
+  object-fit: contain; object-position: center bottom;
+  display: block; opacity: 0;
+  pointer-events: none; -webkit-user-drag: none;
+}
+.setup-char.emoji-font img.on { opacity: 1; }
+/* §3-4(v20由来、v43でも維持): 喋っているあいだだけ上下に小さく揺れる(周期0.4秒)。
+   v43で .setup-char が translateX(-50%) を持つ絶対配置になったので、
+   キーフレーム側にも同じ横方向のずらしを含めておく(含めないと揺れた瞬間に左へ飛ぶ)。 */
+@keyframes setupCharBob {
+  0%, 100% { transform: translate(-50%, 0); }
+  50%      { transform: translate(-50%, calc(var(--frame-w) * -0.016)); }
+}
 .setup-char.talking { animation: setupCharBob 0.4s ease-in-out infinite; }
 
-/* 下段: 不透明。セリフの可読性はここで確保する。区切り線は外枠と同じ太さ・色のborder-topで引く。
-   v21 §2-4: 高さは内容に応じて伸縮させず固定する(文字送り中に1→2行と増えて区切り線が動くのを
-   防ぐため)。実測(scratchpad配下のPlaywrightで.setup-window-name/-body/-nextを実フォント・
-   実CSSで計測): name行19.19px + margin-bottom4px + 本文2行44.78px + next行25.59px = 93.56px、
-   + padding上下20px = 113.56px。環境差の安全マージンを見て118pxに固定した。全9行(2周目5行)で
-   本文が2行を超えないことは§5で実測確認する。 */
+/* セリフの面。v21 §2-4以来の性質(高さは内容に応じて伸縮させず固定。文字送り中に1→2行と
+   増えて下の区切りが動くのを防ぐ)は v43 でも維持する。実測値の由来は当時のまま:
+   本文2行44.78px + next行25.59px = 70.37px、+ padding上下20px = 90.37px。
+   v21は名前行(19.19px + margin 4px)も同じ面に入れていたが、v43で名前は下の色帯へ移した
+   ぶんだけ減らし、環境差の安全マージンを見て 96px に固定した(全10行で本文が2行を
+   超えないことは確認スクリプトで実測する)。 */
 .setup-panel-body {
-  flex: 0 0 118px;
+  flex: 0 0 96px;
   display: flex; flex-direction: column;
   padding: 10px 12px;
-  background: var(--c-panel);
-  border-top: 2px solid var(--c-ink);
-  border-radius: 0 0 calc(var(--r) - 2px) calc(var(--r) - 2px);
-}
-.setup-window-name {
-  flex: 0 0 auto;
-  font-size: var(--fs-note); font-weight: 700; color: var(--c-accent);
-  margin-bottom: 4px;
+  position: relative; z-index: 3;   /* 立ち絵の足元より手前(文字が絵に隠れない) */
 }
 .setup-window-body {
   flex: 1 1 auto; min-height: 0;
   font-size: var(--fs-body); line-height: 1.6;
+  color: var(--t-text);
   overflow: hidden;
 }
 /* §3-1: 右下の「次へ」の三角。文字送りが終わったら点滅する。
    即時反応(0.2〜0.25s/ease)ではなく余韻側(0.6〜1.7s/ease-out系)の速さに寄せる。
    svEatと同じ無限ループ系なので、既存の使い分けどおりease-in-outを使う(ease-inは使わない)。 */
-.setup-window-next { flex: 0 0 auto; align-self: flex-end; font-size: var(--fs-label); opacity: 0; }
+.setup-window-next {
+  flex: 0 0 auto; align-self: flex-end;
+  font-size: var(--fs-label); color: var(--t-text-sub); opacity: 0;
+}
 @keyframes setupNextBlink { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
 .setup-window-next.show { animation: setupNextBlink 1.2s ease-in-out infinite; }
+
+/* v43 §5: カード下端の色帯。名前はこの中に抜き文字で入れる(メニューの札 .menu-card-band と
+   同じ役割・同じ作り)。カード側に overflow:hidden を掛けられない(立ち絵のはみ出しを切って
+   しまう)ので、下端の角丸はここで自分で持つ。枠の内側に収まるよう枠の太さぶん引く。 */
+.setup-panel-band {
+  flex: 0 0 auto;
+  padding: calc(var(--frame-w) * 0.022) calc(var(--frame-w) * 0.03);
+  background: var(--t-band); color: var(--t-band-text);
+  border-top: var(--t-card-line) solid var(--t-card-border);
+  border-radius: 0 0 calc(var(--t-radius) - var(--t-card-line)) calc(var(--t-radius) - var(--t-card-line));
+  font-weight: 700; font-size: calc(var(--frame-w) * 0.045); line-height: 1.2;
+  text-align: center; white-space: nowrap;
+}
 
 /* setup-hintはloop.js側の設備/従業員パネルでも使う共通クラス(削除しない) */
 .setup-hint { font-size: var(--fs-note); color: var(--c-ink-64); margin-bottom: 6px; }
@@ -831,7 +886,8 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .tap-continue.show { animation: setupNextBlink 1.2s ease-in-out infinite; }
 
 /* v24(指示書§3-2手順1): 席の演出中、会話パネルの代わりにタップを受ける透明な層。
-   半透明は使わない(背景=店の断面図がそのまま見える完全透明)。 */
+   半透明は使わない(背景=店の断面図がそのまま見える完全透明)。
+   v43 §6 で断面図ごと消したときに一度削除したが、v44 §3 の差し戻しで復活させた。 */
 .seat-reveal-layer { position: absolute; inset: 0; z-index: 19; cursor: pointer; }
 
 /* v20 §3-3/§3-4/§4: prefers-reduced-motionでは文字送り・揺れ・カード演出を止める。

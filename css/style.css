@@ -396,6 +396,38 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .op-tap.op-show { animation: opFadeIn var(--d, 0.4s) ease-out forwards, opTapBlink 1s ease-in-out var(--d, 0.4s) infinite; }
 @keyframes opTapBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 
+/* v41 §61: オープニングの前に挟む「タップして始める」。ここで一度触ってもらわないとブラウザが音を
+   鳴らさせず、シネマティックが無音で流れる。起動のたびに必ず1回通る、プレイヤーが最初に見る画面。
+   .op-stage が背景 #000 と inset:0 を持っているので、こちらは中身の置き方だけ書く。
+   絵(1:1、img/gate/start.webp)は縦に積んで中央、文字はその下。絵がまだ無ければ枠ごと出ないので、
+   文字だけが中央に来る(どちらでも崩れない)。 */
+.op-gate { display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; }
+/* 絵の表示幅: 枠幅の 92%。札の絵(枠幅の約35%＝札40%×面88%)よりずっと大きく取るのは、こちらが
+   1枚だけの主役だから。届いた絵(img/gate/bowl.webp)は黒地にスポットライトが描き込まれていて、
+   四隅は既に黒へ落ちている。**絵の中の丼はコマの中央 6割ほど**なので、コマを枠いっぱいに近く置いて
+   ようやく丼が主役の大きさになる。縦が足りない画面では枠高の 52% で頭打ちにして、はみ出させない。
+   大きさを変えたいときはこの1行だけ触ればよい。 */
+.op-gate-pic { display: flex; align-items: center; justify-content: center; }
+.op-gate-pic img {
+  width: min(calc(var(--frame-w) * 0.92), calc(var(--frame-h) * 0.52));
+  aspect-ratio: 1 / 1; height: auto; object-fit: contain; display: block;
+  margin-bottom: calc(var(--frame-w) * 0.04);   /* 文字との間。絵が無いときは枠ごと消えるので余白も残らない */
+  pointer-events: none; user-select: none; -webkit-user-drag: none;
+  /* 「絵の周囲を暗く落として絵だけが照らされて見える」は、**届いた絵が自前で持っている**
+     (黒地＋丼の後ろのスポットライト)。CSS 側で mask-image のヴィネットを重ねると二重掛けになり、
+     丼のまわりの光まで削ってしまうので掛けていない。
+     もし将来、四隅まで絵が詰まった(黒地でない)絵に差し替えるなら、ここに次を足すと同じ効果になる:
+       -webkit-mask-image / mask-image:
+         radial-gradient(farthest-corner, #000 58%, rgba(0,0,0,0.72) 84%, rgba(0,0,0,0.28) 100%);
+     四隅を完全に消して円く見せたいときは closest-side + transparent。 */
+}
+.op-gate-text {
+  color: #FFF3D6; font-weight: 700; text-align: center;
+  font-size: calc(var(--frame-w) * 0.055); letter-spacing: 0.12em;
+  paint-order: stroke fill; -webkit-text-stroke: calc(var(--frame-w) * 0.005) #4A2A1A;
+  animation: opTapBlink 1.4s ease-in-out infinite;   /* TAP TO START と同じ点滅で「押す場所」と分かる */
+}
+
 /* ================================================================
    v38-2: モードメニュー(js/screens/menu.js、docs/指示書/v38-2_モードメニュー_指示書.md §5〜§7)
    - タイトル画面と本編の間の画面。配色は theme-a「はっきり」で確定(§7-4): 空色〜青の地、白い札、濃い文字、
@@ -531,6 +563,10 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .menu-sub-body p { margin: 0; }
 /* 設定の1行(効果音: オン/オフ)。中身は本編UIの部品(.pixel-panel/.btn、--c-*)。§5-2 の例外、§6-4/§7-5 で据え置き */
 .menu-settings-row { display: flex; justify-content: space-between; align-items: center; text-align: left; font-size: var(--fs-label); font-weight: 700; }
+.menu-settings-row + .menu-settings-row { margin-top: calc(var(--frame-w) * 0.02); } /* v39: BGM / 効果音 の2行 */
+/* v39 §9-1: 魔王魂の著作表記(BGM を使う限り必須)。設定の行の下に小さく置く。
+   色は --m-note(注記)ではなく --m-panel-text: --m-note は青地の上に置く白文字で、白い .menu-sub-panel の上では見えない。 */
+.menu-settings-credit { margin-top: calc(var(--frame-w) * 0.045); font-size: var(--fs-note); line-height: 1.5; color: var(--m-panel-text); opacity: 0.7; }
 
 /* ================= 案内役(開業フェーズ/営業中) ================= */
 .guide-bar {

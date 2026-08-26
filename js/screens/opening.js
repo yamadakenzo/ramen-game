@@ -2,7 +2,11 @@
 // v30の動画版(video/opening.mp4、object-fit:containの上下黒帯)と、そのフォールバックだった
 // 旧テキスト4画面(renderTextFallback)は廃止した。
 //
-// 構成は2段:
+// 構成は3段(v41 §61 で先頭に1枚足した):
+//   renderGate(bgmId, onStart) … 「タップして始める」の1枚。触れた瞬間に曲を始めてから先へ渡す。これが無いと
+//                             ブラウザが音を鳴らさせず、オープニングが無音で流れてしまう(§60・§61)。
+//                             **起動のたびに必ず1回**通す(1周目・2周目とも。§61-3)。絵は img/gate/bowl.webp、
+//                             まだ無ければ文字だけの形になる(GATE_PIC)。
 //   renderCinematic(onDone) … 約10秒のシネマティック(商店街→店構え→厨房→丼→ズーム→白フラッシュ)。
 //                             右上のスキップで即 onDone(=タイトル画面へ。setupへ直行ではない)。
 //                             v38-2: モードメニューの「オープニング」札(js/screens/menu.js)からも直接呼ばれる
@@ -32,8 +36,8 @@ window.ScreenOpening = (function () {
   }
 
   // ---- 画像 ----
-  // js/asset-image.js と同じキャッシュ対策(?v=20260825134331)。tools/deploy-pages.sh が公開時に置換する。
-  var BUILD_V = "20260825134331";
+  // js/asset-image.js と同じキャッシュ対策(?v=20260826110324)。tools/deploy-pages.sh が公開時に置換する。
+  var BUILD_V = "20260826110324";
   var DIR = "img/opening/";
   function src(name) { return DIR + name + ".webp?v=" + BUILD_V; }
   // 画像の参照はこのテーブル1か所だけ。他所でファイル名を書かない。
@@ -156,6 +160,55 @@ window.ScreenOpening = (function () {
   // 店構え+暖簾はカット②とタイトル画面で共通
   function storefrontCut(opts) { return makeCut(IMG.storefront, [norenLayer()], opts); }
 
+  // ---- 最初の1枚「タップして始める」(v41 §61) ----
+  // ブラウザは一度も操作がないと音を鳴らさせない(§60)。オープニングを**最初のコマから曲つき**で
+  // 流すには、その前に一度触ってもらうしかない。ここで曲を鳴らし始めてから先へ渡す。
+  // 押した瞬間(click=操作として成立している)に bgm(bgmId)。先の画面が同じ id を呼んでも鳴らし直さない。
+  //
+  // 出すのは「起動してから1回、いちばん最初だけ」:
+  //   - **1周目・2周目とも出す**(§61-3)。2周目だけ出さないと、1周目は「触ってから画面が始まる」・
+  //     2周目は「タイトルが無音で数秒立ち上がってから鳴る」となり、起動ごとに立ち上がりの印象が変わる。
+  //   - シネマティックの途中では出ない(この画面は先頭に1回描くだけ)
+  //   - メニューの「オープニング」札からの再生では出ない(あちらは renderCinematic を直接呼ぶ)
+  //   - 同じ読み込みの中で render() が二度呼ばれても出ない(gatePassed)
+  // ---- 関門の絵(v41 §61-6) ----
+  // 絵が届いたら img/gate/bowl.webp(縦横比 1:1)を置き、GATE_PIC を true にする。**それだけで出る。**
+  // false の間は要求しない: 無いファイルを要求すると 404 がコンソールエラーになるため(§57-1 と同じ理由)。
+  // 置いたのに読めなかった場合も、絵の枠ごと外して文字だけの形に戻る(下の error ハンドラ)。
+  var GATE_PIC = true;
+  var GATE_IMG = "img/gate/bowl.webp?v=" + BUILD_V;
+
+  var gatePassed = false;   // ページを読み込み直すまで持つ(タブを開き直せばまた出る)
+  // bgmId は「この関門を抜けた先の画面で鳴る曲」。1周目はシネマティックなので "opening"、
+  // 2周目はタイトルへ直行するので "title"。抜けた先が同じ id を呼んでも鳴らし直さない(js/audio.js の bgm())。
+  function renderGate(bgmId, onStart) {
+    var root = document.getElementById("screen-opening");
+    window.UI.clear(root);
+    var started = false;
+    function start() {
+      if (started) return;   // 連打しても1回だけ
+      started = true;
+      gatePassed = true;
+      window.GameAudio.bgm(bgmId); // ← 触れているこの瞬間に鳴らし始める
+      window.UI.clear(root);
+      onStart();
+    }
+    var children = [];
+    if (GATE_PIC) {
+      var pic = h("div", { className: "op-gate-pic" });
+      var img = document.createElement("img");
+      img.src = GATE_IMG;
+      img.alt = "";
+      // 読めなければ枠ごと外す。絵の無い状態＝文字だけの形に戻るだけで、画面は壊れない。
+      img.addEventListener("error", function () { if (pic.parentNode) pic.parentNode.removeChild(pic); });
+      pic.appendChild(img);
+      children.push(pic);
+    }
+    children.push(h("div", { className: "op-gate-text", text: "タップして始める" }));
+    var stage = h("div", { className: "op-stage op-gate", onclick: start }, children);
+    root.appendChild(stage);
+  }
+
   function skipButton(onSkip) {
     // 右上に常設。js/screens/setup.js の .setup-skip と同じクラス・見た目(css/style.css)を流用。
     return h("button", { className: "btn small setup-skip", text: "スキップ", onclick: onSkip });
@@ -167,6 +220,7 @@ window.ScreenOpening = (function () {
   function renderCinematic(onDone) {
     var root = document.getElementById("screen-opening");
     window.UI.clear(root);
+    window.GameAudio.bgm("opening"); // v39: シネマティックのBGM(自動再生が拒否されれば最初の操作で始まる。js/audio.js §3)
     var done = false;
     var sched = null;
 
@@ -272,6 +326,7 @@ window.ScreenOpening = (function () {
   function buildTitle(root, onStart) {
     var started = false;
     markSeen(); // タイトル画面が初めて表示された時点で既視扱い(2周目以降はシネマティック省略)
+    window.GameAudio.bgm("title"); // v39: タイトル画面〜メニューのBGM(メニューへ移っても切り替えない。同じ曲なら鳴らし直さない)
 
     function start() {
       if (started) return;
@@ -313,7 +368,13 @@ window.ScreenOpening = (function () {
       onFinish();
     }
     function showTitle() { renderTitle(finish); }
-    if (hasSeen()) showTitle(); else renderCinematic(showTitle);
+    // 2周目(既視)はシネマティックを飛ばしてタイトルへ直行する。
+    function afterGate() { if (hasSeen()) showTitle(); else renderCinematic(showTitle); }
+    // 関門は**起動のたびに必ず1回**通す(v41 §61-3)。2周目だけ出さないと、1周目は「触ってから画面が始まる」・
+    // 2周目は「タイトルが無音で数秒立ち上がってから鳴る」となり、起動ごとに立ち上がりの印象が変わってしまう。
+    // 抜けた先で鳴る曲をここで始めるので、1周目は "opening"、2周目は "title"。
+    if (gatePassed) { afterGate(); return; }
+    renderGate(hasSeen() ? "title" : "opening", afterGate);
   }
 
   return { render: render, renderCinematic: renderCinematic, renderTitle: renderTitle };

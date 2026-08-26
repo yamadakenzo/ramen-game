@@ -528,6 +528,7 @@ window.ScreenLoop = (function () {
     // 1. 今週の収支 → 2. イベント(あれば) → 3. 月次まとめ(あれば) → 4. 定休日のアクション、の順で必ず止めて見せる。
     // どの段階も「次へ」を押すまで進まない。state.dayはこの間ずっと今週の最終日のまま動かさない
     // (advanceWeekで初めて次の週の頭に進める)。
+    window.GameAudio.se("week"); // v39: 週末の収支が確定した瞬間(history に積み save した後、収支画面を出す直前)。演出のみ
     showWeeklyBalance(finance, customers, weeklyFixedCosts, equipUpkeep, sideSales, function () {
       proceedToEvents(finishedWeek, weekStats);
     });

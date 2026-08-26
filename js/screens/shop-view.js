@@ -1122,6 +1122,7 @@ window.ShopView = (function () {
     var seat = order.seat, a = order.actor;
     if (!a || a.gone || seat.occupant !== a) return;
     a.deliveredAt = nowLabel();
+    window.GameAudio.se("serve"); // v39: 丼が客に届いた瞬間。演出のみ(onServeCb の金銭処理より前だが、順序には影響しない)
     // v26(追補§B-2): spawnWeekも渡す。loop.js側で今週の週番号と比較し、週をまたいで配膳された
     // 客(厨房が調理着手済みでclearSeatedWaiters()の安全弁が効かなかったケース)は金銭の加算だけ
     // スキップする。絵の配膳シーケンス(このあとのstartEating等)はそのまま完走させる。
@@ -1613,6 +1614,7 @@ window.ShopView = (function () {
   function enterAndSit(a, seat) {
     seat.occupant = a;
     a.seat = seat;
+    window.GameAudio.se("arrive"); // v39: 来店(店に入った瞬間=席へ向かい始めた瞬間)。演出のみ、計算には触れない
     // v26(指示書§3-1、追補§C-1):「今週の客」はweeklyBandSchedule由来の理論値から都度計算する
     // 方式に変わったため、着席イベントを数えるコールバック(onEnterCb)は廃止した。
     a.orderedAt = nowLabel(); // v15-1: 着席が決まった瞬間=注文発生(既存のplaceOrderと同じ瞬間)
@@ -1699,6 +1701,7 @@ window.ShopView = (function () {
     later(function () {
       if (a.gone) return;
       spawnCoinFx(a); // v37-3: 会計時のコイン演出(席を立つ瞬間、客の現在位置に。表示のみ)
+      window.GameAudio.se("coin"); // v39: 会計(コイン演出と同時)。演出のみ
       seat.occupant = null;
       a.seat = null;
       walkVia(a, routeSeatToOff(seat), SEAT_WALK_MIN_PER_CELL, function () { removeActor(a); }); // v36-3: 入口を通って歩道へ

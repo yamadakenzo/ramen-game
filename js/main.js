@@ -39,6 +39,7 @@
       });
     } else if (phase === "loop") {
       window.UI.showScreen("loop");
+      window.GameAudio.bgm("shop"); // v39: 営業ループのBGM(「続きから」で直接 loop に入る場合も同じ経路)。遷移そのものには触れない
       window.ScreenLoop.render(state, function () {
         // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §9): 52週が終わってresult画面に
         // 入る直前の、この1回だけで呼ぶ(ここを逃すとcompendium・関係値・記録が更新されない)。

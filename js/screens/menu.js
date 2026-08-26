@@ -2,6 +2,9 @@
 // 本編(setup)の間に挟まる、state を持たない通過点。state.phase には "menu" を書かず、js/main.js が
 // goToPhase("menu") で入るだけ。
 //
+// 札のタップ(v40 §58): 押された事実は pending に積み、カルーセルが止まってから解決する。「止まった」は
+// 描画位置(getTranslate)で見る。sw.animating は端のゴム戻りで true のまま降りないことがあり(v40 で実測)、
+// §10 のようにそれで分岐すると「押しても開かない・押し直しても開かない」になる。詳細は decide 節のコメント。
 // カルーセル(§7): Swiper.js(js/vendor/swiper/、同梱)の coverflow effect。指への追従・フリック・吸着・端のゴム・
 // キーボード・矢印・脇の札タップはすべて Swiper に任せ、自前では書かない(§6 の rAF 駆動の自前実装は撤回。
 // 毎フレーム filter: brightness() と z-index を書いていたのが滑らかにならない原因だった、§7-1)。
@@ -29,6 +32,11 @@ window.ScreenMenu = (function () {
 
   // ---- Swiper の設定(§7-3)。実測値は docs/完了/v38-2_確認/確認結果.md「§7 Swiper 版」 ----
   var SPEED = 400;            // 吸着・送りの時間(ms)。prefers-reduced-motion では 0(即切替、§7-3)
+  // v40 §58: 押されたあと「止まった」と判定するまでの見張り。POLL ごとに描画位置を見て、STABLE 回続けて
+  // 同じなら止まったとみなす。MAX を過ぎたら止まっていなくても解決する(決定待ちを宙に浮かせない)。
+  var REST_POLL_MS = 40;
+  var REST_STABLE = 2;
+  var PENDING_MAX_MS = 2000;
   var COVERFLOW = {
     rotate: 20,               // 脇の札の傾き(度)。大きいほど ±2 が細く見える
     stretch: 48,              // 札同士を中央へ寄せる量(px。正で寄る)。5枚を枠内に収めるため
@@ -50,6 +58,10 @@ window.ScreenMenu = (function () {
   var sw = null;        // Swiper インスタンス
   var subEl = null;     // 開いている下位画面(図鑑/記録/設定)。null なら閉じている
   var busy = false;     // 遷移中(二重起動防止)
+  // 押された事実(v40 §58)。タップも「決定」も、まずここに積んでから、カルーセルが止まった時点で解決する。
+  var pending = null;       // { card: 押された札の番号(null は「中央の札」=決定ボタン/Enter), until: 打ち切りの時刻 }
+  var pendingTimer = null;
+  var restPos = null, restCount = 0;  // 「止まった」の判定用: 直前の描画位置と、それが続いた回数
   var keyBound = false;
 
   function reduced() {
@@ -70,12 +82,80 @@ window.ScreenMenu = (function () {
     if (on) sw.keyboard.enable(); else sw.keyboard.disable();
   }
 
-  // ---- 決定 ----
-  // 中央の札(=sel)なら決定。脇の札は Swiper の slideToClickedSlide がそこへ滑らせる(こちらでは何もしない)。
-  function activate(i) {
-    if (busy || subEl || (sw && sw.animating)) return;
-    if (i !== sel) { if (sw) sw.slideTo(i); return; }
-    var id = CARDS[sel].id;
+  // ---- 決定(v40 §58) ----
+  // 押された事実は、押した瞬間には解決しない。まず pending に積み、カルーセルが**止まってから**
+  // 「押された札が中央かどうか」を見て、中央なら決定・中央でなければそこへ寄せる。
+  //
+  // §10 はこの判断を押した瞬間に sw.animating で分岐していた。それが実機で「設定札を押しても開かない」に
+  // なった(v40 で再現。docs/v40_確認/)。理由は2つあり、どちらも animating に寄りかかったせい:
+  //   (1) 右端のゴム戻りで animating が **true のまま降りなくなる**ことがある。降りないと §10 の経路では
+  //       タップが永久に「寄せるだけ」になり、押し直しても決して開かない。
+  //   (2) 降りた場合でも、ゴム戻りの最中に押された「すでに中央にある札」まで「移動」として消費されていた。
+  // なので判定の土台を animating から**描画位置(getTranslate が動かなくなったこと)**へ移し、
+  // 打ち切り(PENDING_MAX_MS)を必ず持たせて、決定待ちが宙に浮かないようにする。animating は一切見ない。
+  function tapCard(i) { requestDecide(i); }
+  // 「決定」ボタン・Enter は指の位置の情報が無いので、止まった時点で中央にある札を決める(card = null)。
+  // §10 では移動中に何もしていなかった(sel が古い札を指すため)が、待ってから中央を読めば取りこぼさない。
+  function decide() { requestDecide(null); }
+
+  function requestDecide(card) {
+    if (busy || subEl) return;
+    if (card != null && (card < 0 || card >= CARDS.length)) return;
+    pending = { card: card, until: Date.now() + PENDING_MAX_MS };
+    if (pendingTimer) return;   // 見張りは1本だけ。連打ぶんは pending.card の上書きになる
+    restPos = null; restCount = 0;
+    pendingStep();
+  }
+  function cancelPending() {    // ドラッグし直した・画面を作り直した: 押された事実は古くなったので捨てる
+    pending = null;
+    if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; }
+  }
+  function pendingStep() {
+    pendingTimer = null;
+    if (!pending) return;
+    if (busy || subEl || !sw) { pending = null; return; }
+    var pos = null;
+    try { pos = Math.round(sw.getTranslate()); } catch (e) { pos = null; }
+    if (pos !== null && pos === restPos) restCount++; else restCount = 0;
+    restPos = pos;
+    // まだ動いている。ただし打ち切りの時刻を過ぎたら、動いていても下へ進む(待ち続けて無反応にしない)。
+    if (restCount < REST_STABLE && Date.now() < pending.until) {
+      pendingTimer = setTimeout(pendingStep, REST_POLL_MS);
+      return;
+    }
+    var centre = centreIndex();
+    var want = (pending.card == null) ? centre : pending.card;
+    pending = null;
+    // 押された札を指定し直す。同じ番号でも引き直す: 吸着中のカルーセルに触れると Swiper の translate と
+    // activeIndex がずれることがあり(§57-4 の副産物)、指定し直すと位置が引き直されて直る。
+    sw.slideTo(want);
+    if (want !== centre) return;  // 押された札はまだ脇。中央へ寄せるだけ(v38-2 からの二段階のまま)
+    decideCard(want);
+  }
+  // 中央の札は「実際に描かれている位置」から決める。Swiper の activeIndex は吸着中に描画とずれることが
+  // あり(§57-4)、transitionEnd が来なければ sel も古いままなので、どちらも判定の基準にしない。
+  function centreIndex() {
+    if (!swEl) return sel;
+    var box = swEl.getBoundingClientRect();
+    if (!box.width) return sel;   // 画面が隠れている(幅0)ときは今の選択のまま
+    var cx = box.left + box.width / 2;
+    var nodes = swEl.querySelectorAll(".swiper-slide");
+    var best = -1, bd = Infinity;
+    for (var k = 0; k < nodes.length; k++) {
+      var r = nodes[k].getBoundingClientRect();
+      if (!r.width) continue;
+      var d = Math.abs(r.left + r.width / 2 - cx);
+      if (d < bd) { bd = d; best = parseInt(nodes[k].getAttribute("data-index"), 10); }
+    }
+    return best < 0 ? sel : best;
+  }
+
+  function decideCard(i) {
+    if (busy || subEl) return;
+    if (i == null || i < 0 || i >= CARDS.length) return;
+    sel = i; refreshNote();   // 止まった位置に合わせて確定させる(transitionEnd が来ていなくても揃う)
+    var id = CARDS[i].id;
+    window.GameAudio.se("decide"); // v39: 決定(中央の札のタップ・「決定」・Enter)。脇の札のタップは移動なので鳴らさず、止まった時の slide に任せる
     if (id === "continue") {
       busy = true; keysOn(false);
       if (kind === "ok") handlers.onContinue(); else handlers.onNewGame();
@@ -100,6 +180,7 @@ window.ScreenMenu = (function () {
     window.ScreenOpening.renderCinematic(function () {
       window.UI.clear(opRoot); // 丼など最後のカットの残骸を片付ける
       window.UI.showScreen("menu");
+      window.GameAudio.bgm("title"); // v39: 再生(opening の曲)が終わったらメニューの曲へ戻す
       busy = false; keysOn(true);
       if (sw) sw.update(); // 非表示の間に寸法が変わっていても位置を取り直す
     });
@@ -123,25 +204,33 @@ window.ScreenMenu = (function () {
     subEl = null;
     keysOn(true);
   }
-  // 設定: 効果音のオン/オフ1項目のみ(§5-4)。切替ボタンは本編UIの .btn(§5-2 の例外、§6-4/§7-5 で据え置き)。
+  // 設定: BGM と 効果音 のオン/オフ(v39 §4 で2系統に)。切替ボタンは本編UIの .btn(§5-2 の例外、§6-4/§7-5 で据え置き)。
+  // 音量スライダーは将来ここに行を足す(js/audio.js 側は bgmVol/seVol の器だけ用意してある)。
   function openSettings() {
     var A = window.GameAudio;
-    var btn = h("button", {
-      className: "btn small",
-      onclick: function () {
-        A.toggleMuted();
-        refresh();
-        if (!A.isMuted()) A.play("slide"); // オンにした瞬間に一度鳴らして確認できるように
+    function row(label, isOn, setOn, onTurnedOn) {
+      var btn = h("button", {
+        className: "btn small",
+        onclick: function () {
+          setOn(!isOn());
+          refresh();
+          if (isOn() && onTurnedOn) onTurnedOn(); // オンにした瞬間に一度鳴らして確認できるように
+        }
+      });
+      function refresh() {
+        var on = isOn();
+        btn.textContent = on ? "オン" : "オフ";
+        btn.classList.toggle("primary", on);
       }
-    });
-    function refresh() {
-      var on = !A.isMuted();
-      btn.textContent = on ? "オン" : "オフ";
-      btn.classList.toggle("primary", on);
+      refresh();
+      return h("div", { className: "pixel-panel menu-settings-row" }, [h("span", { text: label }), btn]);
     }
-    refresh();
     openSub("設定", [
-      h("div", { className: "pixel-panel menu-settings-row" }, [h("span", { text: "効果音" }), btn])
+      row("BGM", A.isBgmOn, A.setBgmOn, null),
+      row("効果音", A.isSeOn, A.setSeOn, function () { A.se("decide"); }),
+      // v39 §9-1: BGM は魔王魂(https://maou.audio/)。著作表記が利用条件なので、音源を積んでいる限り消さない。
+      // 出典の詳細(曲名・元ファイル名・ライセンス)は docs/素材出典.md。
+      h("div", { className: "menu-settings-credit", text: "音楽：魔王魂" })
     ]);
   }
 
@@ -151,7 +240,7 @@ window.ScreenMenu = (function () {
     var screen = document.getElementById("screen-menu");
     if (!screen || !screen.classList.contains("active") || busy) return;
     if (subEl) { if (e.key === "Escape") { closeSub(); e.preventDefault(); } return; }
-    if (e.key === "Enter" || e.key === " ") { activate(sel); e.preventDefault(); }
+    if (e.key === "Enter" || e.key === " ") { decide(); e.preventDefault(); }
   }
 
   // ---- DOM ----
@@ -177,7 +266,7 @@ window.ScreenMenu = (function () {
     var next = h("button", { className: "menu-arrow menu-next", "aria-label": "次の札" });
     var nav = h("div", { className: "menu-nav" }, [
       prev,
-      h("button", { className: "menu-btn menu-go", text: "決定", onclick: function () { activate(sel); } }),
+      h("button", { className: "menu-btn menu-go", text: "決定", onclick: function () { decide(); } }),
       next
     ]);
     [head, clipEl, noteEl, nav].forEach(function (el) { stageEl.appendChild(el); });
@@ -201,7 +290,9 @@ window.ScreenMenu = (function () {
       speed: reduced() ? 0 : SPEED,
       freeMode: FREE_MODE,
       grabCursor: true,
-      slideToClickedSlide: true,
+      // 脇の札への移動も tapCard() で行う(§10-2)。Swiper 任せ(slideToClickedSlide)にすると、吸着中の
+      // タップで進行中の慣性へ割り込む形になり、sticky の再吸着に上書きされて指の下でない札に着地する。
+      slideToClickedSlide: false,
       keyboard: { enabled: true, onlyInViewport: true },
       navigation: { nextEl: next, prevEl: prev },
       on: {
@@ -212,13 +303,18 @@ window.ScreenMenu = (function () {
           if (s.activeIndex === sel) return;
           sel = s.activeIndex;
           refreshNote();
-          window.GameAudio.play("slide");
+          window.GameAudio.se("slide");
         },
-        // タップ(Swiper が「ドラッグではない」と判定したもの)。中央の札なら決定。脇は slideToClickedSlide が動かす
+        // タップ(Swiper が「ドラッグではない」と判定したもの)。押された札の番号をそのまま渡す(脇の札の移動もここ)。
+        // clickedIndex は指の下の DOM から決まるので、吸着中でも「見えている札」と一致する。
+        // 中央かどうかの判定・移動か決定かの選択は tapCard() 側で行う(§10-2)。
         click: function (s) {
           if (s.clickedIndex == null || s.clickedIndex < 0) return;
-          if (s.clickedIndex === s.activeIndex) activate(s.activeIndex);
-        }
+          tapCard(s.clickedIndex);
+        },
+        // 指を置いて動かし始めたら、待っている「押された事実」は古い(選び直している最中)ので捨てる。
+        // タップ自体は touchStart → touchEnd → click の順なので、これで自分のタップを消すことはない。
+        sliderMove: function () { cancelPending(); }
       }
     });
   }
@@ -231,6 +327,7 @@ window.ScreenMenu = (function () {
     if (sw) { sw.destroy(true, true); sw = null; }
     window.UI.clear(root);
     sel = 0; busy = false; subEl = null;
+    cancelPending();
     kind = saveKind();
     CARDS[0].label = kind === "ok" ? "続きから" : "はじめから";
     build(root);

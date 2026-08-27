@@ -44,18 +44,29 @@
     } else if (phase === "loop") {
       window.UI.showScreen("loop");
       window.GameAudio.bgm("shop"); // v39: 営業ループのBGM(「続きから」で直接 loop に入る場合も同じ経路)。遷移そのものには触れない
-      window.ScreenLoop.render(state, function () {
-        // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §9): 52週が終わってresult画面に
-        // 入る直前の、この1回だけで呼ぶ(ここを逃すとcompendium・関係値・記録が更新されない)。
-        // 通常セーブ(state.phase="result")とは別に、js/meta-state.js側(ramen_meta)へも保存する。
-        state.__newlyAddedCards = window.MetaState.recordRunEnd(state);
+      // v46(docs/指示書/v46_無期限化_指示書.md §3-2): 52週目は「終わり」ではなく**年の区切り**。
+      // 引数の year は、いま終わった年(1年目なら 1)。
+      window.ScreenLoop.render(state, function (year) {
+        // v46: **MetaState.recordRunEnd() の呼び出しをここから外した。**
+        // 年末はもう「1周の終わり」ではないので、図鑑・記録・関係値の引き継ぎを走らせる場面ではない。
+        // **js/meta-state.js と recordRunEnd() は消していない**(1行も触っていない)。
+        // 次版の「店を畳む」(自分の意思で店をたたんで新しい店を始める)からこれを呼ぶ(§1-2 / §65)。
+        // それまでの間、図鑑・記録・関係値の引き継ぎは動かない。承知の上(指示書 §1-2)。
+        state.resultYear = year;   // 結果画面がどの年のものか。リロードしても同じ年を出すために state に持つ
         state.phase = "result";
         window.GameState.save();
         goToPhase("result");
       });
     } else if (phase === "result") {
       window.UI.showScreen("result");
-      window.ScreenResult.render(state, state.__newlyAddedCards || []);
+      // v46: 第3引数「続ける」。セーブを消さずに翌年の第1週から営業ループへ戻る
+      // (state.day は advanceWeek() で既に翌年の1日目へ進めてある)。
+      // この画面から「最初からやり直す」経路は無くした(メニューの「はじめから」がある、§3-2)。
+      window.ScreenResult.render(state, state.__newlyAddedCards || [], function () {
+        state.phase = "loop";
+        window.GameState.save();
+        goToPhase("loop");
+      });
     }
   }
 

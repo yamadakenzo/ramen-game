@@ -1,4 +1,10 @@
-// 結果画面(1年後)
+// 結果画面(1年の区切り)
+// v46(docs/指示書/v46_無期限化_指示書.md §3-2、設計判断記録 §65): 52週で**ゲームが終わる**画面から、
+// **年の区切りで1枚挟む**画面になった。中身(年間収支・客層別グラフ・キャッチコピー・従業員・
+// 人カード・図鑑・イベント密度)は作り直していない。変えたのは3つだけ:
+//   1. 「N周目のプレイ」→「N年目」
+//   2. 集計を**その年のぶんだけ**に絞る(state.history が年をまたいで積み上がり続けるため)
+//   3. 「もう一度プレイする」(clearSave+reload)→「続ける」(セーブを消さずに翌年の第1週へ)
 window.ScreenResult = (function () {
   var h = window.UI.h;
   var U = window.Utils;
@@ -15,10 +21,16 @@ window.ScreenResult = (function () {
     regular: "常連に愛された小さな店"
   };
 
-  function totalsBySegment(state) {
+  // v46: この画面が出している数字は全部「その年のぶん」。history は年をまたいで積み上がり続けるので、
+  // 絞らないと2年目に1年目が丸ごと混ざる。**旧セーブのレコードには year が無いので必ず (rec.year || 1)**。
+  function yearRecords(state, year) {
+    return state.history.filter(function (rec) { return (rec.year || 1) === year; });
+  }
+
+  function totalsBySegment(records) {
     var totals = {};
     SEGMENTS.forEach(function (s) { totals[s.id] = 0; });
-    state.history.forEach(function (rec) {
+    records.forEach(function (rec) {
       Object.keys(rec.customers || {}).forEach(function (id) {
         totals[id] = (totals[id] || 0) + rec.customers[id];
       });
@@ -35,30 +47,38 @@ window.ScreenResult = (function () {
 
   // STEP12(docs/新設計/12_STEP12_周回引き継ぎ_修正版.md §9): newlyAddedはjs/main.jsが
   // window.MetaState.recordRunEnd(state)から受け取ってそのまま渡してくる({cat,id}の配列)。
-  function render(state, newlyAdded) {
+  // v46: recordRunEnd() を呼ばなくなったので newlyAdded は常に空。図鑑の枠は残してある
+  // (次版の「店を畳む」でまた埋まる)。onContinue は「続ける」で呼ぶ(js/main.js)。
+  function render(state, newlyAdded, onContinue) {
     var screen = document.getElementById("screen-result");
     window.UI.clear(screen);
     // 固定枠の中に収める。スクロールしてよいのはこの中だけ。
     var root = h("div", { className: "scroll-area result-body" });
     screen.appendChild(root);
 
+    // v46: どの年の結果か。state.resultYear は js/main.js が年の区切りで書く。
+    // 旧セーブ(v45 以前に52週を終えて phase="result" のまま保存されたもの)には無いので、
+    // そのときは day から逆算する(旧実装は day を 365 まで進めてから止めていた = 1年目)。
+    var year = state.resultYear || Math.max(1, U.yearOfRun(state.day) - 1);
+    var records = yearRecords(state, year);
+
     var totalRevenue = 0, totalFoodCost = 0, totalFixed = 0, totalProfit = 0;
-    state.history.forEach(function (rec) {
+    records.forEach(function (rec) {
       totalRevenue += rec.revenue;
       totalFoodCost += rec.foodCost;
       totalFixed += rec.fixedCosts; // v23(§E): monthlyCosts→fixedCostsにリネーム(rec.js/screens/loop.js参照)
       totalProfit += rec.profit;
     });
-    var totals = totalsBySegment(state);
+    var totals = totalsBySegment(records);
     var maxCount = Math.max.apply(null, SEGMENTS.map(function (s) { return totals[s.id] || 0; }).concat([1]));
 
-    // STEP12(§5): 周回数(何周目のプレイだったか)を既存のタイトル枠に添える。新しい画面は作らない。
-    // この画面に来る時点でMetaState.recordRunEnd()は呼ばれ済み(js/main.js)なので、
-    // currentRunNumber()(次に始まる周回の番号)ではなくlastRunNumber()(今終わった周回の番号)を使う。
-    var runNumber = window.MetaState ? window.MetaState.lastRunNumber() : 1;
+    // STEP12(§5): 周回数を既存のタイトル枠に添えていた場所。新しい画面は作らない。
+    // v46: 周回(MetaState.lastRunNumber())ではなく**何年目か**を出す。周回はもう動かないため。
+    // 見出しは当初 h1「1年が経った」+ 添え字「N年目」の2段だったが、2年目以降で
+    // 「1年が経った / 2年目」と並んで**「いま2年目に入る」とも読めて**しまうため、
+    // 承認時に**見出し1行に畳んだ**。「1年目が終わった」「3年目が終わった」のどちらも自然に読める。
     root.appendChild(h("div", { className: "pixel-panel result-title" }, [
-      h("h1", { text: "1年が経った" }),
-      h("div", { className: "dim", text: runNumber + "周目のプレイ" }),
+      h("h1", { text: year + "年目が終わった" }),
       h("div", { className: "catch", text: "「" + catchphrase(totals) + "」" })
     ]));
 
@@ -146,17 +166,19 @@ window.ScreenResult = (function () {
 
     var densityPanel = h("div", { className: "pixel-panel" });
     densityPanel.appendChild(h("h2", { text: "イベント密度ログ（開発確認用）" }));
-    densityPanel.appendChild(h("p", { className: "dim", text: "合計 " + state.eventLog.length + " 件発生。詳細はブラウザのコンソールに出力済み。" }));
+    // v46: eventLog も年をまたいで積み上がるので、この画面が出す件数はその年のぶんだけに絞る。
+    var yearEvents = state.eventLog.filter(function (e) { return (e.year || 1) === year; });
+    densityPanel.appendChild(h("p", { className: "dim", text: "合計 " + yearEvents.length + " 件発生。詳細はブラウザのコンソールに出力済み。" }));
     root.appendChild(densityPanel);
 
+    // v46(§3-2): 「もう一度プレイする」(clearSave+reset+reload)を「続ける」に置き換えた。
+    // **セーブは消さない。** 押すと翌年の第1週から営業ループへ戻る(state.day は既に進めてある)。
+    // この画面から「最初からやり直す」経路は無くした。やり直したいときはメニューの
+    // 「ゲームスタート」→「はじめから」から(確認が1枚挟まる、v45 §3-5)。
     root.appendChild(h("div", { style: { textAlign: "center", marginTop: "8px" } }, [
       h("button", {
-        className: "btn primary", text: "もう一度プレイする",
-        onclick: function () {
-          window.GameState.clearSave();
-          window.GameState.reset();
-          location.reload();
-        }
+        className: "btn primary result-continue", text: (year + 1) + "年目へ",
+        onclick: function () { if (onContinue) onContinue(); }
       })
     ]));
   }

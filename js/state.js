@@ -224,6 +224,12 @@ window.GameState = (function () {
       // それだと「選んでいた速度」を覚えていられなかった。v09で廃止)。
       weekEndActive: false, // 週末シーケンス中(「次の週へ」を押すまでtrue)。UIの表示・安全な再開判定に使う
       gameOverReason: null,
+      // v46(docs/指示書/v46_無期限化_指示書.md §3-2): 結果画面がどの年のものか。年の区切り
+      // (js/screens/loop.js の advanceWeek で年が変わった瞬間)に js/main.js が書く。
+      // 結果画面を出したままリロードしても同じ年を出すために state に持つ。
+      // **SAVE_VERSION は上げていない(25 のまま)。** 旧セーブにこの値は無いが、
+      // js/screens/result.js が day から逆算して 1 を返す形にしてあるので正しく開く(§65)。
+      resultYear: null,
       // v22(docs/指示書/v22_ラーメン開発チュートリアル_修正指示書.md §2): 「ラーメン開発」
       // チュートリアルの進行状況。'intro'→'showButton'→'selectIngredients'→'pressDevelop'→
       // 'naming'→'done'。js/screens/loop.jsのtutorialStepVal()/setTutorialStep()で読み書きする。

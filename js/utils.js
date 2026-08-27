@@ -1,9 +1,14 @@
 // 共通ユーティリティ
-// v07-1-3: 1周の長さ(週数)を定数で持つ。数年に伸ばす可能性があるための下準備で、
-// 今回はまだ実際には伸ばさない(値は52のまま)。
-window.WEEKS_PER_RUN = 52;
+// v07-1-3: 1周の長さ(週数)を定数で持つ。数年に伸ばす可能性があるための下準備。
+// v46(docs/指示書/v46_無期限化_指示書.md、設計判断記録 §65): その「数年に伸ばす」をやった。
+// **52週はもう「1周の長さ」ではなく「1年の長さ」**で、52週目は終わりではなく年の区切りになった。
+// 名前も WEEKS_PER_RUN → WEEKS_PER_YEAR / DAYS_PER_RUN → DAYS_PER_YEAR へ改めてある
+// (旧名のままだと「run=プレイ1回」と読めてしまい、無期限になった今は嘘になる)。
+window.WEEKS_PER_YEAR = 52;
 // v09-3: 内部で持つ時間の単位は「開業からの通算日数」だけ。52週 × 7日 = 364日。
-window.DAYS_PER_RUN = window.WEEKS_PER_RUN * 7;
+// v46: state.day は年をまたいでも**通算のまま**増え続ける(365日目 = 2年目の1日目)。
+// 月日・週番号は「年内の位置」へ剰余で畳んでから求める(下の dayOfYear)。
+window.DAYS_PER_YEAR = window.WEEKS_PER_YEAR * 7;
 // v12-1: 「1時間の実秒(×1)」をここ1箇所だけに持つ。速度の実秒(loop.js)も、客・店員の
 // アニメーションの尺(shop-view.js)も、どちらもこの値からしか実msを作らない
 // (実秒の直値をコードの他の場所に書かないための唯一の物差し)。
@@ -48,9 +53,21 @@ window.Utils = (function () {
     { cal: 12, len: 31 }, { cal: 1, len: 31 }, { cal: 2, len: 28 }, { cal: 3, len: 31 }
   ];
 
+  // v46: 通算日 -> 年内の日(1〜364)。年をまたぐと 1 に戻る。
+  // 以前はここが clamp(1, 364) で、365日目以降は「3月30日」に貼り付いたまま止まっていた。
+  // 月日・週番号を年内の位置から求めるための、v46 の土台。
+  function dayOfYear(day) {
+    var d = Math.max(1, Math.round(day));
+    return ((d - 1) % window.DAYS_PER_YEAR) + 1;
+  }
+  // v46: 何年目か(1始まり)。1〜364日目が1年目、365〜728日目が2年目。
+  function yearOfRun(day) {
+    var d = Math.max(1, Math.round(day));
+    return Math.floor((d - 1) / window.DAYS_PER_YEAR) + 1;
+  }
+
   function dateInfo(day) {
-    day = clamp(Math.round(day), 1, window.DAYS_PER_RUN);
-    var rest = day;
+    var rest = dayOfYear(day);
     for (var i = 0; i < MONTHS.length; i++) {
       if (rest <= MONTHS[i].len) return { seq: i + 1, cal: MONTHS[i].cal, dom: rest };
       rest -= MONTHS[i].len;
@@ -68,9 +85,18 @@ window.Utils = (function () {
     var i = clamp(Math.round(seq), 1, MONTHS.length) - 1;
     return MONTHS[i].cal;
   }
-  // 通算週番号(1〜52)。表示・ログ・「N週間以内」のような相対判定に使う。
+  // 年内の週番号(1〜52)。表示・ログ・「その年の何週目か」の判定に使う。
   // 週の区切りは通算日数の7日ごと(月の区切りとは無関係。月をまたぐ週があってよい)。
-  function weekOfRun(day) { return clamp(Math.ceil(day / 7), 1, window.WEEKS_PER_RUN); }
+  // v46: 年で1に戻る(53週目は無く、2年目の第1週になる)。以前は 52 で clamp していた。
+  //
+  // **「N週間以内」のような間隔の判定にこれを使ってはいけない。** 年をまたいだ瞬間に
+  // 52 -> 1 と戻るので、「4週以内」のような差の比較が全部成立してしまう(第1週 - 第50週 = -49)。
+  // 間隔には下の weekOfGame(通算・上限なし)を使う(§65)。
+  function weekOfRun(day) { return Math.ceil(dayOfYear(day) / 7); }
+  // v46: 開業からの通算週番号(1始まり・上限なし)。年をまたいでも戻らないので、
+  // 「前回から何週たったか」という**間隔**の判定はこちらを使う
+  // (recipeChangeLog・yutaHireWeek・lastCardEventWeek・クールダウン)。
+  function weekOfGame(day) { return Math.ceil(Math.max(1, Math.round(day)) / 7); }
 
   // seq番目の月(開業月=1)の開始日/終了日。「開業からNヶ月目の間のどこか」を選びたいイベントの
   // 抽選窓に使う(実カレンダー月とは独立。開業日が変わっても相対的な間隔は保たれる)。
@@ -150,6 +176,8 @@ window.Utils = (function () {
   return {
     clamp: clamp, findById: findById,
     calMonth: calMonth, dayOfMonth: dayOfMonth, weekOfRun: weekOfRun, monthSeq: monthSeq, monthSeqToCal: monthSeqToCal,
+    // v46: 無期限化で足した3つ。weekOfGame=通算週(間隔の判定用)、yearOfRun=何年目か、dayOfYear=年内の日。
+    weekOfGame: weekOfGame, yearOfRun: yearOfRun, dayOfYear: dayOfYear,
     monthSeqStartDay: monthSeqStartDay, monthSeqEndDay: monthSeqEndDay, monthJustChanged: monthJustChanged,
     dow: dow, isWeekend: isWeekend, dowLabel: dowLabel, bandDef: bandDef, timeLabel: timeLabel,
     bandEmoji: bandEmoji, bandTimeLabel: bandTimeLabel,

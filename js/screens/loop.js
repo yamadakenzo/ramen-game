@@ -16,11 +16,11 @@ window.ScreenLoop = (function () {
   var STAFF = window.DATA.characters.staff;
   var CARDS = window.DATA.characters.cards;
   var SIDES = window.DATA.sides.items; // STEP8: サイドメニュー5種
-  var WEEKS_PER_RUN = window.WEEKS_PER_RUN;
+  var WEEKS_PER_YEAR = window.WEEKS_PER_YEAR; // v46: 1年の長さ(52週)。もう「1周の長さ」ではない
   var DAYS_PER_WEEK = 7;
   var TICK_MIN = 15; // 時計を進める最小刻み(分)。表示は15分単位
 
-  var state, onGameOver;
+  var state, onYearEnd;
   var tickTimer = null;
   var TALK_COST = 1200;
   var TALK_GAIN = 8;
@@ -359,7 +359,9 @@ window.ScreenLoop = (function () {
     // state.weekRevenue.weekが今週の週番号と一致する場合(=週の途中でのリロード)は、
     // 保存済みのplanned/paidをそのまま使う(上書きするとpaidが0に戻り、二重計上になる)。
     // 一致しない場合(=本当に新しい週が始まった)だけ、新しく確定してpaidを0にする。
-    var wk = U.weekOfRun(state.day);
+    // v46: 通算週で持つ。年内週(1〜52)だと「52週目の次の第1週」で番号が戻るため、
+    // 別の週なのに一致してしまう可能性が理屈の上で残る(既存セーブは1年目=通算週と同値なので互換)。
+    var wk = U.weekOfGame(state.day);
     var plannedNow = finance.revenue; // §1-2で確認済み: weekRevenueMultは既にfinance.revenueに適用済み
     if (!state.weekRevenue || state.weekRevenue.week !== wk) {
       state.weekRevenue = { week: wk, planned: plannedNow, paid: 0 };
@@ -404,7 +406,9 @@ window.ScreenLoop = (function () {
 
   // ---------- 週の計算(7日ぶんのティックがたまった時に1回だけ走る) ----------
   function runWeeklyCalc() {
-    if (state.day > window.DAYS_PER_RUN) { finishGame(); return; } // 安全弁。実際の終了判定はadvanceWeek側
+    // v46: ここにあった「day が 364 を超えたら終わり」の安全弁は落とした。
+    // 無期限化で day に上限が無くなり(365日目 = 2年目の1日目)、超えること自体が正常になったため。
+    // 年の区切りの判定は advanceWeek() 側1か所だけ(§65)。
 
     // v09-1: ここから「週末の完全停止」に入る。理由「weekend」を積む(pause内でsyncClock()が
     // 呼ばれ、日付タイマー・店の絵の両方が止まる)。速度の選択(state.speed)自体には触れない
@@ -486,6 +490,10 @@ window.ScreenLoop = (function () {
     Object.keys(customers.results).forEach(function (id) { weekStats.satisfactionBySeg[id] = customers.results[id].satisfaction; });
 
     state.history.push({
+      // v46: year(何年目か)を持たせた。history は年をまたいで積み上がり続けるので、
+      // これが無いと結果画面が「その年のぶんだけ」を切り出せない(week も month も年で巻き戻る)。
+      // **旧セーブのレコードには year が無い。読む側は必ず (rec.year || 1) と書くこと**(§65)。
+      year: U.yearOfRun(state.day),
       // v09-3: monthは実カレンダー月ではなく「開業から何ヶ月目か」(seq, 1〜12・巻き戻りなし)で
       // 持つ。1月をまたいで12月→1月と巻き戻る実カレンダー月のままだと月別集計のキーが壊れるため
       // (表示するときだけ U.monthSeqToCal で実際の月名に戻す)。
@@ -559,7 +567,7 @@ window.ScreenLoop = (function () {
     var seq = U.monthSeq(state.day);
     var queue = [];
     if (U.monthJustChanged(state.day) && seq - 1 >= 1) queue.push(seq - 1);
-    if (finishedWeek === WEEKS_PER_RUN && queue.indexOf(seq) < 0) queue.push(seq);
+    if (finishedWeek === WEEKS_PER_YEAR && queue.indexOf(seq) < 0) queue.push(seq);
     function next() {
       if (!queue.length) { proceedToDayOff(finishedWeek); return; }
       showMonthlyRecap(queue.shift(), next);
@@ -568,18 +576,33 @@ window.ScreenLoop = (function () {
   }
 
   function proceedToDayOff(finishedWeek) {
-    // 最終週は「次の週」が無く、選んでも効果が現れないので定休日アクションは出さない
-    if (finishedWeek >= WEEKS_PER_RUN) { advanceWeek(); return; }
+    // v46: 「最終週は次の週が無いので定休日アクションを出さない」という特別扱いを落とした。
+    // 無期限化で**どの週にも必ず次の週がある**(52週目の次は翌年の第1週)ので、選んだ効果は
+    // ちゃんと現れる。52週目だけ選べないほうが不自然になった。
     window.DayOff.show(state, G, function () { advanceWeek(); });
   }
 
   // 「次の週へ」。ここで初めて時間が動く。
   function advanceWeek() {
+    var yearBefore = U.yearOfRun(state.day);
     state.day++; // 今週の最終日で止めていた状態(runWeeklyCalc開始時点)から、次の週の1日目へ進める
     state.weekEndActive = false;
     var bands = activeBandDefs();
     state.clockMin = bands.length ? bands[0].start * 60 : 0;
-    if (state.day > window.DAYS_PER_RUN) { window.GameState.save(); finishGame(); return; }
+    // v46(§3-2): 年が変わった = 52週目が終わった。ゲームは終わらず、**年の区切り**として
+    // 結果画面を1枚挟むだけ。ここが v46 で唯一の「区切りの判定」で、以前の
+    // 「day が 364 を超えたら finishGame()」を置き換えたもの。
+    // 判定は「日付が新しい年に入ったか」だけを見る(週番号を数えない)。state.day が唯一の時計、
+    // という v09-3 の設計をそのまま使っている。
+    var yearNow = U.yearOfRun(state.day);
+    if (yearNow !== yearBefore) {
+      // 年次で出し直すイベント(決算・夏・家賃)の発生済みフラグを落とす(§3-4)。
+      // 新しい年の1日目に入ったこの時点で落とすので、その年の該当週に改めて出る。
+      EE.resetYearlyEvents(state);
+      window.GameState.save();
+      finishYear(yearBefore);
+      return;
+    }
     window.GameState.save();
     // v25(§2/追補§B-2): 新しい週の客を仕込む直前に、前の週から着席したまま丼を待っていた客を
     // 片付ける安全弁。「我慢の限界」の復活ではなく、週の境界で一律に片付けるだけ(数値には
@@ -598,10 +621,16 @@ window.ScreenLoop = (function () {
   // 帰属させるか決められないため(指示書§3-2)。集計元はstate.history(週ログ、費用込み)ではなく
   // state.dailyLog(暦月の初日〜末日をそのまま合計するだけ)に切り替えた。
   function monthAggregate(seq) {
-    var start = U.monthSeqStartDay(seq);
-    // §B-2: 最終月(3月)のmonthSeqEndDay(12)は365を返しDAYS_PER_RUN(364)を1超過するため、
-    // 実在する最終日(364=3月30日)でクランプする。他の11ヶ月は元々DAYS_PER_RUN以内に収まる。
-    var end = Math.min(U.monthSeqEndDay(seq), window.DAYS_PER_RUN);
+    // v46: dailyLog のキーは**通算日**だが、monthSeqStartDay/EndDay が返すのは**年内の日**(1〜364)。
+    // 年の下駄(offset)を履かせないと、2年目以降の月次まとめが1年目の日を読んでしまう。
+    // 対象の年は「いまの日付の年」= 週末に呼ばれるこの関数から見て、集計したい月が属する年と一致する
+    // (年をまたいだ直後に前年の月を集計することは無い。proceedToMonthlyRecap が push するのは
+    //  seq-1>=1 の月と、52週目の seq だけで、どちらも同じ年の中に収まる)。
+    var offset = (U.yearOfRun(state.day) - 1) * window.DAYS_PER_YEAR;
+    var start = offset + U.monthSeqStartDay(seq);
+    // §B-2: 最終月(3月)のmonthSeqEndDay(12)は365を返し1年の日数(364)を1超過するため、
+    // 実在する最終日(364=3月30日)でクランプする。他の11ヶ月は元々364以内に収まる。
+    var end = offset + Math.min(U.monthSeqEndDay(seq), window.DAYS_PER_YEAR);
     var customers = 0, revenue = 0;
     for (var d = start; d <= end; d++) {
       var rec = state.dailyLog && state.dailyLog[d];
@@ -665,7 +694,13 @@ window.ScreenLoop = (function () {
     overlay.classList.add("show");
   }
 
-  function finishGame() {
+  // v46: 旧 finishGame()。52週で「ゲームが終わる」のをやめ、**年の区切りで結果画面を1枚挟む**形にした。
+  // ここでやることは以前と同じ(tick を止めて店の絵を畳み、ログを吐いて呼び出し側へ渡す)。
+  // 違うのは、呼ばれたあとにゲームが終わらないこと——js/main.js が結果画面を出し、
+  // 「続ける」で同じ state のまま営業ループへ戻ってくる。
+  // **MetaState.recordRunEnd() はもう呼ばれない**(js/main.js から外した)。関数自体は残してあり、
+  // 次版の「店を畳む」から呼ぶ(§1-2 / §65)。
+  function finishYear(year) {
     clearTick();
     closeSheet();
     G.hide();
@@ -677,7 +712,7 @@ window.ScreenLoop = (function () {
     console.table(state.eventLog);
     console.log("=== 客ライフサイクルログ(着席/注文/丼受取/食事開始/退店/理由) ===");
     console.table(lifecycleLog);
-    onGameOver();
+    onYearEnd(year);
   }
 
   // ---------- v07-2: 週の収支表示(1行版 / 詳細版)。週末停止の第1段階として、ブロッキングのモーダルで出す ----------
@@ -847,8 +882,9 @@ window.ScreenLoop = (function () {
   // v09-3: 「4/1」のような日付を出す。内部の通算日数(state.day)を実際の暦(4月開業・平年固定)で
   // 逆算するだけなので、以前のような「2/35」等の存在しない日付は出ない。
   // v10-2-1: それに曜日と現在時刻を添える(例: 「4月1日(月) 12:40」)。
+  // v46(§3-3): 何年目かを日付の頭に足す。新しい枠は作らず、既にある「日時」の表示に足すだけ。
   function dateLabel() {
-    return U.calMonth(state.day) + "月" + U.dayOfMonth(state.day) + "日" +
+    return U.yearOfRun(state.day) + "年目 " + U.calMonth(state.day) + "月" + U.dayOfMonth(state.day) + "日" +
       "(" + U.dowLabel(state.day) + ") " + U.timeLabel(state.clockMin);
   }
 
@@ -1265,7 +1301,7 @@ window.ScreenLoop = (function () {
   function finalizeDevelop(target, ingredients, agg, name) {
     if (target === "recipe") {
       state.recipe = { soup: ingredients.soup, tare: ingredients.tare, noodle: ingredients.noodle, topping: ingredients.topping };
-      state.recipeChangeLog.push(U.weekOfRun(state.day)); // 既存のレシピ変更ログと同じ扱いにする
+      state.recipeChangeLog.push(U.weekOfGame(state.day)); // v46: 間隔の判定に使うので通算週(既存のレシピ変更ログと同じ扱い)
     } else {
       state.extraRamens[target] = { soup: ingredients.soup, tare: ingredients.tare, noodle: ingredients.noodle, topping: ingredients.topping };
     }
@@ -1456,7 +1492,7 @@ window.ScreenLoop = (function () {
           onclick: function () {
             if (disabled || selected) return;
             state.recipe[key] = item.id;
-            state.recipeChangeLog.push(U.weekOfRun(state.day));
+            state.recipeChangeLog.push(U.weekOfGame(state.day)); // v46: 間隔の判定に使うので通算週
             window.UI.toast(c[1] + "を" + item.name + "に変更した");
             refreshSheet();
           }
@@ -1745,7 +1781,7 @@ window.ScreenLoop = (function () {
             if (atStaffCap) return;
             state.staffHired.push(def.id);
             EE.ensureStaffState(state, def.id);
-            if (def.id === "yuta") state.flags.yutaHireWeek = U.weekOfRun(state.day);
+            if (def.id === "yuta") state.flags.yutaHireWeek = U.weekOfGame(state.day); // v46: 「雇って13週後」の判定に使うので通算週
             window.UI.toast(def.name + "を雇用した");
             refreshShop();
             refreshSheet();
@@ -1804,7 +1840,7 @@ window.ScreenLoop = (function () {
       sec.appendChild(h("div", { className: "dim" }, [
         h("span", { className: "money", text: r.name }),
         "　味" + r.stats.taste + "・原価" + r.stats.cost + "円・調理時間" + r.stats.cookTime +
-        "　(" + U.weekOfRun(r.createdAt) + "週目に開発)"
+        "　(" + U.yearOfRun(r.createdAt) + "年目" + U.weekOfRun(r.createdAt) + "週目に開発)" // v46: 年をまたぐと週番号が戻るので年も添える
       ]));
     });
     return sec;
@@ -1836,7 +1872,8 @@ window.ScreenLoop = (function () {
     var panel = h("div", { className: "week-log-panel" });
     state.history.slice(-12).reverse().forEach(function (rec) {
       panel.appendChild(h("div", {
-        text: "第" + rec.week + "週(" + U.monthSeqToCal(rec.month) + "月): 客" + rec.totalCustomers + "人 / 売上" +
+        // v46: 年をまたぐと週番号が1へ戻るので、年も添えないと並び順が読めなくなる
+        text: (rec.year || 1) + "年目 第" + rec.week + "週(" + U.monthSeqToCal(rec.month) + "月): 客" + rec.totalCustomers + "人 / 売上" +
           U.formatMoneyShort(rec.revenue) + " / 満足度" + rec.avgSatisfaction
       }));
     });
@@ -1902,9 +1939,9 @@ window.ScreenLoop = (function () {
   }
 
   // ---------- 組み立て ----------
-  function render(gameState, gameOverCb) {
+  function render(gameState, yearEndCb) {
     state = gameState;
-    onGameOver = gameOverCb;
+    onYearEnd = yearEndCb;
     var root = document.getElementById("screen-loop");
     window.UI.clear(root);
 

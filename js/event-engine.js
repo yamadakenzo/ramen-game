@@ -170,9 +170,13 @@ window.EventEngine = (function () {
     else state.reputation = U.clamp(state.reputation - 25, 0, 100);
   }
 
+  // v46: 決算は毎年やってくる(§3-4)ので、課税対象は**その年の利益だけ**に絞る。
+  // 絞らないと、2年目の決算が1年目の利益にもう一度課税してしまう(history は年をまたいで
+  // 積み上がり続けるため)。年の判定は各レコードの year(v46 で追加。無い＝1年目)。
   function resolveTax(state) {
+    var year = U.yearOfRun(state.day);
     var profitSoFar = 0;
-    state.history.forEach(function (h) { profitSoFar += h.profit; });
+    state.history.forEach(function (h) { if ((h.year || 1) === year) profitSoFar += h.profit; });
     var tax = Math.max(0, Math.round(profitSoFar * 0.2));
     state.money -= tax;
     state.flags.lastTax = tax;
@@ -449,7 +453,41 @@ window.EventEngine = (function () {
   // v05: 全イベントが「1周で1回」になったのでクールダウン機構は使っていない。
   // 季節ものを複数回出したくなったときのために枠だけ残してある(entry.cooldownKey)。
   function setCooldown(state, key) {
-    state.flags["cooldown_" + key] = U.weekOfRun(state.day);
+    // v46: 間隔の判定に使う値なので通算週(年で戻らない)で持つ。年内週だと年またぎで壊れる(§65)。
+    state.flags["cooldown_" + key] = U.weekOfGame(state.day);
+  }
+
+  // ---- v46(§3-4): 年が変わるときに、また出るようにするイベント ----
+  // v05 でほぼ全イベントを「1周1回」に統一した(firedEventIds に id を積んだら二度と出ない)。
+  // 無期限化して「1周」が「1年」になったので、**年ごとに来るのが当たり前のものだけ**、
+  // 年の切り替わりでフラグを落とす。ここに挙げていないイベントには一切触らない。
+  //
+  // **判断の基準(§65-6)**:
+  //   年次で出し直してよいのは、**その年に閉じる出来事だけ**。
+  //   永続する変化を残すイベント(家賃の恒久的な上昇など)は対象にしない。
+  //   kind:"fixed" かどうかは「月のクォータを無視するか」の軸であって、繰り返しに耐えるかとは別。
+  //
+  // 入れたもの(2つ。どちらもその年で閉じる):
+  //   ev_tax     決算。文面が「一年が終わった」そのもので、2年目に来ないのはおかしい。
+  //              money を1回引くだけで、あとに何も残さない。
+  //   ev_summer  夏。季節ものの定義どおり毎年めぐってくる。効果は summer_flow の一時ブースト(6週)で、
+  //              その年のうちに切れる。
+  // 入れなかったもの(3つ):
+  //   ev_rent_up      家賃の話。**効果 rent_pct が家賃そのものを恒久的に上げる**(しかも複利)。
+  //                   毎年受け入れると年15%ずつ増え、設計していない難易度がひとりでに生える。
+  //                   無期限化した以上、年々きつくなる変化を毎年配ってはいけない(承認時の判断)。
+  //                   kind は "fixed" だが、上の基準のとおりそこでは切っていない。
+  //   ev_open_day     開店初日。開店は一度しかない。
+  //   ev_rival_arrive 向かいに、何かできる。「空き店舗に工事が入った」という一度きりの出来事で、
+  //                   効果も rival_open という持続フラグ。毎年ラーメン屋が向かいに開くのは筋が通らない。
+  //
+  // 仕組みは新しく作らない。**既存の firedEventIds のゲートをそのまま使い、id を消すだけ**。
+  // (v05 の setCooldown() は値を書くだけで読む側が無く、isEventOnCooldown() は存在しない。
+  //  読む側から作るより、既にあるゲートを開け直すほうが小さい。)
+  var YEARLY_EVENT_IDS = ["ev_tax", "ev_summer"];
+  function resetYearlyEvents(state) {
+    if (!state.firedEventIds) return;
+    YEARLY_EVENT_IDS.forEach(function (id) { delete state.firedEventIds[id]; });
   }
 
   // v05 密度制御: 月2〜3回 / 年25〜35回。1週に出すのは最大1件。
@@ -457,10 +495,17 @@ window.EventEngine = (function () {
   // v09-3: 「今月」は表示上の月(実カレンダー月)で数える。イベントは週末(週番号×7日目)にしか
   // 発生しないので、ログの週番号を7倍すればその発生日に戻せる(近似ではなく厳密に一致する)。
   var MONTHLY_EVENT_CAP = 3;
+  // v46: **年でも絞る。** eventLog は年をまたいで積み上がり続けるので、絞らないと
+  // 2年目の7月に1年目の7月ぶんが数えられ、月3件のクォータが最初から埋まったままになる
+  // (=2年目以降イベントが1件も出なくなる)。年は各レコードの year(v46 で追加。無い＝1年目)。
   function eventsThisMonth(state) {
     var m = U.calMonth(state.day);
+    var year = U.yearOfRun(state.day);
     var n = 0;
-    state.eventLog.forEach(function (e) { if (U.calMonth(e.week * 7) === m) n++; });
+    state.eventLog.forEach(function (e) {
+      if ((e.year || 1) !== year) return;
+      if (U.calMonth(e.week * 7) === m) n++;
+    });
     return n;
   }
 
@@ -469,7 +514,11 @@ window.EventEngine = (function () {
   // 呼ばれる前提で、週番号はここで一度だけ導出してローカル変数で使い回す。
   function checkWeeklyEvents(state, weekStats) {
     var candidates = []; // {ev, ctx, kind}
+    // v46: week は**年内の週**(1〜52)。「その年の何週目か」で決まる条件(開店初日・決算・
+    // カードの登場ウィンドウ)はこちら。gweek は**通算週**(年で戻らない)で、
+    // 「前回から何週たったか」という間隔の判定はすべてこちらを使う(§65)。
     var week = U.weekOfRun(state.day);
+    var gweek = U.weekOfGame(state.day);
 
     // --- fixed ---
     if (week === 1 && !state.firedEventIds.ev_open_day) {
@@ -486,7 +535,7 @@ window.EventEngine = (function () {
     if (U.calMonth(state.day) === 10 && !state.firedEventIds.ev_rent_up) {
       candidates.push({ ev: getEvent("ev_rent_up"), ctx: {}, kind: "fixed" });
     }
-    if (week === window.WEEKS_PER_RUN && !state.firedEventIds.ev_tax) {
+    if (week === window.WEEKS_PER_YEAR && !state.firedEventIds.ev_tax) {
       candidates.push({ ev: getEvent("ev_tax"), ctx: {}, kind: "fixed" });
     }
 
@@ -495,7 +544,7 @@ window.EventEngine = (function () {
       candidates.push({ ev: getEvent("ev_first_complaint"), ctx: {}, kind: "conditional_once", once: "firstComplaintFired" });
     }
     if (state.staffHired.indexOf("gonzo") >= 0 && !state.firedEventIds.ev_gonzo_angry) {
-      var recentChanges = state.recipeChangeLog.filter(function (w) { return week - w <= 4; }).length;
+      var recentChanges = state.recipeChangeLog.filter(function (w) { return gweek - w <= 4; }).length; // v46: 通算週で(年またぎで全部成立しないように)
       if (recentChanges >= 2) {
         candidates.push({ ev: getEvent("ev_gonzo_angry"), ctx: {}, kind: "once", once: "ev_gonzo_angry" });
       }
@@ -504,7 +553,7 @@ window.EventEngine = (function () {
       weekStats.satisfactionBySeg.student > 75 && !state.firedEventIds.ev_sns_viral) {
       candidates.push({ ev: getEvent("ev_sns_viral"), ctx: {}, kind: "once", once: "ev_sns_viral" });
     }
-    if (state.staffHired.indexOf("yuta") >= 0 && week >= (state.flags.yutaHireWeek || 1) + 13 && !state.firedEventIds.ev_yuta_ask) {
+    if (state.staffHired.indexOf("yuta") >= 0 && gweek >= (state.flags.yutaHireWeek || 1) + 13 && !state.firedEventIds.ev_yuta_ask) {
       candidates.push({ ev: getEvent("ev_yuta_ask"), ctx: {}, kind: "once", once: "ev_yuta_ask" });
     }
     // 従業員の士気低下 -> 辞めたい
@@ -544,7 +593,7 @@ window.EventEngine = (function () {
     if (menyaRel >= 50 && (state.relationships.oldman || 0) >= 50 && !state.comboFired.menya_oldman) {
       cardCandidates.push({ ev: getEvent("ev_menya_oldman_combo"), ctx: {}, kind: "combo", combo: "menya_oldman" });
     }
-    if (cardCandidates.length > 0 && week - (state.flags.lastCardEventWeek || -99) >= 2) {
+    if (cardCandidates.length > 0 && gweek - (state.flags.lastCardEventWeek || -99) >= 2) {
       candidates.push(cardCandidates[0]); // 1週間に1件だけ
     }
 
@@ -788,16 +837,20 @@ window.EventEngine = (function () {
 
   function markFired(state, entry) {
     var ev = entry.ev;
-    var week = U.weekOfRun(state.day);
+    var week = U.weekOfRun(state.day);    // 年内の週(ログの表示・月の逆算用)
+    var gweek = U.weekOfGame(state.day);  // v46: 通算週(間隔の判定用)
     state.firedEventIds[ev.id] = true;
     if (entry.once) state.firedEventIds[entry.once] = true;
     if (entry.cooldownKey) setCooldown(state, entry.cooldownKey);
-    if (entry.combo) { state.comboFired[entry.combo] = true; state.flags.lastCardEventWeek = week; }
-    if (entry.ev.trigger === "card") state.flags.lastCardEventWeek = week;
-    state.eventLog.push({ week: week, id: ev.id, title: ev.title });
+    if (entry.combo) { state.comboFired[entry.combo] = true; state.flags.lastCardEventWeek = gweek; }
+    if (entry.ev.trigger === "card") state.flags.lastCardEventWeek = gweek;
+    // v46: year を足した。無期限化で eventLog が年をまたいで積み上がるようになり、
+    // 「今月もう何件出たか」(eventsThisMonth)と結果画面の件数を年で絞る必要が出たため。
+    state.eventLog.push({ year: U.yearOfRun(state.day), week: week, id: ev.id, title: ev.title });
   }
 
   return {
+    resetYearlyEvents: resetYearlyEvents, // v46: 年の切り替わりで呼ぶ(js/screens/loop.js の advanceWeek)
     getEvent: getEvent,
     initRun: initRun,
     applyEffect: applyEffect,

@@ -17,7 +17,10 @@
       // (SAVE_VERSION も上げない)。
       window.UI.showScreen("menu");
       window.ScreenMenu.render({
-        // 「続きから」: 有効なセーブを読んで、その phase(setup/loop/result)へ。
+        // v45: 1枚目の札は「ゲームスタート」に統一され、「つづきから」/「はじめから」はその札の
+        // パネルの中で選ぶようになった(docs/指示書/v45_メニュー画面の作り込み_指示書.md §3-5)。
+        // ここへ渡す2つの関数の中身と、セーブの読み書きそのものは v38-2 のまま変えていない。
+        // 「つづきから」: 有効なセーブを読んで、その phase(setup/loop/result)へ。
         // 読めなかった(直前に消えた等)場合は最初から。
         onContinue: function () {
           if (window.GameState.load()) {
@@ -27,7 +30,8 @@
             startNew();
           }
         },
-        // 「はじめから」: セーブを消して最初から。
+        // 「はじめから」: セーブを消して最初から。有効なセーブ/形式不一致のセーブがあるときは、
+        // menu.js 側が呼ぶ前に確認を1枚挟む(消えるものが無い=セーブ無しのときだけ確認なし、§3-5)。
         onNewGame: startNew
       });
     } else if (phase === "setup") {

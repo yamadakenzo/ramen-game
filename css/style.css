@@ -438,6 +438,12 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
      札の位置・傾き・奥行き・暗さ(slideShadows)は Swiper が transform と opacity だけで動かす。ここには札そのものの
      見た目だけを書く(§7-1: 毎フレーム触ってよいのは transform と opacity のみ)。
    - 札の絵(v38-3): .menu-card-pic の中に img/menu/*.webp(透過)。面の地(--m-pic)は絵の後ろに残る。
+   - v45(docs/指示書/v45_メニュー画面の作り込み_指示書.md、設計判断記録 §64): 札を4枚にし、下段(矢印2つ+「決定」)を
+     撤去して現在地のドット(.menu-dots)と説明1行(.menu-desc)に置き換えた。上部は暖簾(.menu-noren)+DOMテキストの
+     ロゴ(.menu-logo)。動くもの(雲 .menu-cloud / 中央の札の浮き / 押した手応え / どんぶりちゃん .menu-donburi)を
+     足したが、**すべて CSS で、新しい画像は作っていない**(暖簾と立ち絵は既存素材の使い回し)。
+     浮きと押し込みは .menu-card-inner に掛ける(札そのものは Swiper が transform を書くので触らない)。
+     動きは下位画面のあとの @media (prefers-reduced-motion: reduce) でまとめて止める。
    ================================================================ */
 #screen-menu { padding: 0; }
 .menu-root {
@@ -463,22 +469,70 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   background: var(--m-bg); background-image: var(--m-bg-image);
   user-select: none; -webkit-user-select: none;
   --menu-card-w: calc(var(--frame-w) * 0.40);
-  --menu-card-h: calc(var(--frame-w) * 0.40 * 4 / 3);   /* 札は3:4の縦長(仮。実機で確定する) */
+  --menu-card-h: calc(var(--frame-w) * 0.40 * 4 / 3);   /* 札は3:4の縦長 */
+  /* v45 §3-3: 暖簾の幅。枠幅とフレームの高さの両方で頭打ちにする。PC幅(1280×800)では
+     --frame-w が 450px まで伸びる一方で高さは 800px しかなく、幅だけで決めると札に被るため。
+     暖簾の絵(img/opening/noren_a.webp)は 860×663 なので、高さ = 幅 × 663/860。 */
+  --menu-noren-w: min(calc(var(--frame-w) * 0.78), calc(100svh * 0.315));
+  /* v45: 札の帯(カルーセル)の縦の中心。暖簾を上に置いたぶん v38-2 の 47% から下げた。
+     ドットと説明もここを基準に並ぶので、上下の詰まり具合はこの1行で動かせる。 */
+  --menu-row: 50%;
 }
-.menu-head {
-  position: absolute; left: 0; right: 0; top: 6%; text-align: center; pointer-events: none;
-  font-weight: 700; font-size: calc(var(--frame-w) * 0.07); letter-spacing: 0.08em; line-height: 1.2;
-  color: var(--m-text); text-shadow: var(--m-text-shadow);
+/* ---- 上部: 暖簾に載ったロゴ(v45 §3-3) ----
+   素の文字1行をやめ、画面上部から暖簾を吊るし、その上に DOM テキストのロゴを載せる
+   (生成画像に文字は入れない、§54-8)。暖簾の絵はオープニングと同じ img/opening/noren_a.webp を使い回す。
+   揺れは .menu-noren 自身に掛ける(ロゴも子なので一緒に揺れ、暖簾から浮かない)。
+   回転の軸は絵の中の吊り棒(上から約6%の高さ)。 */
+.menu-head { position: absolute; left: 0; right: 0; top: 0; display: flex; justify-content: center; pointer-events: none; }
+.menu-noren {
+  position: relative; width: var(--menu-noren-w); aspect-ratio: 860 / 663;
+  transform-origin: 50% 6%;
+  animation: menuNorenSway 7s ease-in-out infinite;
+}
+.menu-noren img { width: 100%; height: 100%; object-fit: contain; display: block; }
+/* 一往復に7秒。振れ幅は片側 1.1 度(暖簾の下端で枠幅の 1.5% ほど)。視界の端で気づく程度の浅さ。 */
+@keyframes menuNorenSway {
+  0%, 100% { transform: rotate(-1.1deg); }
+  50%      { transform: rotate(1.1deg); }
+}
+/* ロゴ。タイトル画面(.op-logo)と同じ書体・縁取り・ベタずらし影で、大きさだけ落とす。
+   位置は暖簾の布の上端寄り(絵の切れ込みが始まる手前)。サブタイトルは出さない(タイトル画面で見せているため)。 */
+.menu-logo {
+  position: absolute; left: 0; right: 0; top: 18%; text-align: center;
+  font-weight: 700; font-size: calc(var(--menu-noren-w) * 0.094); line-height: 1.05; letter-spacing: 0.02em;
+  color: #FFF3D6;
+  -webkit-text-stroke: calc(var(--menu-noren-w) * 0.012) #4A2A1A; paint-order: stroke fill;
+  text-shadow: calc(var(--menu-noren-w) * 0.016) calc(var(--menu-noren-w) * 0.016) 0 #D9432F;
+}
+
+/* ---- 背景の雲(v45 §3-4-1) ----
+   新しい画像は作らず、CSS の図形(角丸の帯 + 円2つ)で作る。DOM 順でいちばん先に置いてあるので
+   z-index を書かずに札より奥に来る。濃さは 0.5 前後に抑え、札の読み取りを邪魔しない。
+   1つずつ --cw(幅=枠幅比) / --ct(上からの位置) / --cd(横切る時間) と負の animation-delay で散らす。 */
+.menu-sky { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.menu-cloud {
+  position: absolute; left: 0; top: var(--ct, 10%);
+  width: calc(var(--frame-w) * var(--cw, 0.3)); height: calc(var(--frame-w) * var(--cw, 0.3) * 0.34);
+  background: rgba(255, 255, 255, 0.5); border-radius: 999px;
+  animation: menuCloudDrift var(--cd, 45s) linear infinite;
+}
+.menu-cloud::before, .menu-cloud::after { content: ""; position: absolute; background: inherit; border-radius: 50%; }
+.menu-cloud::before { left: 16%; bottom: 35%; width: 52%; height: 0; padding-bottom: 52%; }
+.menu-cloud::after  { right: 18%; bottom: 55%; width: 36%; height: 0; padding-bottom: 36%; }
+/* 左の枠外から右の枠外まで。雲の幅は最大でも枠幅の 0.34 なので -60% 始まりで完全に隠れている。 */
+@keyframes menuCloudDrift {
+  from { transform: translateX(calc(var(--frame-w) * -0.6)); }
+  to   { transform: translateX(calc(var(--frame-w) * 1.05)); }
 }
 
 /* ---- カルーセル(Swiper coverflow、§7-3) ----
    .menu-swiper-clip(枠幅、overflow:hidden)が枠の外へはみ出す札を切る。その中の .swiper は札1枚ぶんの幅で中央に置き、
    overflow:visible(Swiper 既定の hidden を上書き)で脇の札を外へ描かせる。器を札幅にする理由は js/screens/menu.js の
    build() のコメント(centeredSlides の snap 位置を 0 始まりにして freeMode の吸着を正しくする)。
-   slidesPerView:'auto' なので札の幅はここの .swiper-slide で決める。centeredSlides で中央揃え、
+   slidesPerView は auto なので札の幅はここの .swiper-slide で決める。centeredSlides で中央揃え、
    coverflow は Y 軸回転+translateZ なので札の中心の高さは常に揃う。 */
 .menu-swiper-clip {
-  position: absolute; left: 0; right: 0; top: 47%; transform: translateY(-50%);
+  position: absolute; left: 0; right: 0; top: var(--menu-row); transform: translateY(-50%);
   height: var(--menu-card-h); overflow: hidden;
 }
 .menu-swiper {
@@ -487,14 +541,38 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .menu-swiper .swiper-slide {
   width: var(--menu-card-w); height: var(--menu-card-h);
 }
+/* v45: 札そのもの(.swiper-slide = .menu-card)には Swiper が coverflow の transform を毎フレーム書く。
+   見た目(面・枠・影)と自前のアニメーション(浮き・押し込み)は中の .menu-card-inner に載せ、
+   Swiper と取り合いにならないようにする。.menu-card 側に残すのは当たり判定と、
+   Swiper が差し込む暗色の板(.swiper-slide-shadow-*)を角丸で切るための border-radius だけ。 */
 .menu-card {
-  background: var(--m-card); border: var(--m-card-line) solid var(--m-card-border); border-radius: calc(var(--frame-w) * 0.025);
-  box-shadow: var(--m-shadow-side);
-  overflow: hidden; display: flex; flex-direction: column;
+  border-radius: calc(var(--frame-w) * 0.025);
   cursor: pointer;
 }
-.menu-card.swiper-slide-active { box-shadow: var(--m-shadow); } /* 中央の札だけ大きい影(クラス切替時の1回だけ塗り直る) */
-/* 札の中身: 上が絵(仮の空箱)、下に帯+札名(文字は画像に入れない方針)。札名はこの帯だけ(§7-4) */
+.menu-card-inner {
+  position: absolute; inset: 0;
+  background: var(--m-card); border: var(--m-card-line) solid var(--m-card-border); border-radius: inherit;
+  box-shadow: var(--m-shadow-side);
+  overflow: hidden; display: flex; flex-direction: column;
+}
+.menu-card.swiper-slide-active .menu-card-inner { box-shadow: var(--m-shadow); } /* 中央の札だけ大きい影 */
+/* v45 §3-4-2: 中央の札は**止まっているあいだだけ**ゆっくり浮く。動いているあいだ(.menu-swiper.is-moving、
+   付け外しは js/screens/menu.js の markMoving())は掛けない。浮きの量は札の高さの 3.5%。 */
+.menu-swiper:not(.is-moving) .swiper-slide-active .menu-card-inner { animation: menuCardFloat 3.2s ease-in-out infinite; }
+@keyframes menuCardFloat {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-3.5%); }
+}
+/* v45 §3-4-3: 押した瞬間、一度沈んで跳ねる。決定の処理そのものは変えない(手応えだけ)。
+   浮き(上のルール)と同じ要素・同じ詳細度なので、後に書いたこちらが勝つ。 */
+.menu-card-inner.is-pressed { animation: menuCardPress 0.34s cubic-bezier(0.3, 0, 0.2, 1) 1; }
+@keyframes menuCardPress {
+  0%   { transform: translateY(0) scale(1, 1); }
+  30%  { transform: translateY(2%) scale(1.03, 0.94); }
+  62%  { transform: translateY(-4%) scale(0.99, 1.02); }
+  100% { transform: translateY(0) scale(1, 1); }
+}
+/* 札の中身: 上が絵、下に帯+札名(文字は画像に入れない方針)。札名はこの帯だけ(§7-4) */
 .menu-card-pic {
   flex: 1; margin: 6% 6% 0; background: var(--m-pic); border-radius: calc(var(--frame-w) * 0.015);
   display: flex; align-items: center; justify-content: center; overflow: hidden; min-height: 0;
@@ -510,35 +588,77 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   background: var(--m-band); color: var(--m-band-text); font-weight: 700; font-size: calc(var(--frame-w) * 0.05); line-height: 1.2;
   text-align: center; white-space: nowrap;
 }
-/* Swiper の暗色の板(slideShadows)。角丸に沿って切れるよう札側に overflow:hidden がある。濃さは Swiper が opacity で動かす */
+/* Swiper の暗色の板(slideShadows)。角丸に沿って切れるよう札側の border-radius を継ぐ。濃さは Swiper が opacity で動かす */
 .menu-card .swiper-slide-shadow-left, .menu-card .swiper-slide-shadow-right { border-radius: inherit; }
 
-/* ---- 札の下: 注記(形式不一致の一言)・操作(矢印・決定) ----
-   札の下端 = 47% + h/2(h は札の高さ)。そこからフレーム幅基準で下へ並べる。 */
-.menu-note {
-  position: absolute; left: 8%; right: 8%; top: calc(47% + var(--menu-card-h) * 0.5 + var(--frame-w) * 0.05);
-  text-align: center; pointer-events: none; min-height: 1.5em;
-  font-size: var(--fs-note); line-height: 1.5; color: var(--m-note);
+/* ---- 札の下: 現在地のドットと、選ばれている札の説明1行(v45 §3-2) ----
+   v38-2 の下段(矢印2つ+「決定」)を撤去してここへ置き換えた(§55-2 の撤回。理由は §64)。
+   札の下端 = --menu-row + h/2(h は札の高さ)。そこからフレーム幅基準で下へ並べる。 */
+.menu-dots {
+  position: absolute; left: 0; right: 0; top: calc(var(--menu-row) + var(--menu-card-h) * 0.5 + var(--frame-w) * 0.055);
+  display: flex; justify-content: center; align-items: center; gap: calc(var(--frame-w) * 0.028);
+  pointer-events: none;   /* 押せなくてよい(現在地を示す飾り、§3-2) */
 }
-.menu-nav {
-  position: absolute; left: 0; right: 0; bottom: 7%;
-  display: flex; justify-content: center; align-items: center; gap: calc(var(--frame-w) * 0.06);
+.menu-dot {
+  width: calc(var(--frame-w) * 0.019); height: calc(var(--frame-w) * 0.019); border-radius: 50%;
+  background: rgba(255, 255, 255, 0.55);
+  transition: width 0.2s ease, height 0.2s ease, background-color 0.2s ease;
 }
-/* 矢印: 丸いボタンの中にCSSで描いた山形(記号や絵文字フォントに頼らない)。端では Swiper が .swiper-button-disabled を付ける */
-.menu-arrow {
-  position: relative; width: calc(var(--frame-w) * 0.13); height: calc(var(--frame-w) * 0.13); padding: 0;
-  border-radius: 50%; background: var(--m-btn); border: calc(var(--frame-w) * 0.006) solid var(--m-btn-border); cursor: pointer;
-  box-shadow: var(--m-shadow-side);
+.menu-dot.is-on {
+  width: calc(var(--frame-w) * 0.032); height: calc(var(--frame-w) * 0.032);
+  background: var(--m-card-border);
+}
+/* 説明の1行。**空にしない**(送っている最中は行き先の文言に切り替わる、§3-2)。2行ぶんの高さを
+   常に確保して、長い文言でも下の要素の位置が動かないようにする。 */
+.menu-desc {
+  position: absolute; left: 6%; right: 6%; top: calc(var(--menu-row) + var(--menu-card-h) * 0.5 + var(--frame-w) * 0.115);
+  text-align: center; pointer-events: none; min-height: 3em;
+  font-size: var(--fs-label); font-weight: 700; line-height: 1.5; color: var(--m-note);
+  text-shadow: 0 calc(var(--frame-w) * 0.005) 0 rgba(10, 40, 90, 0.45);
+}
+
+/* ---- どんぶりちゃん(v45 §3-4-4) ----
+   右下の隅。札(下端 --menu-row + h/2)・ドット・説明のどれにも重ならない位置に置く。
+   3表情は共通枠で切ってあるので(§63-3)、2枚を同じ場所に重ねて opacity を切り替えるだけで位置が合う。
+   数秒に1回ぴょんと跳ねる。決定の瞬間だけ .is-happy が付いて絵が変わり、もう一度大きく跳ねる。 */
+.menu-donburi {
+  position: absolute; right: 4%; bottom: 3%; width: calc(var(--frame-w) * 0.24); aspect-ratio: 470 / 495;
+  pointer-events: none;
+  animation: menuDonburiHop 4s ease-in-out infinite;
+}
+.menu-donburi-face { position: absolute; inset: 0; transition: opacity 0.12s linear; }
+.menu-donburi-face img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.menu-donburi-face.is-happy { opacity: 0; }
+.menu-donburi.is-happy .menu-donburi-face.is-normal { opacity: 0; }
+.menu-donburi.is-happy .menu-donburi-face.is-happy { opacity: 1; }
+/* 4秒に1回、終わりの 12% だけを使って小さく跳ねる(残りの時間は静止) */
+@keyframes menuDonburiHop {
+  0%, 88%, 100% { transform: translateY(0); }
+  92%           { transform: translateY(-14%); }
+  96%           { transform: translateY(0); }
+  98%           { transform: translateY(-5%); }
+}
+/* 決定の瞬間: 表情が happy に替わり、続けて1回大きく跳ねる(0.9秒後に js が class を外す) */
+.menu-donburi.is-happy { animation: menuDonburiJoy 0.55s ease-out 1; }
+@keyframes menuDonburiJoy {
+  0%   { transform: translateY(0) scale(1, 1); }
+  22%  { transform: translateY(4%) scale(1.06, 0.92); }
+  55%  { transform: translateY(-26%) scale(0.97, 1.05); }
+  85%  { transform: translateY(0) scale(1.03, 0.97); }
+  100% { transform: translateY(0) scale(1, 1); }
+}
+
+/* ---- 隅のオープニング再生リンク(v45 §3-1) ----
+   v38-2 で札にしたものを、v38-1 の .op-replay と同じ「画面隅の小さい文字リンク」へ戻した。
+   背景なし・枠なし。.menu-btn は使わない(画面に馴染ませる)。どんぶりちゃんは右下なので左下に置く。 */
+.menu-replay {
+  position: absolute; left: 3%; bottom: 3%; z-index: 5;
+  background: none; border: 0; padding: 2% 3%; cursor: pointer;
+  font-family: inherit; font-weight: 700; font-size: calc(var(--frame-w) * 0.032);
+  color: #FFF3D6; -webkit-text-stroke: calc(var(--frame-w) * 0.004) #4A2A1A; paint-order: stroke fill;
   touch-action: manipulation;
 }
-.menu-arrow::before {
-  content: ""; position: absolute; top: 50%; left: 50%; width: 30%; height: 30%;
-  border-left: calc(var(--frame-w) * 0.01) solid var(--m-btn-fg); border-bottom: calc(var(--frame-w) * 0.01) solid var(--m-btn-fg);
-}
-.menu-arrow.menu-prev::before { transform: translate(-30%, -50%) rotate(45deg); }
-.menu-arrow.menu-next::before { transform: translate(-70%, -50%) rotate(-135deg); }
-.menu-arrow.swiper-button-disabled { opacity: 0.4; cursor: default; }
-.menu-arrow:active, .menu-btn:active { transform: translate(1px, 1px); }
+.menu-replay:active, .menu-btn:active { transform: translate(1px, 1px); }
 .menu-btn {
   font-family: inherit; font-weight: 700; font-size: var(--fs-label); line-height: 1.4;
   padding: calc(var(--frame-w) * 0.025) calc(var(--frame-w) * 0.09);
@@ -546,6 +666,10 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   box-shadow: var(--m-shadow-side); cursor: pointer;
   touch-action: manipulation;
 }
+/* v45 §3-5: 目立たせない側のボタン。地を白にして橙(--m-accent)を外す。
+   使うのは確認の「はじめる」(既定は「やめる」側にしたいので、こちらを引っ込める)と、
+   下位画面の「閉じる」(パネルの主役はいつも中身の方で、出口ではないため)。 */
+.menu-btn-quiet, .menu-sub-panel > .menu-btn { background: var(--m-btn); color: var(--m-btn-fg); border-color: var(--m-btn-border); }
 
 /* ---- 下位画面(図鑑/記録/設定)。メニューの上に被せる1枚のパネル。図鑑・記録の中身は次バージョン ---- */
 .menu-sub {
@@ -567,6 +691,47 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 /* v39 §9-1: 魔王魂の著作表記(BGM を使う限り必須)。設定の行の下に小さく置く。
    色は --m-note(注記)ではなく --m-panel-text: --m-note は青地の上に置く白文字で、白い .menu-sub-panel の上では見えない。 */
 .menu-settings-credit { margin-top: calc(var(--frame-w) * 0.045); font-size: var(--fs-note); line-height: 1.5; color: var(--m-panel-text); opacity: 0.7; }
+
+/* ---- 「ゲームスタート」の中身(v45 §3-5) ----
+   下位画面と同じパネルの中に「つづきから」「はじめから」を縦に2つ。押せない側は is-off で薄くし、
+   その理由(まだお店がありません / 形式不一致)をすぐ下に出す。 */
+.menu-start-block + .menu-start-block { margin-top: calc(var(--frame-w) * 0.05); }
+.menu-start-btn { display: block; width: 100%; padding-left: 0; padding-right: 0; }
+.menu-start-btn.is-off { background: var(--m-btn); color: var(--m-panel-text); opacity: 0.45; box-shadow: none; cursor: default; }
+.menu-start-note { margin-top: calc(var(--frame-w) * 0.02); font-size: var(--fs-note); line-height: 1.5; color: var(--m-panel-text); opacity: 0.75; }
+.menu-start-note.is-warn { opacity: 1; }
+
+/* ---- 「はじめから」の確認(v45 §3-5) ----
+   下位画面(.menu-sub、z-index 200)のさらに上にもう1枚。Escape とパネル外のタップで**確認だけ**が閉じ、
+   下のパネルは開いたまま残る。
+   ボタンの並び: 押しやすい側(右)に「やめる」、左に「はじめる」。目立つ配色(--m-accent)は「やめる」に与え、
+   「はじめる」は .menu-btn-quiet(白地)にしてある。誤って押しても取り返しがつく形にするのが目的(§64)。 */
+.menu-confirm {
+  position: absolute; inset: 0; z-index: 210; padding: 10%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--m-overlay);
+}
+.menu-confirm-panel {
+  width: 100%; padding: 6% 6% 5%; text-align: center; color: var(--m-panel-text);
+  background: var(--m-panel); border: calc(var(--frame-w) * 0.006) solid var(--m-panel-border); border-radius: calc(var(--frame-w) * 0.03);
+  box-shadow: var(--m-shadow);
+}
+.menu-confirm-text { font-size: var(--fs-body); line-height: 1.6; margin-bottom: 6%; }
+.menu-confirm-btns { display: flex; justify-content: center; gap: calc(var(--frame-w) * 0.04); }
+.menu-confirm-btns .menu-btn { flex: 1 1 0; padding-left: 0; padding-right: 0; }
+
+/* ---- v45 §4-9: prefers-reduced-motion では、この画面で足した動きを全部止める ----
+   暖簾の揺れ・雲・中央の札の浮き・押した手応え・どんぶりちゃんの跳ね。
+   ドットの大きさの transition も切る(位置は変わらないが、動きを減らす設定に合わせる)。
+   Swiper の送り自体は js/screens/menu.js が speed:0 にしている(§7-3)。 */
+@media (prefers-reduced-motion: reduce) {
+  .menu-noren { animation: none; transform: none; }
+  .menu-cloud { animation: none; }
+  .menu-swiper:not(.is-moving) .swiper-slide-active .menu-card-inner { animation: none; }
+  .menu-card-inner.is-pressed { animation: none; }
+  .menu-donburi, .menu-donburi.is-happy { animation: none; }
+  .menu-dot { transition: none; }
+}
 
 /* ================= 案内役(開業フェーズ/営業中) ================= */
 .guide-bar {

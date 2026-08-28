@@ -12,11 +12,11 @@
 //     途中から始まっても頭出しはしない。失敗は握り潰さず failures() に残す。
 //   - 設定(§4): localStorage の独立キー ramen_audio に JSON {v, bgm, se, bgmVol, seVol}。旧値 "on"/"off"(v38-2、効果音のみ)は
 //     読めるようにしてある(off → 効果音オフ、BGM はオン)。音量(bgmVol/seVol)は器だけ(今回はオン/オフのみ、§6)。
-//   - 音源の参照は BGM / SE のテーブル1か所。URL には ?v=20260828125425(tools/deploy-pages.sh の sed 対象)。
+//   - 音源の参照は BGM / SE のテーブル1か所。URL には ?v=20260828223008(tools/deploy-pages.sh の sed 対象)。
 // 名前は window.GameAudio。window.Audio はブラウザ組み込みのコンストラクタなので使わない。
 window.GameAudio = (function () {
   var KEY = "ramen_audio";
-  var BUILD_V = "20260828125425";
+  var BUILD_V = "20260828223008";
   var DIR = "audio/";
 
   // ---- テーブル(id → audio/ からの相対パス)。ここだけ変えれば差し替えられる ----

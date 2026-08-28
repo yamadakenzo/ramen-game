@@ -99,34 +99,58 @@ window.ShopView = (function () {
         "lAAAAAAAAAAr", // row8 通路
         "lAAAAADAAAAr"  // row9 通路。入口D(暖簾)は正面(row9とrow10の境)のcol5
       ],
-      // v36-3: 店の外(町)。同じマス座標で、col0=店のcol-3、row0=店のrow0 から始まる表(店の区画 '.' は描かない)。
-      // 記号: N=隣の建物(2マス高) F=塀(0.5マス) W=歩道 C=車道 B=向かいの建物(1.5マス高) .=なし
-      // 配置の根拠:
-      //  - 左隣(cols-3〜-1)は店より奥(x+yが小さい)なので店を隠さない。
-      //  - 右隣は店より手前(x+yが大きい)で、建物の高さ÷16pxの行数だけ店の右側を覆う(§47-4)。rows0-7は
-      //    0.5マスの塀(覆うのは壁の列col11だけ)、rows8-9だけ2マスの建物(覆うのは卓の無いT/A帯の(9,6)(10,7)(11,8))。
-      //  - 向かいの建物(rows15-16)は1.5マス。2マスだと歩道(rows10-11)の行列まで覆う。なお向かいの建物が店に向ける
-      //    正面(-y側)はこの投影では視線と逆向きで見えない(見えるのは背面と側面)。
+      // v36-3: 店の外(町)。同じマス座標で、col0/row0 から始まる1枚の表(店の区画 '.' は描かない)。
+      // v48-1(docs/指示書/v48-1_敷地の器_指示書.md、設計判断記録 §67): **店の外を「敷地」として作り直した。**
+      // v47(未マージ、§66)は店の表そのものを広げたが、欲しかったのは「店の外に一段外側の器＝敷地を作り、
+      // その中に店と小屋を置く」形だった。**店の表(12列×10行)は1文字も触っていない**——広げたのはこの表だけ。
+      //
+      // 記号: F=フェンス(0.5マス高) O=門(フェンスの切れ目。部品なし、地面は道と同じ)
+      //       T=土(敷地の地面) G=草地(四隅。v48-2 の増設用) S=前庭の道
+      //       W=歩道 C=車道 B=向かいの建物(1.5マス高) E=隣地の地面(フェンスの外。無地) .=店(別の表)
+      //
+      // 配置の根拠(基準の絵 Higgsfield 616043f0-… / c5f104be-… の2枚から確定):
+      //  - **店は敷地の真ん中。** 店(cols0-11・rows0-9)の周りに、奥5行・左5列・右5列・手前4行の地面を敷く。
+      //    奥と左右の5マスは、v48-2 で小屋(各4×4マス+通路1マス)が置ける広さとして決めた。
+      //  - **入口(暖簾)は前庭に向く。** 前庭の道 S は店の正面(rows10-11、幅2マス。行列の行と歩く行を分ける)を
+      //    左へ敷地の端まで伸ばし、そこから手前へ折れて門へつながる。
+      //  - **門 O は左手前の角の隣**(col-5、row14)の1マス。門の外が歩道、その先が通り。
+      //  - **通りの向こうにだけ屋根つきの他人の建物**(B、rows20-21)。左・奥・右は隣地の地面(E)を2マス置くだけで、
+      //    建物も塀も置かない(v36-3 の左隣の建物 N と右隣の塀・建物はここで撤去した)。
+      //  - 区画の境目は仕切りではなく**地面の色**だけで分ける(§66-4 と同じ方針)。
+      //  - **フェンスのマスにも足元の地面を敷く**(§66-5 の規則を最初から適用。敷かないと黒い筋が出る)。
       town: {
-        col0: -3, row0: 0,
+        col0: -8, row0: -8,
         map: [
-          "NNN............FFF", // row0
-          "NNN............FFF", // row1
-          "NNN............FFF", // row2
-          "NNN............FFF", // row3
-          "NNN............FFF", // row4
-          "NNN............FFF", // row5
-          "NNN............FFF", // row6
-          "NNN............FFF", // row7
-          "NNN............NNN", // row8 右隣の建物(手前の2行だけ)
-          "NNN............NNN", // row9
-          "WWWWWWWWWWWWWWWWWW", // row10 歩道(行列)
-          "WWWWWWWWWWWWWWWWWW", // row11 歩道(行列の2列目)
-          "CCCCCCCCCCCCCCCCCC", // row12 車道
-          "CCCCCCCCCCCCCCCCCC", // row13 車道
-          "WWWWWWWWWWWWWWWWWW", // row14 向かいの歩道
-          "BBBBBBBBBBBBBBBBBB", // row15 向かいの建物
-          "BBBBBBBBBBBBBBBBBB"  // row16 向かいの建物
+          "EEEEEEEEEEEEEEEEEEEEEEEEEEEE", // row -8  隣地(フェンスの外。無地の地面2マス)
+          "EEEEEEEEEEEEEEEEEEEEEEEEEEEE", // row -7
+          "EEFFFFFFFFFFFFFFFFFFFFFFFFEE", // row -6  フェンス(奥)
+          "EEFGGTTTTTTTTTTTTTTTTTTGGFEE", // row -5  敷地の奥の5行。四隅は草地(v48-2 の増設用)
+          "EEFGGTTTTTTTTTTTTTTTTTTGGFEE", // row -4
+          "EEFTTTTTTTTTTTTTTTTTTTTTTFEE", // row -3  v48-2 はここに小屋2棟(各4×4+通路1)
+          "EEFTTTTTTTTTTTTTTTTTTTTTTFEE", // row -2
+          "EEFTTTTTTTTTTTTTTTTTTTTTTFEE", // row -1
+          "EEFTTTTT............TTTTTFEE", // row  0  '.' が店(cols0-11 rows0-9)。左右に敷地が5列ずつ
+          "EEFTTTTT............TTTTTFEE", // row  1
+          "EEFTTTTT............TTTTTFEE", // row  2
+          "EEFTTTTT............TTTTTFEE", // row  3
+          "EEFTTTTT............TTTTTFEE", // row  4
+          "EEFTTTTT............TTTTTFEE", // row  5
+          "EEFTTTTT............TTTTTFEE", // row  6
+          "EEFTTTTT............TTTTTFEE", // row  7
+          "EEFTTTTT............TTTTTFEE", // row  8
+          "EEFTTTTT............TTTTTFEE", // row  9  店の最終行。入口 D は店の表の (5,9)
+          "EEFSSSSSSSSSSSSSSSSSTTTTTFEE", // row 10  前庭の道(入口の前。行列が並ぶ行)
+          "EEFSSSSSSSSSSSSSSSSSTTTTTFEE", // row 11  前庭の道(歩く行)
+          "EEFSSGGGTTTTTTTTTTTTTTTGGFEE", // row 12  道が門へ折れる / 左手前と右手前は草地
+          "EEFSSGGGTTTTTTTTTTTTTTTGGFEE", // row 13
+          "EEFOFFFFFFFFFFFFFFFFFFFFFFEE", // row 14  フェンス(手前)。門 O は左手前の角の隣(col-5)の1マス
+          "WWWWWWWWWWWWWWWWWWWWWWWWWWWW", // row 15  歩道(フェンスの外)
+          "WWWWWWWWWWWWWWWWWWWWWWWWWWWW", // row 16
+          "CCCCCCCCCCCCCCCCCCCCCCCCCCCC", // row 17  車道
+          "CCCCCCCCCCCCCCCCCCCCCCCCCCCC", // row 18
+          "CCCCCCCCCCCCCCCCCCCCCCCCCCCC", // row 19
+          "BBBBBBBBBBBBBBBBBBBBBBBBBBBB", // row 20  向かいの建物(1.5マス)
+          "BBBBBBBBBBBBBBBBBBBBBBBBBBBB" // row 21
         ]
       }
     }
@@ -143,13 +167,22 @@ window.ShopView = (function () {
   // 部屋の表(ROOMS)に載らない可動物・小物の置き場所はここが唯一の出典。
   var GEO = {
     door: { x: 5.5, y: 9.5 },   // v36-2: 入口(表のD=マス(5,9))の中心。店の正面(手前)
-    off: { x: 15.5, y: 10.5 },  // v36-3: 湧き/退場先 = 歩道(row10)の右端の外(右隣の建物の先。通りの向こうへ消える)
+    // v48-1: 湧き/退場先 = **門の外の歩道の左端**(row15、門から3マス)。v36-3 は「通りの向こうへ消える」
+    // 置き方(右隣の建物の先)だったが、敷地に門ができた以上、客は**門へ向かって歩道を歩いてくる**のが筋。
+    // 通りを渡らせないので車道のマスは一度も踏まない。退店も同じ点へ戻る。
+    off: { x: -7.5, y: 15.5 },
+    // v48-1: 門(表の O = マス(-5,14))の中心と、門から前庭の道へ上がる列。
+    // 経由点は**全部この GEO から組み立てる**——直値を経路の関数に置くと、表を伸ばしたときに
+    // 追従漏れが起きる(§66-1 の教訓。v47 は 19 か所を手で +2 する羽目になった)。
+    gate: { x: -4.5, y: 14.5 },
+    gateLane: { x: -4.5 },   // 門から前庭の道へ上がる列(表の S。cols-5〜-4 の2マス幅の左側)
     // v36-3: 店の中の動線(入口から席まで、壁・什器を通り抜けない道筋)。入口の列(col5)は卓(cols2-4・6-8)の間の
     // 通路で、row5(A)がカウンター席の前の通路、row8(A)が卓の手前の通路。席との行き来は必ずこの3本を経由する
     lane: { x: 5.5 },        // 入口の列(奥へ向かう通路)
     aisleRow: 5.5,           // カウンター席の前の通路(row5)
     frontRow: 8.5,           // 卓の手前の通路(row8)
-    walkRow: 10.5,           // 歩道(row10)。入口を出たら歩道に出てから通りの先へ
+    yardRow: 10.5,           // v48-1: 前庭の道のうち**歩く行**(row10。入口の真ん前。行列もこの行に並ぶ)
+    walkRow: 15.5,           // v48-1: 門の外の歩道(row15)。**店の前ではなく敷地の外**になった(旧 10.5=店の前)
     kitchenHome: { x: 7.5, y: 2.5 }, // 厨房担当の定位置の基準(K帯。複数人は左右にspread)
     soup: { x: 8.5, y: 1.5 },        // 寸胴/鍋(K)
     noodle: { x: 6.5, y: 1.5 },      // 茹で麺器(K。無い場合の代役も同じ位置)
@@ -159,11 +192,36 @@ window.ShopView = (function () {
     counterSeatRow: 4.5,             // 丸椅子の行(表のS行)の中心。席はcol1から1マスに1脚
     // テーブル卓(2マス幅)の接地中心(T帯)。drawMaxTable=4席=2卓ぶんだけ持つ
     tableAnchors: [{ x: 3.0, y: 6.5 }, { x: 7.0, y: 6.5 }],
-    // v36-2: 行列は店の外の道(P、row10)に、入口の前から道の先(右下)へ向かって並べる。GEO.queueColsで折り返す。
+    // v48-1: 行列は前庭の道(row10)に、入口の前から**門の方向(−x)へ**並べる。GEO.queueColsで折り返す。
+    // **v36-2 とは向きが逆。** 道の先が右(+x)ではなく左(門)になったので、行列も門へ向かって伸びる
+    // ——並んでいる客の列がそのまま「門から入ってきた順」に見える。折り返しの規則は変えていない。
+    // **起点は v36-2 と同じ (6.5, 10.5) のまま。** この投影では画面の横位置は (x−y) だけで決まるので、
+    // 入口(5.5, 9.5)と (6.5, 10.5) は**画面の上では同じ列**(x−y = −4.0)——つまりこの点はもともと
+    // 「入口の真ん前」だった。向きを反転するときに起点まで鏡にして (4.5, 10.5) にすると、
+    // 画面の上では行列が入口より2マス左から始まってしまい、4人目が画面の外へ出る(実測で踏んだ)。
+    // **動かすのは進む向き(queueColStep)だけでよい。**
     queueOrigin: { x: 6.5, y: 10.5 },
-    queueColStep: { dx: 1.0, dy: 0 },   // 列の中で1人ずつ進む方向(道に沿って右下へ)。v36-2: 0.7→1.0マス(0.7だと隣と体が重なって数えられない。実測)
+    queueColStep: { dx: -1.0, dy: 0 },  // 列の中で1人ずつ進む方向(道に沿って門へ)。1.0マス(0.7だと隣と体が重なって数えられない。v36-2の実測)
     queueRowStep: { dx: 0, dy: 0.9 },   // 列が埋まったら次列(row11=道の手前側)
     queueCols: 4,
+    // v48-1(§2-5): 初期表示で画面の中央に置く点。この投影では画面の横位置は (x−y) だけ、
+    // 縦位置は (x+y) だけで決まる(toPxX/toPxY 参照)ので、「何を中央に置くか」は
+    // **どの (x−y) と、どの (x+y) を中央にするか**という2つの選択になる。**実測で選んだ:**
+    //
+    // 横 x−y = −1.5:
+    //   優先順は 1=入口と行列 > 2=カウンター席全部 > 3=卓 > 4=門(§2-5)。0.95 での横の窓は
+    //   390幅で 12.83マス・360幅で 11.84マスしかなく、**優先1〜2 を全部入れるには 13.0マス要る**
+    //   (行列4人目 x−y=−7.0 〜 10席目 +6.0)。入りきらないので優先順に従い、
+    //   **10席目を半マス外へ出した**(390幅で 0.6マス=18px。開店時に持つ6席目は x−y=+2.0 で中央付近)。
+    //   x−y=0(v47 のホール定位置)だと逆に**行列の4人目が画面の外**へ出る——行列は
+    //   「並んでいるのが見えること」自体が機能なので、そちらを優先した。
+    // 縦 x+y = 11.0:
+    //   **v36-3 までの「縦にはみ出したら奥壁を画面の上端に合わせる」規則は、敷地が店の奥へ
+    //   伸びた時点で成り立たなくなった。** その規則のままだと画面の上 40%(77〜411px)が
+    //   奥の土と隣地だけで埋まり、店が下半分に沈み、向かいの建物が画面の外へ出る(実測)。
+    //   横と同じく中央に置く点を決める形へ変えた。11.0 は入口(x+y=15)とカウンター席(6〜15)と
+    //   卓(9.5〜13.5)がまとまって入り、かつ通りまで見える値。
+    camCenter: { x: 4.75, y: 6.25 },  // x−y = −1.5 / x+y = 11.0
     drawMaxTable: 4 // テーブル側は実際の卓数より多くは描かない(絵は代表表示。v24からの既存方針)
   };
 
@@ -225,7 +283,11 @@ window.ShopView = (function () {
   var camOverride = null;
   var CAM_GAP = 6; // HUDと部屋の間に空ける余白(px)。元の手置き値(top-bar 70.8 → y 76)と同じ約5〜6px
   var CAM_ZOOM_MAX = 2; // 寄れる限界(素材仕様§2-1のピンチ上限。客の表情の絵文字が十分読める)
-  var CAM_INIT_S = 0.95; // v36-2 暫定の初期倍率(人物55〜60px)。道ができてから決め直す
+  // v36-2 の暫定値。v48-1 で敷地を作ったあとも**据え置き**にした(§2-5)。人物の画面上の背丈 =
+  // PERSON_HEIGHT_CELLS×CELL×s = 60×0.95 = 57px。敷地が広がったぶん倍率を下げれば全体は入るが、
+  // 引ける限界(fitScale=0.21)まで下げると人物は 12.6px にしかならない。**入りきらない分は
+  // スクロールで見に行く**(門は初期表示に入らない。§2-5)。
+  var CAM_INIT_S = 0.95;
   var hudObserver = null;
   var camTouched = false; // ユーザーが一度でもカメラを動かしたらtrue(以後HUDの変化で初期表示へ戻さない)
 
@@ -272,23 +334,26 @@ window.ShopView = (function () {
     return Math.min(Math.max(s, fitScale(fit)), CAM_ZOOM_MAX);
   }
 
-  // 初期表示の式: 倍率 s = coverScale(部屋がfit矩形を埋める)。位置はclampCamera()と同じ規則で、
-  // 部屋が枠より大きい軸は「入口側(左・奥壁側=上)を枠の端に合わせる」、小さい軸は中央。
-  // y は奥壁の上端(row -1)を基準にした「部屋の上端」に CELL*s を足した値(CAM.yはrow0の上端)。
-  // 旧「top-bar + 余白 + 1マス」の手置きを式にしたもの。
+  // 初期表示の式: 倍率は CAM_INIT_S 据え置き。位置は**縦も横も GEO.camCenter を画面の中央に置く**
+  // (枠より小さい軸は中央のまま。限界は clampCamera が掛ける)。
+  //
+  // v48-1(§2-5): **縦の規則を「奥壁を枠の上端に合わせる」から「中央に置く点を決める」へ変えた。**
+  // v36-3 までは店の奥に何も無かったので、はみ出す縦を奥壁で揃えれば店が画面の上に来た。
+  // 敷地が店の**奥へ5行**伸びた v48-1 では同じ規則が逆に働き、画面の上 40%(77〜411px)が
+  // 奥の土と隣地だけで埋まって店が下半分に沈み、通りの向かいの建物が画面の外へ出た(実測)。
+  // 横は v36-2 から「どの (x−y) を中央にするか」を選ぶ作りだったので、縦も同じ形に揃えただけ。
+  // 中央に置く点そのものと、その決め方は GEO.camCenter のコメントに書いてある。
   function fitCamera() {
     if (camOverride) { CAM = { x: camOverride.x, y: camOverride.y, s: camOverride.s }; return; }
     var fit = viewportFit();
-    // v36-2(§4): 暫定の初期倍率。人物の背丈が画面上で55〜60px(=60px×0.95)になる値。道ができて
-    // 縦の広がりが確定してから決め直す(coverScale/fitScaleは限界として残す)。横にはみ出す分はスクロール。
     var s = Math.min(Math.max(CAM_INIT_S, fitScale(fit)), CAM_ZOOM_MAX);
     var r = roomSize(s);
     var fw = fit.right - fit.left, fh = fit.bottom - fit.top;
+    var c = GEO.camCenter;
     CAM = {
       s: s,
-      // 横にはみ出すなら入口(表のD)の列が画面の中央に来るように(はみ出さなければ中央)。限界はclampCameraが掛ける
-      x: r.w > fw ? (fit.left + fw / 2 - toPxX(GEO.door.x, GEO.door.y) * s) : (fit.left + (fw - r.w) / 2),
-      y: fit.top + (r.h > fh ? 0 : (fh - r.h) / 2) + roomRise() * s  // 縦にはみ出すなら奥壁を上端に
+      x: r.w > fw ? (fit.left + fw / 2 - toPxX(c.x, c.y) * s) : (fit.left + (fw - r.w) / 2),
+      y: r.h > fh ? (fit.top + fh / 2 - toPxY(c.x, c.y) * s) : (fit.top + (fh - r.h) / 2 + roomRise() * s)
     };
     clampCamera();
   }
@@ -711,10 +776,28 @@ window.ShopView = (function () {
     // 記号→床の色クラス(壁マスには床を敷かない。壁の絵が接地マスごと覆う前提<素材仕様§3-2>)
     // v35-4: 床は本素材の画像(img/stage/floor_wood.webp / floor_tile.webp、1マス48pxに縮小して敷く)。
     // 第2段階の区画ごとの色分け(wood-s/wood-t)は目視判定用だったので廃止し、木目とタイルの2種だけ。
-    var FLOOR_CLS = { "K": "tile", "S": "wood", "A": "wood", "T": "wood", "(": "tile", "=": "tile", ")": "tile", "D": "wood" };
+    var FLOOR_CLS = {
+      "K": "tile", "S": "wood", "A": "wood", "T": "wood", "(": "tile", "=": "tile", ")": "tile", "D": "wood",
+      // v48-1(§2-4、v47-lot §66-5 の部品をそのまま): **壁のマスにも足元の地面を敷く。**
+      // v36-2 以来「壁マスには床を敷かない(壁の絵が接地マスごと覆う前提)」だったが、その前提が
+      // 成り立つのは**絵のある壁**だけだった。手前側の壁(col11 の r)は「外側の面はプレイヤーに
+      // 背を向けて店の中を隠すだけ」という理由で**部品を描いていない**ので、床も部品も無い
+      // 1マス幅の穴が右の縁に v36-2 からずっと開いていた。v46 までは右隣の塀(0.5マス)がその穴の
+      // 前に立って隠していただけで、v48-1 で右隣を撤去すると黒い筋として露出する。
+      // l/L/#/R は絵のある壁なのでこの地面は見えない(敷いても無害)。見えるのは r の列だけ。
+      "l": "base", "r": "base", "L": "base", "#": "base", "R": "base"
+    };
     // v36-3: 町の記号→地面の色クラスと、高さのある部品 [面の色クラス, 高さ(マス)]
-    var TOWN_FLOOR = { "W": "walk", "C": "road", "N": "lot", "F": "lot", "B": "lot" };
-    var TOWN_PIECE = { "N": ["bldg", 2], "F": ["fence", 0.5], "B": ["far", 1.5] };
+    // v48-1: 敷地の記号を足した。**門 O は地面だけで部品を持たない**(フェンスの切れ目そのもの)。
+    // 地面は道 S と同じ色にして、門をくぐる道が1本につながって見えるようにする。
+    // **フェンス F のマスにも地面(土)を敷く**(上と同じ理由。0.5マスの帯では足元が隠れない)。
+    var TOWN_FLOOR = {
+      "W": "walk", "C": "road", "B": "lot",
+      "T": "dirt", "G": "grass", "S": "path", "O": "path", "F": "dirt", "E": "next"
+    };
+    // v48-1: 左隣の建物 N は撤去したので凡例ごと消した(死んだ記号を残さない)。
+    // フェンス F(0.5マス)は v36-3 の右隣の塀と同じ部品・同じ CSS をそのまま使う。
+    var TOWN_PIECE = { "F": ["fence", 0.5], "B": ["far", 1.5] };
     // 記号→高さのある部品 [色クラス, 高さ(マス)]。カウンターは1.2マス
     // (素材仕様§3-3「台の絵は下1マス強」。1.5マスで作ったら、奥のrow2に立つ店員が
     // 頭しか見えなくなるのを実際のスクリーンショットで確認し、1マス強へ直した)。
@@ -929,8 +1012,12 @@ window.ShopView = (function () {
       svg.setAttribute("class", "sv-grid");
       svg.setAttribute("width", rs.w); svg.setAttribute("height", rs.h);
       svg.style.top = (-roomRise()) + "px";
-      for (var gr = 0; gr < room.rows; gr++) {
-        for (var gc = 0; gc < room.cols; gc++) {
+      // v48-1(§2-6、v47-lot §66-8 の部品をそのまま): 店の表だけでなく**敷地の外接矩形の全部**
+      // (敷地・フェンス・門・歩道・車道・隣地も)に升目を出す。どのマスが何なのかを目で確かめられないと
+      // この版の確認ができない。
+      var ge = roomExtent();
+      for (var gr = ge.rowMin; gr <= ge.rowMax; gr++) {
+        for (var gc = ge.colMin; gc <= ge.colMax; gc++) {
           var pts = [[gc, gr], [gc + 1, gr], [gc + 1, gr + 1], [gc, gr + 1]].map(function (c) {
             return toPxX(c[0], c[1]) + "," + (toPxY(c[0], c[1]) + roomRise());
           }).join(" ");
@@ -1521,9 +1608,34 @@ window.ShopView = (function () {
     if (seat.kind === "counter") return [{ x: GEO.lane.x, y: GEO.frontRow }, { x: GEO.lane.x, y: GEO.aisleRow }, { x: seat.x, y: GEO.aisleRow }, { x: seat.x, y: seat.y }];
     return [{ x: GEO.lane.x, y: GEO.frontRow }, { x: seat.x, y: GEO.frontRow }, { x: seat.x, y: seat.y }];
   }
+  // v48-1: **敷地の外(歩道)から入口までの1区間**。店の中の道筋(routeDoorToSeat)は1行も触っていない
+  // ——足したのはここだけ。歩道 → 門 → 前庭の道 → 入口の前 → 入口、の順に折れる。
+  // **フェンスのマスは1つも通らない**: 門(gate)は表の O = フェンスの切れ目で、
+  // 門へ上がる列(gateLane.x)と門の x は同じなので、歩道から前庭までまっすぐ1本の列を上がる。
+  // 経由点は全部 GEO 由来(§66-1)。
+  // **敷地の外へ出る道筋はこの1本だけ。** 前庭の道 → 門 → 歩道 → off。
+  // 退店(routeDoorToOff)と、行列から待ちきれず帰る経路(leaveQueue)の**両方がこれを使う**
+  // ——道筋を2か所に書くと、片方だけ直してもう片方がフェンスを突っ切る形が残る。
+  function routeYardToOff() {
+    return [
+      { x: GEO.gateLane.x, y: GEO.yardRow }, // 前庭の道を門の列まで戻る
+      { x: GEO.gate.x, y: GEO.gate.y },      // 門を抜ける
+      { x: GEO.gate.x, y: GEO.walkRow },     // 歩道へ下りる
+      { x: GEO.off.x, y: GEO.off.y }         // 歩道の端で消える(通りは渡らない)
+    ];
+  }
+  // 入口(の前)から敷地の外へ。
+  function routeDoorToOff() {
+    return [{ x: GEO.door.x, y: GEO.yardRow }].concat(routeYardToOff());
+  }
+  // **入店は退店の逆順**(off から歩き出して入口で終わる)。1本の道筋から機械的に作るので、
+  // 片方だけ経由点が増えて食い違うことがない。
+  function routeOffToDoor() {
+    return routeDoorToOff().slice(0, -1).reverse().concat([{ x: GEO.door.x, y: GEO.door.y }]);
+  }
   function routeSeatToOff(seat) {
     var back = routeDoorToSeat(seat).slice(0, -1).reverse(); // 席の1つ手前から入口側へ戻る
-    return back.concat([{ x: GEO.door.x, y: GEO.door.y }, { x: GEO.door.x, y: GEO.walkRow }, { x: GEO.off.x, y: GEO.off.y }]);
+    return back.concat([{ x: GEO.door.x, y: GEO.door.y }]).concat(routeDoorToOff());
   }
 
   function spawnCustomer(segId) {
@@ -1531,8 +1643,8 @@ window.ShopView = (function () {
     // 初期位置を確定させてから移動させる。requestAnimationFrame だと
     // タブが非表示のときにコールバックが来ず、客が湧いた位置で固まる。
     void a.el.offsetWidth;
-    // v36-3: 歩道を歩いて入口の前に来てから入口へ(建物の前を通り抜けない)
-    walkVia(a, [{ x: GEO.door.x, y: GEO.walkRow }, { x: GEO.door.x, y: GEO.door.y }], null, function () { arriveDoor(a); });
+    // v48-1: 歩道を歩いて門をくぐり、前庭の道を通って入口へ(フェンスも建物も通り抜けない)
+    walkVia(a, routeOffToDoor(), null, function () { arriveDoor(a); });
   }
 
   function freeSeat() {
@@ -1595,10 +1707,11 @@ window.ShopView = (function () {
     setBubbleText(a, "😡"); // v15-4: 待ちきれず帰るのは怒った表情に統一(隠さずはっきり見せる)。v25§5で😠→😡(より赤く、視認性を上げる)
     a.bubble.className = "sv-bubble mood-bad";
     a.el.classList.add("show-bubble");
-    var slot = queueSlot(i < 0 ? 0 : i);
-    var ms = walkMs2(slot.x, slot.y, GEO.off.x, GEO.off.y);
-    move(a, GEO.off.x, GEO.off.y, ms);
-    later(function () { removeActor(a); }, ms);
+    // v48-1(§2-3): **ここだけ walkVia を使わず off へ直線移動していた。** 店の前がそのまま歩道だった
+    // v36-3 までは、行列の位置から off まで一直線でも道の上を通れたので問題にならなかったが、
+    // 敷地にフェンスができた以上、直線で帰らせると**フェンスを突っ切る**(§3-4 の「フェンスのマスに
+    // 入った点が 0」に必ず引っかかる)。退店と同じ道筋——前庭の道を門まで戻り、門を抜けて歩道へ——に揃えた。
+    walkVia(a, routeYardToOff(), null, function () { removeActor(a); });
   }
 
   function pullFromQueue() {

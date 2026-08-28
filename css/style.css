@@ -1500,7 +1500,28 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .sv-tile-tile { background: #cfe3d6; } /* K 厨房のタイル床(仮) */
 .sv-tile-walk { background: #d6d0c4; } /* W 歩道(仮) v36-3 */
 .sv-tile-road { background: #8d8880; } /* C 車道(仮) v36-3 */
-.sv-tile-lot  { background: #c4bdb0; } /* N/F/B 建物・塀の敷地(仮) v36-3 */
+.sv-tile-lot  { background: #c4bdb0; } /* B 向かいの建物の敷地(仮) v36-3 */
+/* v48-1(§2-2): 敷地の地面。**全部色板**(本素材は v48-3)。
+   区別が要るのは 草 G / 土 T / 道 S=O / 歩道 W / 車道 C の5種とフェンスの面。
+   「別の色を当てた」では足りない(§66-4)。**さらに v48-1 の実機確認で分かったのは、
+   チャンネルの差だけでも足りないこと**——最初は「隣り合う2種の差がどれかのチャンネルで 26 以上」で
+   組んだが、土・隣地・フェンス・店の生成りの壁が**どれも色相 30〜40°の暖色**に固まっていて
+   (土/フェンス 1°、土/隣地 10°、土/壁 9°)、数値は満たしていても**絵では1つの茶色の塊に見えた**。
+   → **§67-6 の規則: 隣り合いうる面は「色相で 20°以上」離す。** チャンネル差 26 以上はそのまま残す。
+   色相で離せない組(歩道と車道のような無彩色どうし)だけ、明度で分ける。
+   土は**店の壁の生成り(#f3e6ce、色相 39°)から色相でも離す**——暗さだけで分けると、
+   v47 で踏んだ「壁と同じ色の薄い土」の失敗に戻る(§66-4)。 */
+.sv-tile-dirt  { background: #ae6244; } /* T 敷地の土。色相 17°(赤みの土)。フェンスのマスの足元もこれ */
+.sv-tile-grass { background: #7d9c4e; } /* G 草地(敷地の四隅。v48-2 の増設用)。色相 84° */
+.sv-tile-path  { background: #cdbd96; } /* S/O 前庭の道と門。色相 43°。門は地面だけで部品を持たない */
+/* E 隣地(フェンスの外)。**敷地の中と地続きに見えないよう、色相ごと冷たい側へ振った**(灰緑 93°)。
+   土(17°)から 76°離れていて、「ここから外は自分の土地ではない」が色で分かる。 */
+.sv-tile-next  { background: #8f9a86; }
+/* v48-1(§2-4、v47-lot §66-5 の部品): 壁の足元の地面。絵のある壁(l/L/#/R)の下では見えず、
+   **部品を描かない手前側の壁(col11 の r)の列**でだけ見える。右隣を撤去すると、そこに
+   1マス幅の穴(床も部品も無い)が v36-2 からずっと開いていたのが露出するので塞ぐ。
+   色は壁の生成り(--sv-wall)より一段落とした、地面に見えるトーン。 */
+.sv-tile-base  { background: #ddd0b8; }
 /* 高さのある部品(壁・カウンター)。接地はtranslate(-50%,-100%)=足元アンカーで全部品共通(素材仕様§2-2)。
    --sv-line: 輪郭線の濃茶 / --sv-wall: 壁の生成り / --sv-wood: 天板・腰板の橙茶 / --sv-front: カウンター前板 */
 .sv-piece { position: absolute; transform: translate(-50%, -100%); box-sizing: border-box;
@@ -1517,9 +1538,13 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .sv-face-bldg { background: #efe0c2; }        /* 隣の建物の正面 */
 .sv-face-bldg-side { background: #d9c7a4; }   /* 隣の建物の側面 */
 .sv-face-roof { background: #8a6a52; }        /* 屋根 */
-.sv-face-fence { background: #a07a52; }       /* 塀 */
-.sv-face-fence-side { background: #8a6844; }
-.sv-face-fence-top { background: #b08a60; }
+/* 塀 → v48-1 では敷地のフェンス。**地面のどれとも違う色相にする**(§67-6)。
+   v36-3 の木の茶(#a07a52、色相 31°)は土(17°)・道(43°)と同じ暖色帯にいて、
+   面として立ち上がって見えなかった。濃い赤茶(351°)へ振り、いちばん近い土とも 26°離した。
+   明度も 32% と低く、敷地の縁が輪郭として読める。 */
+.sv-face-fence { background: #7a2733; }
+.sv-face-fence-side { background: #5e1c26; }
+.sv-face-fence-top { background: #93343f; }
 .sv-face-far { background: #d8cdb8; }         /* 向かいの建物(背面) */
 .sv-face-far-side { background: #c2b59e; }
 .sv-face-far-roof { background: #7a6450; }

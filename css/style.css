@@ -1499,7 +1499,7 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .sv-tile-wood { background: #d9a648; } /* S/A/T/D 客席の木目床(仮) */
 .sv-tile-tile { background: #cfe3d6; } /* K 厨房のタイル床(仮) */
 /* v48-2a(§68): 歩道は本素材(ベージュの砂利)。background-color は画像が読めなかったときの下地として残す */
-.sv-tile-walk { background-image: url(../img/stage/sidewalk.webp?v=20260828125338); background-size: 100% 100%; background-repeat: no-repeat; background-color: #d6d0c4; } /* W 歩道 v48-2a(旧 仮色 #d6d0c4) */
+.sv-tile-walk { background-image: url(../img/stage/sidewalk.webp?v=20260828125425); background-size: 100% 100%; background-repeat: no-repeat; background-color: #d6d0c4; } /* W 歩道 v48-2a(旧 仮色 #d6d0c4) */
 .sv-tile-road { background: #8d8880; } /* C 車道(仮) v36-3 */
 .sv-tile-lot  { background: #c4bdb0; } /* B 向かいの建物の敷地(仮) v36-3 */
 /* v48-1(§2-2): 敷地の地面。**v48-2a(§68)で土・草・道・歩道の4種を本素材の画像に差し替えた。**
@@ -1526,11 +1526,11 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    記号→クラスの対応(dirt かどうか)はこの土台のクラスが担い、1/2/3 は絵だけを足す。
    **判定・経路・当たり判定に 1/2/3 の区別は持ち込まない。** */
 .sv-tile-dirt   { background-color: #ae6244; }
-.sv-tile-dirt-1 { background-image: url(../img/stage/yard_dirt_1.webp?v=20260828125338); background-size: 100% 100%; background-repeat: no-repeat; }
-.sv-tile-dirt-2 { background-image: url(../img/stage/yard_dirt_2.webp?v=20260828125338); background-size: 100% 100%; background-repeat: no-repeat; }
-.sv-tile-dirt-3 { background-image: url(../img/stage/yard_dirt_3.webp?v=20260828125338); background-size: 100% 100%; background-repeat: no-repeat; }
-.sv-tile-grass { background-image: url(../img/stage/yard_grass.webp?v=20260828125338); background-size: 100% 100%; background-repeat: no-repeat; background-color: #7d9c4e; } /* G 草地(敷地の四隅)。v48-2a で本素材へ(旧 仮色 #7d9c4e) */
-.sv-tile-path  { background-image: url(../img/stage/yard_path.webp?v=20260828125338); background-size: 100% 100%; background-repeat: no-repeat; background-color: #cdbd96; } /* S/O 前庭の道と門(灰の敷石)。v48-2a で本素材へ(旧 仮色 #cdbd96)。門は地面だけで部品を持たず、同じクラスを共有するので敷石が門まで1本につながる(§67の設計どおり) */
+.sv-tile-dirt-1 { background-image: url(../img/stage/yard_dirt_1.webp?v=20260828125425); background-size: 100% 100%; background-repeat: no-repeat; }
+.sv-tile-dirt-2 { background-image: url(../img/stage/yard_dirt_2.webp?v=20260828125425); background-size: 100% 100%; background-repeat: no-repeat; }
+.sv-tile-dirt-3 { background-image: url(../img/stage/yard_dirt_3.webp?v=20260828125425); background-size: 100% 100%; background-repeat: no-repeat; }
+.sv-tile-grass { background-image: url(../img/stage/yard_grass.webp?v=20260828125425); background-size: 100% 100%; background-repeat: no-repeat; background-color: #7d9c4e; } /* G 草地(敷地の四隅)。v48-2a で本素材へ(旧 仮色 #7d9c4e) */
+.sv-tile-path  { background-image: url(../img/stage/yard_path.webp?v=20260828125425); background-size: 100% 100%; background-repeat: no-repeat; background-color: #cdbd96; } /* S/O 前庭の道と門(灰の敷石)。v48-2a で本素材へ(旧 仮色 #cdbd96)。門は地面だけで部品を持たず、同じクラスを共有するので敷石が門まで1本につながる(§67の設計どおり) */
 /* E 隣地(フェンスの外)。**敷地の中と地続きに見えないよう、色相ごと冷たい側へ振った**(灰緑 93°)。
    土(17°)から 76°離れていて、「ここから外は自分の土地ではない」が色で分かる。 */
 .sv-tile-next  { background: #8f9a86; }

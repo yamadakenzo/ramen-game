@@ -798,6 +798,28 @@ window.ShopView = (function () {
     // v48-1: 左隣の建物 N は撤去したので凡例ごと消した(死んだ記号を残さない)。
     // フェンス F(0.5マス)は v36-3 の右隣の塀と同じ部品・同じ CSS をそのまま使う。
     var TOWN_PIECE = { "F": ["fence", 0.5], "B": ["far", 1.5] };
+    // v48-2a(§68-8): **土だけ絵を3種に散らす。**
+    // 1枚の絵を全マスに敷くと、寄ったときに斑が周期的に並んで見えた(§3-1 の目視で実測)。
+    // 3枚は**平均色が同じで模様だけが違う**ので、色の判定(§67-6)はどれで測っても変わらない。
+    //
+    // **どの種になるかは、そのマスの col と row だけで決まる。**
+    // 状態も乱数も時刻も使わない——舞台は設備の購入や雇用のたびに組み直される(ensureBuilt)ので、
+    // 乱数で選ぶと**組み直すたびに地面の模様が変わってしまう**。col/row だけの式なら、
+    // 何度組み直しても同じ絵が同じマスに出る。
+    //
+    // 剰余は**負の側で 0 以上へ正規化する**。敷地の表は col0=-8, row0=-8 から始まるので、
+    // col も row も負になる。JS の % は負の被除数に対して負を返す(-1 % 3 === -1)ため、
+    // 正規化しないと variant が 0 や負になり、クラス名が存在しないものになる。
+    //
+    // **これは見た目だけの分岐。** 記号は T のままで TOWN_FLOOR も変えていない。
+    // 判定・経路・当たり判定は "dirt" かどうかだけを見ており、1/2/3 の区別は持ち込まない
+    // (要素には土台の sv-tile-dirt を必ず付け、その上に絵の sv-tile-dirt-N を足すだけ)。
+    var DIRT_VARIANTS = 3;
+    function dirtVariant(col, row) {
+      var m = (col * 7 + row * 13) % DIRT_VARIANTS;
+      if (m < 0) m += DIRT_VARIANTS;
+      return m + 1;
+    }
     // 記号→高さのある部品 [色クラス, 高さ(マス)]。カウンターは1.2マス
     // (素材仕様§3-3「台の絵は下1マス強」。1.5マスで作ったら、奥のrow2に立つ店員が
     // 頭しか見えなくなるのを実際のスクリーンショットで確認し、1マス強へ直した)。
@@ -861,7 +883,12 @@ window.ShopView = (function () {
           var tsym = room.town.map[tr].charAt(tc);
           var gcol = room.town.col0 + tc, grow = room.town.row0 + tr;
           if (TOWN_FLOOR[tsym]) {
-            cameraEl.appendChild(block("sv-tile sv-tile-" + TOWN_FLOOR[tsym], {
+            // v48-2a(§68-8): 土だけ、土台のクラスに絵の種(sv-tile-dirt-1/2/3)を足す。
+            // 土台の sv-tile-dirt は必ず付いたままなので、"dirt かどうか" を見る側は何も変わらない
+            var tcls = TOWN_FLOOR[tsym];
+            var tclsName = "sv-tile sv-tile-" + tcls +
+              (tcls === "dirt" ? " sv-tile-dirt-" + dirtVariant(gcol, grow) : "");
+            cameraEl.appendChild(block(tclsName, {
               left: toPxX(gcol + 0.5, grow + 0.5) + "px", top: toPxY(gcol + 0.5, grow + 0.5) + "px",
               width: (TW + 2) + "px", height: (TH + 1) + "px"
             }));

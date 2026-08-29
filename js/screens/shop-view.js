@@ -308,6 +308,16 @@ window.ShopView = (function () {
   }
   // v48-5b(§74): 正面の腰壁を切る列。入口の中心 GEO.door.x から幅 GEO.doorWidth ぶん(幅1なら入口のマスだけ、幅2なら入口のマスとその右)。
   // 切れ目の出典はここ1か所。入口を動かす(v48-6)ときも GEO.door が動けば追従する
+  // v48-5c(§75): 腰壁の窓の出し分け。**col/row だけで決める**(乱数・状態・時刻を使わない。土の3種・市松と同じ作法 §68-8)。
+  // 正面 col2・col8 = 角の格子窓、col11 = 細長の紺格子窓、右辺 row6 = 丸窓、それ以外は無地(指示書 §0)。
+  function lowWallVariant(side, col, row) {
+    if (side === "front") {
+      if (col === 2 || col === 8) return "win-square";
+      if (col === 11) return "win-slit";
+      return "";
+    }
+    return row === 6 ? "win-round" : "";
+  }
   function doorCols() {
     var start = Math.floor(GEO.door.x - (GEO.doorWidth - 1) / 2), cols = [];
     for (var i = 0; i < GEO.doorWidth; i++) cols.push(start + i);
@@ -962,8 +972,23 @@ window.ShopView = (function () {
   // マスの菱形の頂点は 上(TW/2,H-TH/2) 右(TW,H) 下(TW/2,H+TH/2) 左(0,H)。見えるのは手前側の2辺
   // (左→下: 奥壁・カウンターの前板 / 下→右: 側壁の面)を高さHだけ上へ押し出した平行四辺形と、
   // カウンターの天板(菱形をHだけ持ち上げたもの)。面はclip-pathのpolygonで切る(仮の色板)。
-  function isoFaces(piece, sym, H) {
+  function isoFaces(piece, sym, H, variant) {
     var w2 = TW / 2, h2 = TH / 2;
+    // v48-5c(§75): 腰壁の面は clip-path の色板ではなく、**32×48 の矩形を skewY で平行四辺形にした要素**に板壁の絵を貼る。
+    // 矩形の背景は transform ごと歪むので、横板の線と笠木が辺(傾き h2/w2=0.5、26.57°)と平行になる。
+    // clip-path のまま背景を貼ると、絵は 64×64 の箱に水平に敷かれて辺と平行にならない(v48-5c 調査 1-1)。
+    // 幅は w2+1 で右隣の面に 1px 重ねる(倍率 0.95/1.5・DPR2 の小数 px で継ぎ目が透けないように。床の +2/+1 と同じ考え)。
+    // front(手前左の辺): 矩形 (0,0)〜(w2,H) を +skew → 頂点 (0,0)(w2,h2)(w2,H+h2)(0,H) = back 面の平行四辺形。
+    // right(手前右の辺): 矩形 (w2,h2)〜(TW,H+h2) を −skew → 頂点 (w2,h2)(TW,0)(TW,H)(w2,H+h2) = side 面の平行四辺形。
+    var skewDeg = Math.atan2(h2, w2) * 180 / Math.PI;
+    function lowWall(dir, v) {
+      var el = block("sv-face sv-face-lowwall" + (v ? " " + v : ""), {
+        left: (dir === "front" ? 0 : w2) + "px", top: (dir === "front" ? 0 : h2) + "px", width: (w2 + 1) + "px", height: H + "px"
+      });
+      el.style.transformOrigin = "0 0";
+      el.style.transform = "skewY(" + (dir === "front" ? skewDeg : -skewDeg) + "deg)";
+      piece.appendChild(el);
+    }
     function face(cls, top, height, pts) {
       var el = block("sv-face " + cls, { left: "0px", top: top + "px", width: TW + "px", height: height + "px" });
       el.style.clipPath = "polygon(" + pts.map(function (p) { return p[0] + "px " + p[1] + "px"; }).join(",") + ")";
@@ -989,8 +1014,9 @@ window.ShopView = (function () {
       // v48-5b(§74): 店の正面の腰壁(1マス=48px、側壁と同じ色)。front=手前左の辺(マスの y+0.5 の辺=row9/row10 の境)の外側の面、
       // right=手前右の辺(col13 の x+1 の辺)の外側の面。v36-2 で「外側の面はプレイヤーに背を向けて店の中を隠すだけ」と描かなかった辺に、
       // 客(60px)より低い腰壁として立てる。表の記号ではなく buildScenery が GEO.door を見て入口の列だけ切る
-      case "front": back("sv-face-wall-side"); break;
-      case "right": side("sv-face-wall-side"); break;
+      // v48-5c: 色板 back/side(sv-face-wall-side)から、板壁の絵を貼った skew の面へ。variant は窓の種類(buildScenery の lowWallVariant)
+      case "front": lowWall("front", variant); break;
+      case "right": lowWall("right", variant); break;
       case "N": back("sv-face-bldg"); side("sv-face-bldg-side"); top("sv-face-roof"); break;
       case "F": back("sv-face-fence"); side("sv-face-fence-side"); top("sv-face-fence-top"); break;
       case "B": back("sv-face-far"); side("sv-face-far-side"); top("sv-face-far-roof"); break;
@@ -1199,14 +1225,14 @@ window.ShopView = (function () {
     for (var fc = 0; fc < room.cols; fc++) {
       if (cut.indexOf(fc) >= 0) continue;
       var front = block("sv-piece sv-piece-front", { width: TW + "px", height: CELL + "px" });
-      isoFaces(front, "front", CELL);
+      isoFaces(front, "front", CELL, lowWallVariant("front", fc, room.rows - 1));
       placeAt(front, fc + 0.5, room.rows - 0.5);
       front.style.zIndex = zForRow(fc + 0.5, room.rows - 1.1);
       cameraEl.appendChild(front);
     }
     for (var rr = Math.floor(GEO.counterSeatRow); rr < room.rows; rr++) {
       var right = block("sv-piece sv-piece-right", { width: TW + "px", height: CELL + "px" });
-      isoFaces(right, "right", CELL);
+      isoFaces(right, "right", CELL, lowWallVariant("right", room.cols - 1, rr));
       placeAt(right, room.cols - 0.5, rr + 0.5);
       cameraEl.appendChild(right);
     }

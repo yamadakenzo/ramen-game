@@ -36,8 +36,8 @@ window.ScreenOpening = (function () {
   }
 
   // ---- 画像 ----
-  // js/asset-image.js と同じキャッシュ対策(?v=20260829115002)。tools/deploy-pages.sh が公開時に置換する。
-  var BUILD_V = "20260829115002";
+  // js/asset-image.js と同じキャッシュ対策(?v=20260829131802)。tools/deploy-pages.sh が公開時に置換する。
+  var BUILD_V = "20260829131802";
   var DIR = "img/opening/";
   function src(name) { return DIR + name + ".webp?v=" + BUILD_V; }
   // 画像の参照はこのテーブル1か所だけ。他所でファイル名を書かない。

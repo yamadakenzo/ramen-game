@@ -193,6 +193,7 @@ window.ShopView = (function () {
     entrance:      { W: 731, H: 946, ink: { w: 723, h: 942 }, widthCells: 1, cell: { x: 5.5, y: 10.0 }, baseY: 848 / 946 },
     // 寸胴・茹で麺機。奥に立つ従業員(背丈 60px、1行奥=画面上 16px 上)の胸の高さ=足元から約 52px。2つ同じ値。
     // 従業員は絵の**奥(−y、背中側)**の1行に立って作業する(work.dy = −1。v48-2c と同じ型)。
+    // v48-4a-2: 壁際 row1 に置いたときは手前 row2 に立つ(workFor が向きを決める。表の work は既定の向き)。
     stockpot:      { W: 594, H: 886, ink: { w: 586, h: 882 }, heightCells: 1.05, cell: { x: 8.5, y: 2.5 }, work: { dx: 0, dy: -1 } },
     // 茹で麺機。v48-2d: 左奥(col4)へ動かし、**左右反転して正面(引き戸とつまみ)を +y=カウンター側(画面左下)へ向ける**。
     // 残骸を削った後の寸法(§70)。反転しても 2:1 のアイソメは崩れない(v48-2d 調査 1-2)
@@ -201,7 +202,7 @@ window.ShopView = (function () {
     // 足元は入口の内側(A帯)の左端。券売機・POSレジの「1枠」でもある(GEO.ticket はここから導く)
     register:      { W: 561, H: 763, ink: { w: 553, h: 755 }, heightCells: 0.95, cell: { x: 1.5, y: 8.5 } }
   };
-  // v48-4a(docs/指示書/v48-4a_配置モード_指示書.md、§72): 置き場所は state.props[id] = {x, y} が上書きし、無ければ表の既定 cell。
+  // v48-4a(docs/完了/v48-4a_配置モード_指示書.md、§72): 置き場所は state.props[id] = {x, y} が上書きし、無ければ表の既定 cell。
   // 読むのは propCell() の1か所だけ——描画(placeProp)も停止点(refreshGeo)も「置けるか」(canPlace)も同じ答えを見る。
   // 旧セーブに props は無い(SAVE_VERSION は 25 のまま。resultYear と同じ「上げずに既定で補う」作法。§65)。
   var MOVABLE = ["stockpot", "noodle_boiler", "register"]; // 4a で動かせる物。入口は 4b、丸椅子は 4c(v48-4a 調査 1-6)
@@ -209,7 +210,19 @@ window.ShopView = (function () {
     var o = state && state.props && state.props[id];
     return (o && isFinite(o.x) && isFinite(o.y)) ? { x: o.x, y: o.y } : PROPS[id].cell;
   }
-  function workPoint(id) { var c = propCell(id), p = PROPS[id]; return { x: c.x + p.work.dx, y: c.y + p.work.dy }; }
+  // v48-4a-2(docs/指示書/v48-4a-2_厨房機器を壁際にも_指示書.md、§72-8): **停止点の向きは置いた行で決まる。**
+  // 表の work は「既定の向き(奥=−1行)」。その先が厨房の床 K でなければ(壁際 row1 に置いたとき、先は奥壁 row0)
+  // 逆向き(手前 +1行)にする——コックは壁に向かって作業する。表は変えず、読む側 workFor() の1か所で決める。
+  // canPlace(候補のマス)と refreshGeo(いまのマス)の両方がこれを通るので、光るマスと停止点が食い違わない。
+  function workFor(id, cell) {
+    var w = PROPS[id].work;
+    if (!w) return null;
+    var fwd = { x: cell.x + w.dx, y: cell.y + w.dy };
+    if (cellSym(fwd.x, fwd.y) === "K") return fwd;
+    var back = { x: cell.x - w.dx, y: cell.y - w.dy };
+    return cellSym(back.x, back.y) === "K" ? back : fwd;
+  }
+  function workPoint(id) { return workFor(id, propCell(id)); }
 
   // v35: 間取りの名前付きの点。単位はマスの連続座標(マス(col,row)の中心 = (col+0.5, row+0.5))。
   // 部屋の表(ROOMS)に載らない可動物・小物の置き場所はここが唯一の出典。
@@ -558,15 +571,18 @@ window.ShopView = (function () {
       if (o === id) return;
       var c = propCell(o);
       taken.push(c);
-      if (PROPS[o].work) taken.push({ x: c.x + PROPS[o].work.dx, y: c.y + PROPS[o].work.dy });
+      var ow = workFor(o, c); // v48-4a-2: 相手の停止点も置いた行なりの向きで
+      if (ow) taken.push(ow);
     });
     var isTaken = function (c) { return taken.some(function (t) { return sameCell(t, c); }); };
     if (isTaken(cell)) return false;
     if (p.work) {
-      // 厨房の設備(寸胴・茹で麺機): 足元も停止点も厨房の床 K。停止点が壁(row0)や他の物に入る置き方は弾く。
+      // 厨房の設備(寸胴・茹で麺機): 足元も停止点も厨房の床 K。停止点が壁や他の物・他の物の停止点に入る置き方は弾く。
+      // v48-4a-2: row1(壁際)も可。そのとき停止点は手前 row2(workFor が向きを決める)。
+      // 「row1 col3 と row2 col3」のように前後に並べると、一方の足元がもう一方の停止点に当たるので弾かれる。
       // 寸胴は増設(extra_boiler)が停止点の右隣に描かれるので、そこも厨房の中(col10 は不可)
-      var w = { x: cell.x + p.work.dx, y: cell.y + p.work.dy };
-      if (sym !== "K" || cellSym(w.x, w.y) !== "K" || isTaken(w)) return false;
+      var w = workFor(id, cell);
+      if (sym !== "K" || !w || cellSym(w.x, w.y) !== "K" || isTaken(w)) return false;
       if (id === "stockpot" && cellSym(w.x + 1, w.y) !== "K") return false;
       return true;
     }

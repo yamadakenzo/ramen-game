@@ -201,7 +201,15 @@ window.ShopView = (function () {
     // 足元は入口の内側(A帯)の左端。券売機・POSレジの「1枠」でもある(GEO.ticket はここから導く)
     register:      { W: 561, H: 763, ink: { w: 553, h: 755 }, heightCells: 0.95, cell: { x: 1.5, y: 8.5 } }
   };
-  function workPoint(p) { return { x: p.cell.x + p.work.dx, y: p.cell.y + p.work.dy }; }
+  // v48-4a(docs/指示書/v48-4a_配置モード_指示書.md、§72): 置き場所は state.props[id] = {x, y} が上書きし、無ければ表の既定 cell。
+  // 読むのは propCell() の1か所だけ——描画(placeProp)も停止点(refreshGeo)も「置けるか」(canPlace)も同じ答えを見る。
+  // 旧セーブに props は無い(SAVE_VERSION は 25 のまま。resultYear と同じ「上げずに既定で補う」作法。§65)。
+  var MOVABLE = ["stockpot", "noodle_boiler", "register"]; // 4a で動かせる物。入口は 4b、丸椅子は 4c(v48-4a 調査 1-6)
+  function propCell(id) {
+    var o = state && state.props && state.props[id];
+    return (o && isFinite(o.x) && isFinite(o.y)) ? { x: o.x, y: o.y } : PROPS[id].cell;
+  }
+  function workPoint(id) { var c = propCell(id), p = PROPS[id]; return { x: c.x + p.work.dx, y: c.y + p.work.dy }; }
 
   // v35: 間取りの名前付きの点。単位はマスの連続座標(マス(col,row)の中心 = (col+0.5, row+0.5))。
   // 部屋の表(ROOMS)に載らない可動物・小物の置き場所はここが唯一の出典。
@@ -227,11 +235,13 @@ window.ShopView = (function () {
     yardRow: 10.5,           // v48-1: 前庭の道のうち**歩く行**(row10。入口の真ん前。行列もこの行に並ぶ)
     walkRow: 15.5,           // v48-1: 門の外の歩道(row15)。**店の前ではなく敷地の外**になった(旧 10.5=店の前)
     kitchenHome: { x: 7.5, y: 2.5 }, // 厨房担当の定位置の基準(K帯。複数人は左右にspread)
-    soup: workPoint(PROPS.stockpot),        // 寸胴の停止点(K)。v48-2d: 絵の1行奥 = (8.5, 1.5)(v48-2c までの直値と同じ)
-    noodle: workPoint(PROPS.noodle_boiler), // 茹で麺器の停止点(K)。v48-2d: 絵の1行奥 = (4.5, 1.5)(旧 6.5,1.5)。購入設備の絵もここ
+    // v48-4a: soup / noodle / ticket は PROPS(と state.props)の**コピー**。読み込み時はここで既定から作り、
+    // mount と「動かした直後」に refreshGeo() が書き直す(v48-4a 調査 1-2: コピーのままだと追従しない)
+    soup: workPoint("stockpot"),        // 寸胴の停止点(K)。v48-2d: 絵の1行奥 = 既定 (8.5, 1.5)
+    noodle: workPoint("noodle_boiler"), // 茹で麺器の停止点(K)。v48-2d: 絵の1行奥 = 既定 (4.5, 1.5)。購入設備の絵もここ
     plate: { x: 6.5, y: 2.5 },       // 盛り付け台=受け渡し口の立ち位置(K。カウンターのすぐ奥。絵は無い)
     hallHome: { x: 5.5, y: 5.5 },    // ホール担当の定位置(A。カウンターの手前)
-    ticket: PROPS.register.cell,     // v36-2: 券売機(A。入口のある手前の通路の左端)。v48-2c: レジの1枠 = PROPS.register の足元
+    ticket: propCell("register"),    // v36-2: 券売機(A。入口のある手前の通路の左端)。v48-2c: レジの1枠 = register の足元
     counterSeatRow: 4.5,             // 丸椅子の行(表のS行)の中心。席はcol1から1マスに1脚
     // テーブル卓(2マス幅)の接地中心(T帯)。drawMaxTable=4席=2卓ぶんだけ持つ
     tableAnchors: [{ x: 3.0, y: 6.5 }, { x: 7.0, y: 6.5 }],
@@ -267,6 +277,14 @@ window.ShopView = (function () {
     camCenter: { x: 4.75, y: 6.25 },  // x−y = −1.5 / x+y = 11.0
     drawMaxTable: 4 // テーブル側は実際の卓数より多くは描かない(絵は代表表示。v24からの既存方針)
   };
+  // v48-4a(§72): 立ち物に結びつく GEO の点を PROPS と state.props から書き直す。mount() と moveProp() が呼ぶ。
+  // 進行中のサイクル(runSoloCycle/runKitchenCycle の stops)は開始時に座標を固定しているので追いかけない——
+  // 1サイクルは旧座標で終わり、次のサイクルからここで書き直した点を読む(v48-4a 調査 1-2、指示書 §2-2)。
+  function refreshGeo() {
+    GEO.soup = workPoint("stockpot");
+    GEO.noodle = workPoint("noodle_boiler");
+    GEO.ticket = propCell("register");
+  }
 
   // v12-1: 各フェーズの尺は「ゲーム内で何分か」で持ち、gm()でwindow.BASE_HOUR_MS(js/utils.js の
   // 1箇所だけ)から実ms(×1基準)を作る。later()/move()は1x基準のmsを受け取って内部でspd()で
@@ -440,7 +458,7 @@ window.ShopView = (function () {
   // 寄る/引く。指を離せば止まる(慣性なし)。2回続けてタップで初期表示へ戻す。
   // カメラはstateに持たない(リロードで初期表示に戻る)。舞台(.shop-stage)はHUD(速度ボタン・
   // FAB・パネル)より奥のレイヤーなので、ボタンの上で始まった指はここへ届かない(誤爆しない)。
-  var gesture = { pts: {}, start: null, lastTapAt: 0, lastTapX: 0, lastTapY: 0 };
+  var gesture = { pts: {}, start: null, lastTapAt: 0, lastTapX: 0, lastTapY: 0, hit: null }; // hit: v48-4a、pointerdown で触った立ち物
   function ptList() { return Object.keys(gesture.pts).map(function (k) { return gesture.pts[k]; }); }
   function gestureAnchor() {
     var p = ptList();
@@ -461,6 +479,8 @@ window.ShopView = (function () {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     var sr = stage.getBoundingClientRect();
     gesture.pts[e.pointerId] = { x: e.clientX - sr.left, y: e.clientY - sr.top };
+    // v48-4a(§72): 何を触ったかは pointerdown で記録する。setPointerCapture の後は pointerup の target が舞台になる(調査 1-4)
+    gesture.hit = (e.target && e.target.closest) ? e.target.closest("[data-prop]") : null;
     try { stage.setPointerCapture(e.pointerId); } catch (err) { /* 古い環境 */ }
     gestureAnchor();
     e.preventDefault();
@@ -494,18 +514,136 @@ window.ShopView = (function () {
     var was = gesture.start;
     delete gesture.pts[e.pointerId];
     if (!ptList().length && was && !was.moved && was.x != null) {
-      // タップ。300ms以内・近い場所の2回目なら初期表示へ戻す
-      var now = Date.now();
-      if (now - gesture.lastTapAt < 300 && Math.hypot(was.x - gesture.lastTapX, was.y - gesture.lastTapY) < 30) {
-        camTouched = false;
-        fitCamera();
-        applyCamera();
+      // v48-4a(§72): 配置モードが先に取る(立ち物の選択・光ったマスで確定・それ以外で解除)。
+      // 取ったときはダブルタップの初期表示戻しを数えない(「物をタップ→マスをタップ」が戻しに化けないように)
+      if (onTap(was.x, was.y, gesture.hit)) {
         gesture.lastTapAt = 0;
       } else {
-        gesture.lastTapAt = now; gesture.lastTapX = was.x; gesture.lastTapY = was.y;
+        // タップ。300ms以内・近い場所の2回目なら初期表示へ戻す
+        var now = Date.now();
+        if (now - gesture.lastTapAt < 300 && Math.hypot(was.x - gesture.lastTapX, was.y - gesture.lastTapY) < 30) {
+          camTouched = false;
+          fitCamera();
+          applyCamera();
+          gesture.lastTapAt = 0;
+        } else {
+          gesture.lastTapAt = now; gesture.lastTapX = was.x; gesture.lastTapY = was.y;
+        }
       }
     }
+    gesture.hit = null;
     gestureAnchor();
+  }
+
+  // ---------- v48-4a(§72): 配置モード(プレイヤーが立ち物を動かす) ----------
+  // 型: 立ち物をタップ → 置けるマスが光る → マスをタップで確定。ドラッグは使わない(カメラのドラッグと衝突する)。
+  // 営業中もそのまま動く。客・従業員・タイマーには触らない(組み直さない)。
+  var placing = null; // { id, cells: [{x,y}], marks: [el] } 選択中だけ持つ
+  function cellSym(x, y) {
+    var room = roomDef(), col = Math.floor(x), row = Math.floor(y);
+    if (col < 0 || row < 0 || col >= room.cols || row >= room.rows) return null;
+    return room.map[row].charAt(col);
+  }
+  function sameCell(a, b) { return Math.abs(a.x - b.x) < 0.01 && Math.abs(a.y - b.y) < 0.01; }
+  // 置けるか。**純粋関数**: 表(ROOMS)・PROPS・いまの置き場所(propCell)・持ち物の数(卓)だけを見る。DOM は見ない。
+  // 「光るマス」も「確定」もこれ1つで決める(光ったのに置けない/置けるのに光らない、を作らない)。
+  function canPlace(id, cell) {
+    var p = PROPS[id];
+    if (!p || !cell) return false;
+    var sym = cellSym(cell.x, cell.y);
+    if (!sym) return false;
+    // 他の立ち物の足元と停止点は空けておく(入口は動かないが占有はする)
+    var taken = [];
+    MOVABLE.concat(["entrance"]).forEach(function (o) {
+      if (o === id) return;
+      var c = propCell(o);
+      taken.push(c);
+      if (PROPS[o].work) taken.push({ x: c.x + PROPS[o].work.dx, y: c.y + PROPS[o].work.dy });
+    });
+    var isTaken = function (c) { return taken.some(function (t) { return sameCell(t, c); }); };
+    if (isTaken(cell)) return false;
+    if (p.work) {
+      // 厨房の設備(寸胴・茹で麺機): 足元も停止点も厨房の床 K。停止点が壁(row0)や他の物に入る置き方は弾く。
+      // 寸胴は増設(extra_boiler)が停止点の右隣に描かれるので、そこも厨房の中(col10 は不可)
+      var w = { x: cell.x + p.work.dx, y: cell.y + p.work.dy };
+      if (sym !== "K" || cellSym(w.x, w.y) !== "K" || isTaken(w)) return false;
+      if (id === "stockpot" && cellSym(w.x + 1, w.y) !== "K") return false;
+      return true;
+    }
+    if (id === "register") {
+      // レジ: 客席の床(A/T)のうち、客の動線と席・卓を除いたマス(v48-4a 調査 1-1)。
+      // 丸椅子の枠(row4=S)・入口の列(lane)・カウンター前の通路(aisleRow)・卓の客の横移動(frontRow の卓の列の範囲)・入口のマス・卓(購入済み)
+      if (sym !== "A" && sym !== "T") return false;
+      var col = Math.floor(cell.x), row = Math.floor(cell.y);
+      if (col === Math.floor(GEO.lane.x)) return false;
+      if (row === Math.floor(GEO.aisleRow)) return false;
+      var ax = GEO.tableAnchors.map(function (a) { return a.x; });
+      if (row === Math.floor(GEO.frontRow) && col >= Math.min.apply(null, ax) - 1 && col < Math.max.apply(null, ax) + 1) return false;
+      if (sameCell(cell, GEO.door)) return false;
+      var tables = Math.ceil(seatCounts().table / 2);
+      for (var t = 0; t < tables; t++) {
+        var a = GEO.tableAnchors[t];
+        if (a && sym === "T" && Math.abs(cell.x - a.x) <= 1) return false; // 卓は2マス幅(アンカー±0.5 のマス)
+      }
+      return true;
+    }
+    return false;
+  }
+  function placeableCells(id) {
+    var room = roomDef(), cells = [];
+    for (var row = 0; row < room.rows; row++) for (var col = 0; col < room.cols; col++) {
+      var c = { x: col + 0.5, y: row + 0.5 };
+      if (canPlace(id, c)) cells.push(c);
+    }
+    return cells;
+  }
+  function startPlacing(id) {
+    clearPlacing();
+    var cells = placeableCells(id);
+    // 光るマス: 床と同じ菱形(clip-path)を床の上・壁(WALL_Z 90)の下に敷く。タップは通す(マスは座標から特定する)
+    var marks = cells.map(function (c) {
+      var m = block("sv-place-cell", {
+        left: toPxX(c.x, c.y) + "px", top: toPxY(c.x, c.y) + "px", width: (TW + 2) + "px", height: (TH + 1) + "px"
+      });
+      cameraEl.appendChild(m);
+      return m;
+    });
+    propEls[id].classList.add("selected");
+    placing = { id: id, cells: cells, marks: marks };
+  }
+  function clearPlacing() {
+    if (!placing) return;
+    placing.marks.forEach(function (m) { if (m.parentNode) m.parentNode.removeChild(m); });
+    if (propEls[placing.id]) propEls[placing.id].classList.remove("selected");
+    placing = null;
+  }
+  // 確定: state に書く → GEO を書き直す → 要素を置き直す → 保存。組み直さないので客・従業員・タイマーはそのまま
+  function moveProp(id, cell) {
+    if (!state.props) state.props = {};
+    state.props[id] = { x: cell.x, y: cell.y };
+    refreshGeo();
+    var c = propCell(id);
+    if (propEls[id]) placeAt(propEls[id], c.x, c.y);
+    anchored.forEach(function (a) { var p = a.at(); placeAt(a.el, p.x, p.y); });
+    if (window.GameState && window.GameState.save) window.GameState.save();
+  }
+  // タップ点(舞台内 px)→マス。カメラ層の translate と scale を戻してから fromPx(一時停止の復帰と同じ逆変換)
+  function tapCell(sx, sy) {
+    var p = fromPx((sx - CAM.x) / CAM.s, (sy - CAM.y) / CAM.s);
+    return { x: Math.floor(p.x) + 0.5, y: Math.floor(p.y) + 0.5 };
+  }
+  // タップを配置モードが取るなら true(ダブルタップの初期表示戻しには数えない)
+  function onTap(sx, sy, hit) {
+    var id = (hit && hit.dataset) ? hit.dataset.prop : null;
+    if (placing) {
+      var cell = tapCell(sx, sy);
+      var ok = placing.cells.some(function (c) { return sameCell(c, cell); });
+      if (ok) moveProp(placing.id, cell);
+      clearPlacing(); // 光っていない場所・別の立ち物・舞台の外は解除
+      return true;
+    }
+    if (id && MOVABLE.indexOf(id) >= 0 && propEls[id]) { startPlacing(id); return true; }
+    return false;
   }
   function bindGestures() {
     stage.addEventListener("pointerdown", onPointerDown);
@@ -752,7 +890,19 @@ window.ShopView = (function () {
     if (p.baseY != null) el.style.setProperty("--sv-base", (fontPx * (1 - p.baseY)) + "px");
     return el;
   }
-  function placeProp(id, emojiFallback) { return placeAt(propNode(id, emojiFallback), PROPS[id].cell.x, PROPS[id].cell.y); }
+  // v48-4a(§72): 立ち物の要素は id で持つ(propEls)。動かすときは ensureBuilt で組み直さず(客・従業員・タイマーが消える)、
+  // この要素を placeAt し直す。data-prop はタップで「何を触ったか」を知るための印(onPointerDown が読む)。
+  var propEls = {};
+  // 停止点・枠に付いて動く要素(購入設備 big_pot/noodle_boiler/extra_boiler)。at() が今の置き場所を返す
+  var anchored = [];
+  function placeProp(id, emojiFallback) {
+    var c = propCell(id);
+    var el = placeAt(propNode(id, emojiFallback), c.x, c.y);
+    el.dataset.prop = id;
+    propEls[id] = el;
+    return el;
+  }
+  function placeAnchored(el, at) { var p = at(); placeAt(el, p.x, p.y); anchored.push({ el: el, at: at }); return el; }
 
   function block(cls, style, children) {
     return h("div", { className: cls, style: style }, children || []);
@@ -817,6 +967,8 @@ window.ShopView = (function () {
     actors = [];
     staffActors = [];
     queue = [];
+    propEls = {}; anchored = []; placing = null; // v48-4a: 要素ごと消えるので参照と選択も捨てる
+    refreshGeo();                                 // v48-4a: state.props を反映(読み込み直後・組み直しのたび)
 
     var counts = seatCounts();
     var room = roomDef();
@@ -1033,14 +1185,13 @@ window.ShopView = (function () {
     cameraEl.appendChild(placeProp("noodle_boiler", "♨️"));
     // 既製品(big_pot/noodle_boiler/extra_boiler)は v31 の img/equipment/(256×256)を
     // v35 の1マス幅(48px)の規約のまま置く(v48-2c でも変えない。指示書 §2-2)。
+    // v48-4a: 置き場所は関数で持つ(停止点に付いて動く。moveProp が placeAnchored の at() を呼び直す)
     var kit = [];
-    if (has("big_pot")) kit.push({ x: GEO.soup.x, y: GEO.soup.y, def: U.findById(EQUIP, "big_pot") });
-    if (has("noodle_boiler")) kit.push({ x: GEO.noodle.x, y: GEO.noodle.y, def: U.findById(EQUIP, "noodle_boiler") });
-    if (has("extra_boiler")) kit.push({ x: GEO.soup.x + 1, y: GEO.soup.y, def: U.findById(EQUIP, "extra_boiler") });
+    if (has("big_pot")) kit.push({ at: function () { return GEO.soup; }, def: U.findById(EQUIP, "big_pot") });
+    if (has("noodle_boiler")) kit.push({ at: function () { return GEO.noodle; }, def: U.findById(EQUIP, "noodle_boiler") });
+    if (has("extra_boiler")) kit.push({ at: function () { return { x: GEO.soup.x + 1, y: GEO.soup.y }; }, def: U.findById(EQUIP, "extra_boiler") });
     kit.forEach(function (k) {
-      var el = block("sv-kit-item", {}, [AI.node(k.def)]);
-      placeAt(el, k.x, k.y);
-      cameraEl.appendChild(el);
+      cameraEl.appendChild(placeAnchored(block("sv-kit-item", {}, [AI.node(k.def)]), k.at));
     });
     // v13-1/v14-5: 盛り付け済みでホールが運ぶのを待っている丼が積まれて見える場所。
     // v35: カウンターの天板の上(受け渡し口=GEO.plateの手前のC帯)に置く。台の上に載る物なので、
@@ -1113,6 +1264,9 @@ window.ShopView = (function () {
     var regEl = has("pos") ? block("sv-kit-item", {}, [AI.node(U.findById(EQUIP, "pos"))])
       : has("ticket_machine") ? block("sv-ticket", {}, [AI.node(U.findById(EQUIP, "ticket_machine"))])
       : propNode("register", "🧾");
+    // v48-4a: 動かせるのは「枠」——POS・券売機が描かれていてもこの要素を register として持つ
+    regEl.dataset.prop = "register";
+    propEls.register = regEl;
     cameraEl.appendChild(placeAt(regEl, GEO.ticket.x, GEO.ticket.y));
 
     var prop = window.Scoring.getProperty(state);
@@ -2002,6 +2156,7 @@ window.ShopView = (function () {
   function mount(container, gameState, callbacks) {
     destroy(); // v35-3(§5): 前の舞台(開業チュートリアルの背景など)が残っていれば、DOMごと片付けてから作る
     state = gameState;
+    refreshGeo(); // v48-4a: 読み込んだ state.props(無ければ既定)を停止点へ
     onServeCb = (callbacks && callbacks.onServe) || null;
     // v35(v35-2指示書 §1-2/§4): ?cam=x,y,s が付いているときだけカメラの固定値を上書きする
     // (?grid=1と同じ「URLに付けたときだけ」の確認専用経路。判定点6<scaleが乗った状態でも

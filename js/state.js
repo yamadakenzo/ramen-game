@@ -240,7 +240,11 @@ window.GameState = (function () {
       // stats(味/原価/調理時間)は完成した瞬間の値を焼き込み、以後は素材のLv・分岐を変えても書き換えない
       // (詳細はdocs/設計判断記録.md)。実際に店で出すレシピ(state.recipe/state.extraRamens)とは別物の、
       // 「これまで開発した一覧」という履歴表示専用のデータ。
-      developedRamens: []
+      developedRamens: [],
+      // v48-4a(docs/指示書/v48-4a_配置モード_指示書.md、§72): プレイヤーが動かした立ち物の置き場所 {id: {x, y}}(マスの連続座標)。
+      // 無い id は js/screens/shop-view.js の PROPS の既定(cell)。**SAVE_VERSION は上げていない(25 のまま)。**
+      // 旧セーブにこのキーは無いが、読む側(propCell)が既定で補うので正しく開く(resultYear と同じ作法。§65・§72)。
+      props: {}
     };
   }
 

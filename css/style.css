@@ -1503,7 +1503,7 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    (絵が読めなかったときに舞台の地の濃茶が透けて黒い穴にならないため)。
    **木目は1種のまま。** 板の線が隣のマスへつながる絵なので、土のように複数種を混ぜると
    線が切れて「菱形が並んでいる」ように見える(§69-3)。 */
-.sv-tile-wood { background-image: url(../img/stage/shop_wood.webp?v=20260828223008); background-size: 100% 100%; background-repeat: no-repeat; background-color: #d9a648; } /* S/A/T/D 客席の木目床。v48-2b で本素材へ(旧 仮色 #d9a648) */
+.sv-tile-wood { background-image: url(../img/stage/shop_wood.webp?v=20260829000555); background-size: 100% 100%; background-repeat: no-repeat; background-color: #d9a648; } /* S/A/T/D 客席の木目床。v48-2b で本素材へ(旧 仮色 #d9a648) */
 /* K と カウンターのマス ( = ) の床。**v48-2b で市松を新設した(§69-2)。**
    v35-4 の floor_tile.webp は市松を絵の中に持っていたが、その画像は v36-1 以来
    どこからも参照されておらず(§66-7)、この床はずっと1色のべた塗りだった。
@@ -1512,10 +1512,10 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    記号→クラスの対応(tile かどうか)はこの土台が担い、a/b は絵だけを足す。
    どちらになるかは (col + row) の偶奇だけ(js/screens/shop-view.js の tileVariant)。 */
 .sv-tile-tile   { background-color: #cfe3d6; }
-.sv-tile-tile-a { background-image: url(../img/stage/shop_tile_cream.webp?v=20260828223008); background-size: 100% 100%; background-repeat: no-repeat; }
-.sv-tile-tile-b { background-image: url(../img/stage/shop_tile_mint.webp?v=20260828223008); background-size: 100% 100%; background-repeat: no-repeat; }
+.sv-tile-tile-a { background-image: url(../img/stage/shop_tile_cream.webp?v=20260829000555); background-size: 100% 100%; background-repeat: no-repeat; }
+.sv-tile-tile-b { background-image: url(../img/stage/shop_tile_mint.webp?v=20260829000555); background-size: 100% 100%; background-repeat: no-repeat; }
 /* v48-2a(§68): 歩道は本素材(ベージュの砂利)。background-color は画像が読めなかったときの下地として残す */
-.sv-tile-walk { background-image: url(../img/stage/sidewalk.webp?v=20260828223008); background-size: 100% 100%; background-repeat: no-repeat; background-color: #d6d0c4; } /* W 歩道 v48-2a(旧 仮色 #d6d0c4) */
+.sv-tile-walk { background-image: url(../img/stage/sidewalk.webp?v=20260829000555); background-size: 100% 100%; background-repeat: no-repeat; background-color: #d6d0c4; } /* W 歩道 v48-2a(旧 仮色 #d6d0c4) */
 .sv-tile-road { background: #8d8880; } /* C 車道(仮) v36-3 */
 .sv-tile-lot  { background: #c4bdb0; } /* B 向かいの建物の敷地(仮) v36-3 */
 /* v48-1(§2-2): 敷地の地面。**v48-2a(§68)で土・草・道・歩道の4種を本素材の画像に差し替えた。**
@@ -1542,11 +1542,11 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    記号→クラスの対応(dirt かどうか)はこの土台のクラスが担い、1/2/3 は絵だけを足す。
    **判定・経路・当たり判定に 1/2/3 の区別は持ち込まない。** */
 .sv-tile-dirt   { background-color: #ae6244; }
-.sv-tile-dirt-1 { background-image: url(../img/stage/yard_dirt_1.webp?v=20260828223008); background-size: 100% 100%; background-repeat: no-repeat; }
-.sv-tile-dirt-2 { background-image: url(../img/stage/yard_dirt_2.webp?v=20260828223008); background-size: 100% 100%; background-repeat: no-repeat; }
-.sv-tile-dirt-3 { background-image: url(../img/stage/yard_dirt_3.webp?v=20260828223008); background-size: 100% 100%; background-repeat: no-repeat; }
-.sv-tile-grass { background-image: url(../img/stage/yard_grass.webp?v=20260828223008); background-size: 100% 100%; background-repeat: no-repeat; background-color: #7d9c4e; } /* G 草地(敷地の四隅)。v48-2a で本素材へ(旧 仮色 #7d9c4e) */
-.sv-tile-path  { background-image: url(../img/stage/yard_path.webp?v=20260828223008); background-size: 100% 100%; background-repeat: no-repeat; background-color: #cdbd96; } /* S/O 前庭の道と門(灰の敷石)。v48-2a で本素材へ(旧 仮色 #cdbd96)。門は地面だけで部品を持たず、同じクラスを共有するので敷石が門まで1本につながる(§67の設計どおり) */
+.sv-tile-dirt-1 { background-image: url(../img/stage/yard_dirt_1.webp?v=20260829000555); background-size: 100% 100%; background-repeat: no-repeat; }
+.sv-tile-dirt-2 { background-image: url(../img/stage/yard_dirt_2.webp?v=20260829000555); background-size: 100% 100%; background-repeat: no-repeat; }
+.sv-tile-dirt-3 { background-image: url(../img/stage/yard_dirt_3.webp?v=20260829000555); background-size: 100% 100%; background-repeat: no-repeat; }
+.sv-tile-grass { background-image: url(../img/stage/yard_grass.webp?v=20260829000555); background-size: 100% 100%; background-repeat: no-repeat; background-color: #7d9c4e; } /* G 草地(敷地の四隅)。v48-2a で本素材へ(旧 仮色 #7d9c4e) */
+.sv-tile-path  { background-image: url(../img/stage/yard_path.webp?v=20260829000555); background-size: 100% 100%; background-repeat: no-repeat; background-color: #cdbd96; } /* S/O 前庭の道と門(灰の敷石)。v48-2a で本素材へ(旧 仮色 #cdbd96)。門は地面だけで部品を持たず、同じクラスを共有するので敷石が門まで1本につながる(§67の設計どおり) */
 /* E 隣地(フェンスの外)。**敷地の中と地続きに見えないよう、色相ごと冷たい側へ振った**(灰緑 93°)。
    土(17°)から 76°離れていて、「ここから外は自分の土地ではない」が色で分かる。 */
 .sv-tile-next  { background: #8f9a86; }
@@ -1563,7 +1563,6 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .sv-face { position: absolute; }
 .sv-face-wall { background: var(--sv-wall); }            /* 奥壁の立面 */
 .sv-face-wall-side { background: #e6d6b8; }              /* 側壁の立面(奥壁より一段暗く、面の向きの違いを出す) */
-.sv-face-door { background: #d35050; }                   /* 入口の開口 */
 .sv-face-counter-top { background: var(--sv-wood); }     /* カウンターの天板 */
 .sv-face-counter-front { background: var(--sv-front); }  /* カウンターの前板 */
 .sv-face-counter-end { background: #e8d8bc; }            /* カウンター右端の側板 */
@@ -1597,8 +1596,7 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .sv-piece-side-r { border-left: 2px solid var(--sv-line); }
 .sv-piece-wall-corner.sv-piece-side-l { border-left: 2px solid var(--sv-line); border-right: 2px solid var(--sv-line); }
 .sv-piece-wall-corner.sv-piece-side-r { border-right: 2px solid var(--sv-line); border-left: 2px solid var(--sv-line); }
-/* 入口(暖簾): 側壁の中の2マスぶんの開口。壁の内側の縦線はここでも続く(.sv-piece-side-l が付く) */
-.sv-piece-door { background: #d35050; }
+/* 入口(暖簾)は v48-2c で色板(.sv-piece-door/.sv-face-door)をやめ、立ち物の絵(.sv-prop-entrance)になった */
 /* カウンター(左端/中間/右端): 上から 輪郭線・天板(橙茶)・輪郭線・前板(生成り)・足元の濃い帯。
    中間は左右に線を引かない(端だけが外側に線を持つ)。高さ1.2マスはJS(PIECE_CLS)が書く */
 .sv-piece-counter-l, .sv-piece-counter-mid, .sv-piece-counter-r {
@@ -1626,6 +1624,12 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 .sv-lamp { position: absolute; transform: translate(-50%, -100%); font-size: 18px; }
 .sv-duct { position: absolute; transform: translate(-50%, -100%); font-size: 19px; }
 .sv-kit-item { position: absolute; transform: translate(-50%, -100%); font-size: 48px; }
+/* v48-2c: マスの上に立てる本素材(入口・寸胴・茹で麺機・レジ。img/stage/、余白なしの縦長)。
+   font-size(=絵の1em)は JS の PROPS/propFontPx() が物ごとに計算して書く(ここには px を書かない。§42)。
+   img を block にして要素の高さ=絵の高さにし、足元アンカー(-100%)が絵の下端そのものに効くようにする
+   (inline-block のままだと行ボックスの余白ぶん絵が浮く)。 */
+.sv-prop { position: absolute; transform: translate(-50%, -100%); line-height: 0; }
+.sv-prop img { display: block; }
 .sv-wall-sign {
   position: absolute; transform: translate(-50%, -100%);
   font-size: 9px; background: var(--c-panel); border: 1px solid var(--c-ink); padding: 2px 4px;

@@ -34,8 +34,8 @@ window.ShopView = (function () {
   var TW = 64, TH = 32;
 
   // v35-3(§2、§44-7の保留を解消): 人物の見た目の背丈は「1マスの何倍か」の定数1つだけで持つ。
-  // 1.25マス(60px)= 常設の寸胴(🍥、1マス=48px規約、インク実測42px)より高く、入口の開口
-  // (2マス=96px)より低い、の中間。客・従業員の画面上の背丈はこの1つの値に揃え、絵ごとの
+  // 1.25マス(60px)= 常設の寸胴(v48-2c から stockpot.webp、1.05マス=50.4px。v48-2b までは🍥の48px規約)より高く、
+  // 入口(v48-2c から entrance.webp、幅1マス→高さ約83px)より低い、の中間。客・従業員の画面上の背丈はこの1つの値に揃え、絵ごとの
   // キャンバス余白の違い(客80.47%・従業員78.83%、§43-7実測)はこの比率で割って吸収する。
   // (font-sizeの実値はCSSには書かない。buildScenery()/buildStaff()がここから作って書く)
   var PERSON_HEIGHT_CELLS = 1.25;
@@ -99,7 +99,10 @@ window.ShopView = (function () {
         "lTTTTTTTTTTr", // row6 テーブル席
         "lTTTTTTTTTTr", // row7 テーブル席
         "lAAAAAAAAAAr", // row8 通路
-        "lAAAAADAAAAr"  // row9 通路。入口D(暖簾)は正面(row9とrow10の境)のcol5
+        "lAAAADAAAAAr"  // row9 通路。入口D(暖簾)は正面(row9とrow10の境)のcol5
+        // v48-2c(§70): row9 の D は v36-2 から index 6(col6)に書かれていて、GEO.door(5.5)・客の経路(lane 5.5)・
+        // 行列の起点(x−y=−4)より1マス右に入口が描かれていた(v48-2c 調査 1-2 で実測)。col5 へ直した。
+        // 画面の上では入口の絵が1マス左へ動くだけで、経路・行列・GEO は1文字も変えていない。
       ],
       // v36-3: 店の外(町)。同じマス座標で、col0/row0 から始まる1枚の表(店の区画 '.' は描かない)。
       // v48-1(docs/指示書/v48-1_敷地の器_指示書.md、設計判断記録 §67): **店の外を「敷地」として作り直した。**
@@ -694,6 +697,35 @@ window.ShopView = (function () {
     return id ? { img: "stage/" + id, emoji: emojiFallback, name: "" } : { emoji: emojiFallback, name: "" };
   }
 
+  // v48-2c(docs/指示書/v48-2c_立ち物4点_指示書.md、§70): マスの上に立てる本素材(img/stage/)。
+  // stool.webp / bowl.webp(256×256 の正方形に余白込みで置いた絵)と違い、この4枚は**余白なしの縦長**
+  // (周囲 4px の透明だけ。v48-2c 調査 1-1 で bbox.js 実測)。「48px 角に contain」の1本では
+  // 入口が幅 37px・寸胴が高さ 48px にしかならないので、**1枚ごとに大きさの根拠を持つ**:
+  //   heightCells = 見た目の高さ(実体)を何マス(CELL)にするか / widthCells = 見た目の幅(実体)を何マス(TW)にするか
+  // 描画は .shop-stage img の「1em 角に contain」のまま(縦長なのでキャンバスの高さ=1em、幅=1em×W/H)。
+  // font-size(=1em)だけをここで計算して要素に書く(CSS には px を書かない。§42)。
+  // W/H = キャンバス、ink = 実体の外接矩形(bbox.js、α>8)。値を変えたら bbox.js で測り直すこと。
+  var PROPS = {
+    // 入口(暖簾+格子戸)。幅=1マス(TW=64px)ちょうど。高さは縦横比なり(≈83px、1.74マス。側壁 48px より高く奥壁 96px より低い)
+    entrance:      { W: 731, H: 946, ink: { w: 723, h: 942 }, widthCells: 1 },
+    // 寸胴・茹で麺機。奥に立つ従業員(背丈 60px、1行奥=画面上 16px 上)の胸の高さ=足元から約 52px。2つ同じ値
+    stockpot:      { W: 594, H: 886, ink: { w: 586, h: 882 }, heightCells: 1.05 },
+    noodle_boiler: { W: 757, H: 835, ink: { w: 749, h: 827 }, heightCells: 1.05 }, // 残骸を削った後の寸法(§70)
+    // レジ(台つき)。カウンターの天板(0.6マス=28.8px)より高く、丸椅子(見た目 38px)より大きい
+    register:      { W: 561, H: 763, ink: { w: 553, h: 755 }, heightCells: 0.95 }
+  };
+  function propFontPx(p) {
+    // 1em 角に contain → キャンバス高 = 1em、実体の高さ = 1em × ink.h/H、実体の幅 = 1em × ink.w/H
+    if (p.widthCells) return p.widthCells * TW * p.H / p.ink.w;
+    return p.heightCells * CELL * p.H / p.ink.h;
+  }
+  // 立ち物の要素(.sv-prop: 足元アンカー、img は display:block で要素の高さ=絵の高さ)。placeAt で置く。
+  function propNode(id, emojiFallback) {
+    var el = block("sv-prop sv-prop-" + id, {}, [AI.node(stageDef(id, emojiFallback))]);
+    el.style.fontSize = propFontPx(PROPS[id]) + "px";
+    return el;
+  }
+
   function block(cls, style, children) {
     return h("div", { className: cls, style: style }, children || []);
   }
@@ -740,7 +772,8 @@ window.ShopView = (function () {
       case "L": back("sv-face-wall"); side("sv-face-wall-side"); break;
       case "R": back("sv-face-wall"); break;      // v36-2: 右角は奥壁の面だけ(col11側の面は外面=描かない)
       case "l": side("sv-face-wall-side"); break;  // v36-2: r(col11)は部品なし(手前側の壁は描かない)
-      case "D": back("sv-face-door"); break;       // v36-2: 入口は正面(row9/row10の境=y+0.5の辺)に立つ暖簾
+      // v48-2c: 入口 D はここでは作らない(v36-2〜v48-2b は back 面1枚の赤い色板だった)。
+      // 絵(img/stage/entrance.webp)を立ち物として placeAt で置く(buildScenery の「入口」参照)
       case "(": case "=": back("sv-face-counter-front"); top("sv-face-counter-top"); break;
       case ")": back("sv-face-counter-front"); side("sv-face-counter-end"); top("sv-face-counter-top"); break;
       // v36-3 町: 建物・塀は箱(正面=back面、右側面=side面、屋根=top)。隣り合うマスの重なりは奥行き順の描画で隠れる
@@ -857,19 +890,22 @@ window.ShopView = (function () {
     // 「立っている物の高さ÷16px」がそのまま隠す行数になる。
     //   カウンター 0.6マス=28.8px → 1行奥の人物(60px)の足元12.8pxだけ隠す(2行奥は隠さない)。
     //   1.2マスのままだと57.6px → 1行奥の人物を41.6px隠して頭と丼だけになる(v36-1で実測)。
-    //   入口(暖簾) 1マス=48px → 2行奥まで隠す(col5のrow7-8は卓の無い通路なので実害なし)。
     //   奥壁 2マス=96px → 6行ぶんだが奥壁の向こうには何も無い。側壁 1マス=48px(最奥のzなので何も隠さない)。
+    // v48-2c: 入口 D は部品(色板)ではなく立ち物の絵になった(PROPS.entrance)。表の記号 D は残し、
+    // 床(FLOOR_CLS)と立ち物の置き場所の出典としてだけ使う。
     var PIECE_CLS = {
       "L": ["wall-corner", 2], "#": ["wall-mid", 2], "R": ["wall-corner", 2],
-      "l": ["wall-side", 1], "D": ["door", 1],
+      "l": ["wall-side", 1],
       "(": ["counter-l", 0.6], "=": ["counter-mid", 0.6], ")": ["counter-r", 0.6]
     };
     // v35-3(§1、§44-5の「許容」を解消): 重なりの規則は1行——
-    // 「壁(側壁・奥壁・入口)は部屋の縁に沿って連続する1枚の面なので手前の行を隠さない(zは部屋の最奥で固定)／
+    // 「壁(側壁・奥壁)は部屋の縁に沿って連続する1枚の面なので手前の行を隠さない(zは部屋の最奥で固定)／
     //   台(カウンター)は部屋の中に置かれた物なので奥の行を隠す(z=row)」。
     // 壁を行ごとに切ってあるのは描画の都合にすぎず、row6の側壁の上半分がrow5の入口や客を覆うのは
     // 「手前の壁の陰」ではなく単なる描画順の事故だった(v35-3調査報告 §1)。
-    var WALL_SYMS = "L#RlrD";
+    // v48-2c: 入口(暖簾)はこの規則から外した——立ち物として z=row を持つ(店の中にいる客より手前、
+    // 歩道側にいる客より奥。「くぐる」が見える)。
+    var WALL_SYMS = "L#Rlr";
     var WALL_Z = zForRow(-1, 0); // 床(z無し=0)より上、部屋の中の何(奥行き0以上)より奥
     // v36-1: 床タイルは菱形(CSSのclip-path)。位置は変換関数の戻り値(マスの中心)に
     // translate(-50%,-50%)で中心合わせ。横2px・縦1px大きくして隣と重ねる(§46-4の小数pxの隙間は斜めでも起きる)
@@ -895,10 +931,12 @@ window.ShopView = (function () {
     // v36-1: 各部品の根は placeAt(マスの中心に足元)で置き、面(壁の立面・カウンターの天板と前板)は
     // 根の子として isoFaces() が菱形の辺から作る。斜めでは隣り合う壁の面は横に並ぶだけで重ならない。
     var pieces = [];
+    var doors = []; // v48-2c: 表の D のマス(入口の絵を置く足元)
     for (var row = 0; row < room.rows; row++) {
       for (var col = 0; col < room.cols; col++) {
         var sym = room.map[row].charAt(col);
         if (PIECE_CLS[sym]) pieces.push({ sym: sym, col: col, row: row, cls: PIECE_CLS[sym] });
+        if (sym === "D") doors.push({ col: col, row: row }); // v48-2c: 入口は立ち物(下で置く)
       }
     }
     // v36-3: 町(ROOMS.town)。地面は店の床と同じ菱形、建物・塀は店の什器と同じ面の作り(isoFaces)。
@@ -933,6 +971,12 @@ window.ShopView = (function () {
       if (!p.town && WALL_SYMS.indexOf(p.sym) >= 0) piece.style.zIndex = WALL_Z;
       cameraEl.appendChild(piece);
     });
+    // v48-2c(§70): 入口(暖簾と格子戸の絵)。表の D のマスに足元を置く立ち物。幅は1マス(TW)ちょうど、高さは絵の縦横比なり。
+    // z は他の立ち物と同じ zForRow(壁の WALL_Z 固定ではない): 店の中(row8 以浅)にいる客は暖簾の奥、
+    // 前庭(row10)にいる客は暖簾の手前に描かれる。同じマス(row9)では actorLayer が後なので客が手前。
+    doors.forEach(function (d) {
+      cameraEl.appendChild(placeAt(propNode("entrance", "🚪"), d.col + 0.5, d.row + 0.5));
+    });
 
     // 電灯・ダクト・壁の案内・店名看板は奥壁の面(row0の壁が上へ伸びた部分=部屋の外の負のrow)に
     // 掛ける。yが負のままzForRow()を通すと壁(row0)より奥のzになってしまうため、
@@ -952,10 +996,17 @@ window.ShopView = (function () {
       cameraEl.appendChild(ductEl);
     }
 
-    // 厨房設備(K帯の奥の壁沿い)。既製品(big_pot/noodle_boiler/extra_boiler)は
-    // v31のimg/equipment/を使い、常設の寸胴(未購入時のベース)だけは絵が無いので絵文字のまま。
-    // v35: v32の既存素材を1マス幅(48px)の規約に乗せた仮置き(本素材化は今回やらない。指示書§2)。
-    var kit = [{ x: GEO.soup.x, y: GEO.soup.y + 1, def: stageDef(null, "🍥") }];
+    // 厨房設備(K帯の奥の壁沿い)。
+    // v48-2c(§70): 常設の寸胴(v35〜v48-2b は絵文字🍥)と茹で麺機(v48-2b まで常設の絵は無かった)を本素材にした。
+    // 足元は従業員の停止点(GEO.soup / GEO.noodle)の1行手前——従業員は設備の奥に立って作業して見える
+    // (🍥のときと同じ置き方。停止点そのものに置くと従業員と同じマスになり、従業員が設備に重なる)。
+    // 高さは2つとも同じ(PROPS の heightCells): 上端が奥に立つ従業員の胸の高さで、顔を隠さない。
+    // 盛り付け台 GEO.plate=(6.5,2.5) は停止点だけで描画物は無い(丼の山は台の上 (6.5,3.1))ので、茹で麺機はそこに置く。
+    cameraEl.appendChild(placeAt(propNode("stockpot", "🍥"), GEO.soup.x, GEO.soup.y + 1));
+    cameraEl.appendChild(placeAt(propNode("noodle_boiler", "♨️"), GEO.noodle.x, GEO.noodle.y + 1));
+    // 既製品(big_pot/noodle_boiler/extra_boiler)は v31 の img/equipment/(256×256)を
+    // v35 の1マス幅(48px)の規約のまま置く(v48-2c でも変えない。指示書 §2-2)。
+    var kit = [];
     if (has("big_pot")) kit.push({ x: GEO.soup.x, y: GEO.soup.y, def: U.findById(EQUIP, "big_pot") });
     if (has("noodle_boiler")) kit.push({ x: GEO.noodle.x, y: GEO.noodle.y, def: U.findById(EQUIP, "noodle_boiler") });
     if (has("extra_boiler")) kit.push({ x: GEO.soup.x + 1, y: GEO.soup.y, def: U.findById(EQUIP, "extra_boiler") });
@@ -976,11 +1027,6 @@ window.ShopView = (function () {
       placeAt(signEl, 5.0, -0.25);
       signEl.style.zIndex = wallZ;
       cameraEl.appendChild(signEl);
-    }
-    if (has("pos")) {
-      var posEl = block("sv-kit-item", {}, [AI.node(U.findById(EQUIP, "pos"))]);
-      placeAt(posEl, 4.5, 2.5);
-      cameraEl.appendChild(posEl);
     }
 
     // カウンター本体はもう1枚絵では描かない(部屋の表の (==…==) が左端/中間/右端の部品として
@@ -1032,12 +1078,15 @@ window.ShopView = (function () {
       });
     }
 
-    // 券売機は入口の内側(A帯)。
-    if (has("ticket_machine")) {
-      var ticketEl = block("sv-ticket", {}, [AI.node(U.findById(EQUIP, "ticket_machine"))]);
-      placeAt(ticketEl, GEO.ticket.x, GEO.ticket.y);
-      cameraEl.appendChild(ticketEl);
-    }
+    // レジの枠(入口の内側、A帯の左端 = GEO.ticket)。
+    // v48-2c(§70): このマスは「1枠」。常設のレジ(register.webp)を置き、購入設備があれば
+    // POSレジ > 券売機 > 常設のレジ の順で**1つだけ**描く(2つ並べない)。
+    // POSレジは v35〜v48-2b は厨房 (4.5,2.5) の直値に置いていたが、レジは店に1台なのでこの枠へ移した。
+    // 購入設備の絵は従来どおり 48px 角(.sv-kit-item / .sv-ticket)。
+    var regEl = has("pos") ? block("sv-kit-item", {}, [AI.node(U.findById(EQUIP, "pos"))])
+      : has("ticket_machine") ? block("sv-ticket", {}, [AI.node(U.findById(EQUIP, "ticket_machine"))])
+      : propNode("register", "🧾");
+    cameraEl.appendChild(placeAt(regEl, GEO.ticket.x, GEO.ticket.y));
 
     var prop = window.Scoring.getProperty(state);
     var signboardEl = block("sv-signboard", {}, [

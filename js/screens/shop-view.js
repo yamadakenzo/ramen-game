@@ -89,7 +89,7 @@ window.ShopView = (function () {
       // 道を表の一部として持つ理由: 入口・湧き場所・行列の置き場がすべて同じマス座標で書け、
       // 変換関数1つで済む(§43-1)。部屋の外の別座標系を持つと、出典が2つになる。
       // 手前側の2辺(右=col13の外面、手前=row末尾)の壁は描かない(§1、PIECE_CLSの注記)。
-      // v48-5(docs/指示書/v48-5_店の拡幅と厨房の隙間_指示書.md、§73): **店を右へ2列広げて14列にした。** 広がった2列のうち
+      // v48-5(docs/完了/v48-5_店の拡幅と厨房の隙間_指示書.md、§73): **店を右へ2列広げて14列にした。** 広がった2列のうち
       // row3(カウンターの行)は台を延ばさず床 P(厨房の市松を続ける)にして、従業員が厨房とホールを行き来できる隙間にする。
       // P は FLOOR_CLS で床を敷くだけで、部品(PIECE_CLS)にも機器の置き場(canPlace は K だけ)にも入れない——通路を塞げないように。
       // 席は10のまま(counterSlots)。GEO・PROPS の既定・state.props は絶対座標で col0 側が動かないので不変。
@@ -236,6 +236,9 @@ window.ShopView = (function () {
     // v36-2: 入口の中心=マス(5,9)。店の正面(手前)。v48-2d: 入口の絵は PROPS.entrance.cell(正面の辺の中点 (5.5,10.0))に立ち、
     // 客の経由点はその1マス奥(=マスの中心)。表 ROOMS の D は「壁の切れ目」の意味だけで、座標の出典にはしない
     door: { x: PROPS.entrance.cell.x, y: PROPS.entrance.cell.y - 0.5 },
+    // v48-5b(§74): 入口の開口の幅(マス)。正面の腰壁はこの幅ぶんだけ入口の列で切る(doorCols())。いまは1、v48-6 で2にする。
+    // 絵の幅(PROPS.entrance.widthCells)とは別に持つ——開口を2マスにしても暖簾の絵を作り直すまでは絵の幅が変わらない
+    doorWidth: 1,
     // v48-1: 湧き/退場先 = **門の外の歩道の左端**(row15、門から3マス)。v36-3 は「通りの向こうへ消える」
     // 置き方(右隣の建物の先)だったが、敷地に門ができた以上、客は**門へ向かって歩道を歩いてくる**のが筋。
     // 通りを渡らせないので車道のマスは一度も踏まない。退店も同じ点へ戻る。
@@ -302,6 +305,13 @@ window.ShopView = (function () {
     GEO.soup = workPoint("stockpot");
     GEO.noodle = workPoint("noodle_boiler");
     GEO.ticket = propCell("register");
+  }
+  // v48-5b(§74): 正面の腰壁を切る列。入口の中心 GEO.door.x から幅 GEO.doorWidth ぶん(幅1なら入口のマスだけ、幅2なら入口のマスとその右)。
+  // 切れ目の出典はここ1か所。入口を動かす(v48-6)ときも GEO.door が動けば追従する
+  function doorCols() {
+    var start = Math.floor(GEO.door.x - (GEO.doorWidth - 1) / 2), cols = [];
+    for (var i = 0; i < GEO.doorWidth; i++) cols.push(start + i);
+    return cols;
   }
 
   // v12-1: 各フェーズの尺は「ゲーム内で何分か」で持ち、gm()でwindow.BASE_HOUR_MS(js/utils.js の
@@ -976,6 +986,11 @@ window.ShopView = (function () {
       case "(": case "=": back("sv-face-counter-front"); top("sv-face-counter-top"); break;
       case ")": back("sv-face-counter-front"); side("sv-face-counter-end"); top("sv-face-counter-top"); break;
       // v36-3 町: 建物・塀は箱(正面=back面、右側面=side面、屋根=top)。隣り合うマスの重なりは奥行き順の描画で隠れる
+      // v48-5b(§74): 店の正面の腰壁(1マス=48px、側壁と同じ色)。front=手前左の辺(マスの y+0.5 の辺=row9/row10 の境)の外側の面、
+      // right=手前右の辺(col13 の x+1 の辺)の外側の面。v36-2 で「外側の面はプレイヤーに背を向けて店の中を隠すだけ」と描かなかった辺に、
+      // 客(60px)より低い腰壁として立てる。表の記号ではなく buildScenery が GEO.door を見て入口の列だけ切る
+      case "front": back("sv-face-wall-side"); break;
+      case "right": side("sv-face-wall-side"); break;
       case "N": back("sv-face-bldg"); side("sv-face-bldg-side"); top("sv-face-roof"); break;
       case "F": back("sv-face-fence"); side("sv-face-fence-side"); top("sv-face-fence-top"); break;
       case "B": back("sv-face-far"); side("sv-face-far-side"); top("sv-face-far-roof"); break;
@@ -1172,6 +1187,29 @@ window.ShopView = (function () {
       if (!p.town && WALL_SYMS.indexOf(p.sym) >= 0) piece.style.zIndex = WALL_Z;
       cameraEl.appendChild(piece);
     });
+    // v48-5b(§74): 店の正面の腰壁(手前左の辺 row9 の全列と、手前右の辺 col13 の客席側 rows4〜9)。1マス=48px、側壁と同じ色。
+    // 表の記号は使わない(ROOMS は触らない)——最終行・最終列と GEO.door から起こす。入口の列(doorCols)だけ切る。
+    // z: 壁は「奥の壁」の WALL_Z 固定ではなく、**手前の辺に立つ物**として行から出す。
+    //   zForRow(col+0.5, rows−1.1) = row9 の中心より 0.6 行奥の値(col5 なら 250 相当、col6 で 254、col4 で 233)。
+    //   これで 店内 row8 の客(z 240)は壁の奥、前庭 row10 の客(z 260)は壁の手前、入口の絵(5.5,10.0 → z 255)は隣の壁(col6: 254)より手前
+    //   ——客が敷居をまたぐ前後(§70-3、z 256→248)の前後関係と両立する(v48-5b 調査 1-2 の表)。
+    //   rows−1.0 だと col6 の壁が 255 で入口と同点になり DOM 順に頼ることになるので 0.1 奥にした(実測)。
+    //   手前右の辺は placeAt の既定(zForRow(13.5, row+0.5))で、col12 の物より +10 手前。外に何も無いので衝突しない。
+    var cut = doorCols();
+    for (var fc = 0; fc < room.cols; fc++) {
+      if (cut.indexOf(fc) >= 0) continue;
+      var front = block("sv-piece sv-piece-front", { width: TW + "px", height: CELL + "px" });
+      isoFaces(front, "front", CELL);
+      placeAt(front, fc + 0.5, room.rows - 0.5);
+      front.style.zIndex = zForRow(fc + 0.5, room.rows - 1.1);
+      cameraEl.appendChild(front);
+    }
+    for (var rr = Math.floor(GEO.counterSeatRow); rr < room.rows; rr++) {
+      var right = block("sv-piece sv-piece-right", { width: TW + "px", height: CELL + "px" });
+      isoFaces(right, "right", CELL);
+      placeAt(right, room.cols - 0.5, rr + 0.5);
+      cameraEl.appendChild(right);
+    }
     // v48-2c(§70): 入口(暖簾と格子戸の絵)。幅は1マス(TW)ちょうど、高さは絵の縦横比なり。
     // z は他の立ち物と同じ zForRow(壁の WALL_Z 固定ではない): 店の中にいる客は暖簾の奥、前庭にいる客は暖簾の手前に描かれる。
     // v48-2d(§71): 足元は PROPS.entrance.cell = **店の正面の辺の中点 (5.5, 10.0)**(表の D からは取らない。§70-1 のずれの再発防止)。

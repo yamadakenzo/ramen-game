@@ -168,10 +168,48 @@ window.ShopView = (function () {
     return (p && ROOMS[p.id]) || ROOMS.shotengai;
   }
 
+  // v48-2c(docs/完了/v48-2c_立ち物4点_指示書.md、§70) / v48-2d(§71): **マスの上に立てる本素材(img/stage/)の表。**
+  // stool.webp / bowl.webp(256×256 の正方形に余白込みで置いた絵)と違い、この4枚は**余白なしの縦長**
+  // (周囲 4px の透明だけ。v48-2c 調査 1-1 で bbox.js 実測)。「48px 角に contain」の1本では
+  // 入口が幅 37px・寸胴が高さ 48px にしかならないので、**1枚ごとに大きさの根拠を持つ**:
+  //   heightCells = 見た目の高さ(実体)を何マス(CELL)にするか / widthCells = 見た目の幅(実体)を何マス(TW)にするか
+  // 描画は .shop-stage img の「1em 角に contain」のまま(縦長なのでキャンバスの高さ=1em、幅=1em×W/H)。
+  // font-size(=1em)だけを propFontPx() で計算して要素に書く(CSS には px を書かない。§42)。
+  // W/H = キャンバス、ink = 実体の外接矩形(bbox.js、α>8)。値を変えたら bbox.js で測り直すこと。
+  //
+  // v48-2d(§71): **置き場所もこの表が正**になった(v48-2c は寸胴・茹で麺機の足元を GEO の停止点から「+1行」で導き、
+  // 入口は表 ROOMS の D から取っていた——出典が3つに散っていて、入口の1マスずれ(§70-1)はそこで起きた)。
+  //   cell  = 足元(マスの連続座標。placeAt に渡す点)
+  //   work  = 従業員がその設備で作業するときの立ち位置の、足元からの相対。**GEO.soup / GEO.noodle はここから導く**(直値を持たない)
+  //   flip  = 左右反転(.sv-prop.flip。客の .flip と同じ scaleX(-1)、足元は動かない)
+  //   baseY = 絵の「接地線」がキャンバスの上から何割の高さを横中央で通るか。省略=下端(1.0)。
+  //           アイソメの絵は接地が点ではなく斜めの線で、入口は最下点(右の柱の底)より接地線の中央が 98px 上にある(v48-2d 調査 1-1)。
+  //           propNode() が font-size×(1−baseY) だけ絵を下へずらし、**接地線の中央を足元に置く**。
+  // 丸椅子(席の数ぶん複数、座標は seats[])と丼(俳優に付属)はこの表に入れない(v48-2d 調査 1-4)。
+  var PROPS = {
+    // 入口(暖簾+格子戸)。幅=1マス(TW=64px)ちょうど。高さは縦横比なり(≈83px、1.74マス。側壁 48px より高く奥壁 96px より低い)。
+    // 足元は**店の正面の辺の中点**(row9 と row10 の境、col5)。客の経由点 GEO.door はこの1マス奥(cell.y−0.5)。
+    // 接地線 baseY = 848/946(v48-2d 調査 1-1: 左の柱の底 (30,669) → 右へ傾き 0.53、横中央 x=365 で y≈848)
+    entrance:      { W: 731, H: 946, ink: { w: 723, h: 942 }, widthCells: 1, cell: { x: 5.5, y: 10.0 }, baseY: 848 / 946 },
+    // 寸胴・茹で麺機。奥に立つ従業員(背丈 60px、1行奥=画面上 16px 上)の胸の高さ=足元から約 52px。2つ同じ値。
+    // 従業員は絵の**奥(−y、背中側)**の1行に立って作業する(work.dy = −1。v48-2c と同じ型)。
+    stockpot:      { W: 594, H: 886, ink: { w: 586, h: 882 }, heightCells: 1.05, cell: { x: 8.5, y: 2.5 }, work: { dx: 0, dy: -1 } },
+    // 茹で麺機。v48-2d: 左奥(col4)へ動かし、**左右反転して正面(引き戸とつまみ)を +y=カウンター側(画面左下)へ向ける**。
+    // 残骸を削った後の寸法(§70)。反転しても 2:1 のアイソメは崩れない(v48-2d 調査 1-2)
+    noodle_boiler: { W: 757, H: 835, ink: { w: 749, h: 827 }, heightCells: 1.05, cell: { x: 4.5, y: 2.5 }, work: { dx: 0, dy: -1 }, flip: true },
+    // レジ(台つき)。カウンターの天板(0.6マス=28.8px)より高く、丸椅子(見た目 38px)より大きい。
+    // 足元は入口の内側(A帯)の左端。券売機・POSレジの「1枠」でもある(GEO.ticket はここから導く)
+    register:      { W: 561, H: 763, ink: { w: 553, h: 755 }, heightCells: 0.95, cell: { x: 1.5, y: 8.5 } }
+  };
+  function workPoint(p) { return { x: p.cell.x + p.work.dx, y: p.cell.y + p.work.dy }; }
+
   // v35: 間取りの名前付きの点。単位はマスの連続座標(マス(col,row)の中心 = (col+0.5, row+0.5))。
   // 部屋の表(ROOMS)に載らない可動物・小物の置き場所はここが唯一の出典。
+  // v48-2d(§71): 立ち物(PROPS)に結びつく点は**PROPS から導く**(door / soup / noodle / ticket)。直値を2か所に持たない。
   var GEO = {
-    door: { x: 5.5, y: 9.5 },   // v36-2: 入口(表のD=マス(5,9))の中心。店の正面(手前)
+    // v36-2: 入口の中心=マス(5,9)。店の正面(手前)。v48-2d: 入口の絵は PROPS.entrance.cell(正面の辺の中点 (5.5,10.0))に立ち、
+    // 客の経由点はその1マス奥(=マスの中心)。表 ROOMS の D は「壁の切れ目」の意味だけで、座標の出典にはしない
+    door: { x: PROPS.entrance.cell.x, y: PROPS.entrance.cell.y - 0.5 },
     // v48-1: 湧き/退場先 = **門の外の歩道の左端**(row15、門から3マス)。v36-3 は「通りの向こうへ消える」
     // 置き方(右隣の建物の先)だったが、敷地に門ができた以上、客は**門へ向かって歩道を歩いてくる**のが筋。
     // 通りを渡らせないので車道のマスは一度も踏まない。退店も同じ点へ戻る。
@@ -189,11 +227,11 @@ window.ShopView = (function () {
     yardRow: 10.5,           // v48-1: 前庭の道のうち**歩く行**(row10。入口の真ん前。行列もこの行に並ぶ)
     walkRow: 15.5,           // v48-1: 門の外の歩道(row15)。**店の前ではなく敷地の外**になった(旧 10.5=店の前)
     kitchenHome: { x: 7.5, y: 2.5 }, // 厨房担当の定位置の基準(K帯。複数人は左右にspread)
-    soup: { x: 8.5, y: 1.5 },        // 寸胴/鍋(K)
-    noodle: { x: 6.5, y: 1.5 },      // 茹で麺器(K。無い場合の代役も同じ位置)
-    plate: { x: 6.5, y: 2.5 },       // 盛り付け台=受け渡し口の立ち位置(K。カウンターのすぐ奥)
+    soup: workPoint(PROPS.stockpot),        // 寸胴の停止点(K)。v48-2d: 絵の1行奥 = (8.5, 1.5)(v48-2c までの直値と同じ)
+    noodle: workPoint(PROPS.noodle_boiler), // 茹で麺器の停止点(K)。v48-2d: 絵の1行奥 = (4.5, 1.5)(旧 6.5,1.5)。購入設備の絵もここ
+    plate: { x: 6.5, y: 2.5 },       // 盛り付け台=受け渡し口の立ち位置(K。カウンターのすぐ奥。絵は無い)
     hallHome: { x: 5.5, y: 5.5 },    // ホール担当の定位置(A。カウンターの手前)
-    ticket: { x: 1.5, y: 8.5 },      // v36-2: 券売機(A。入口のある手前の通路の左端)
+    ticket: PROPS.register.cell,     // v36-2: 券売機(A。入口のある手前の通路の左端)。v48-2c: レジの1枠 = PROPS.register の足元
     counterSeatRow: 4.5,             // 丸椅子の行(表のS行)の中心。席はcol1から1マスに1脚
     // テーブル卓(2マス幅)の接地中心(T帯)。drawMaxTable=4席=2卓ぶんだけ持つ
     tableAnchors: [{ x: 3.0, y: 6.5 }, { x: 7.0, y: 6.5 }],
@@ -697,34 +735,24 @@ window.ShopView = (function () {
     return id ? { img: "stage/" + id, emoji: emojiFallback, name: "" } : { emoji: emojiFallback, name: "" };
   }
 
-  // v48-2c(docs/指示書/v48-2c_立ち物4点_指示書.md、§70): マスの上に立てる本素材(img/stage/)。
-  // stool.webp / bowl.webp(256×256 の正方形に余白込みで置いた絵)と違い、この4枚は**余白なしの縦長**
-  // (周囲 4px の透明だけ。v48-2c 調査 1-1 で bbox.js 実測)。「48px 角に contain」の1本では
-  // 入口が幅 37px・寸胴が高さ 48px にしかならないので、**1枚ごとに大きさの根拠を持つ**:
-  //   heightCells = 見た目の高さ(実体)を何マス(CELL)にするか / widthCells = 見た目の幅(実体)を何マス(TW)にするか
-  // 描画は .shop-stage img の「1em 角に contain」のまま(縦長なのでキャンバスの高さ=1em、幅=1em×W/H)。
-  // font-size(=1em)だけをここで計算して要素に書く(CSS には px を書かない。§42)。
-  // W/H = キャンバス、ink = 実体の外接矩形(bbox.js、α>8)。値を変えたら bbox.js で測り直すこと。
-  var PROPS = {
-    // 入口(暖簾+格子戸)。幅=1マス(TW=64px)ちょうど。高さは縦横比なり(≈83px、1.74マス。側壁 48px より高く奥壁 96px より低い)
-    entrance:      { W: 731, H: 946, ink: { w: 723, h: 942 }, widthCells: 1 },
-    // 寸胴・茹で麺機。奥に立つ従業員(背丈 60px、1行奥=画面上 16px 上)の胸の高さ=足元から約 52px。2つ同じ値
-    stockpot:      { W: 594, H: 886, ink: { w: 586, h: 882 }, heightCells: 1.05 },
-    noodle_boiler: { W: 757, H: 835, ink: { w: 749, h: 827 }, heightCells: 1.05 }, // 残骸を削った後の寸法(§70)
-    // レジ(台つき)。カウンターの天板(0.6マス=28.8px)より高く、丸椅子(見た目 38px)より大きい
-    register:      { W: 561, H: 763, ink: { w: 553, h: 755 }, heightCells: 0.95 }
-  };
+  // 立ち物の表 PROPS はファイル冒頭(GEO の直前。GEO が停止点を表から導くため)。
   function propFontPx(p) {
     // 1em 角に contain → キャンバス高 = 1em、実体の高さ = 1em × ink.h/H、実体の幅 = 1em × ink.w/H
     if (p.widthCells) return p.widthCells * TW * p.H / p.ink.w;
     return p.heightCells * CELL * p.H / p.ink.h;
   }
-  // 立ち物の要素(.sv-prop: 足元アンカー、img は display:block で要素の高さ=絵の高さ)。placeAt で置く。
+  // 立ち物の要素(.sv-prop: 足元アンカー、img は display:block で要素の高さ=絵の高さ)。placeAt(el, cell.x, cell.y) で置く。
+  // v48-2d(§71): flip は .flip クラス(CSS が scaleX(-1) を足元アンカーの後ろに掛ける。客と同じ)。
+  // baseY は CSS 変数 --sv-base(px)に書き、CSS の translate が「下端」ではなく「接地線」を足元に合わせる。
   function propNode(id, emojiFallback) {
-    var el = block("sv-prop sv-prop-" + id, {}, [AI.node(stageDef(id, emojiFallback))]);
-    el.style.fontSize = propFontPx(PROPS[id]) + "px";
+    var p = PROPS[id];
+    var el = block("sv-prop sv-prop-" + id + (p.flip ? " flip" : ""), {}, [AI.node(stageDef(id, emojiFallback))]);
+    var fontPx = propFontPx(p);
+    el.style.fontSize = fontPx + "px";
+    if (p.baseY != null) el.style.setProperty("--sv-base", (fontPx * (1 - p.baseY)) + "px");
     return el;
   }
+  function placeProp(id, emojiFallback) { return placeAt(propNode(id, emojiFallback), PROPS[id].cell.x, PROPS[id].cell.y); }
 
   function block(cls, style, children) {
     return h("div", { className: cls, style: style }, children || []);
@@ -891,8 +919,9 @@ window.ShopView = (function () {
     //   カウンター 0.6マス=28.8px → 1行奥の人物(60px)の足元12.8pxだけ隠す(2行奥は隠さない)。
     //   1.2マスのままだと57.6px → 1行奥の人物を41.6px隠して頭と丼だけになる(v36-1で実測)。
     //   奥壁 2マス=96px → 6行ぶんだが奥壁の向こうには何も無い。側壁 1マス=48px(最奥のzなので何も隠さない)。
-    // v48-2c: 入口 D は部品(色板)ではなく立ち物の絵になった(PROPS.entrance)。表の記号 D は残し、
-    // 床(FLOOR_CLS)と立ち物の置き場所の出典としてだけ使う。
+    // v48-2c: 入口 D は部品(色板)ではなく立ち物の絵になった(PROPS.entrance)。
+    // v48-2d(§71): 表の記号 D は「壁の切れ目」の意味だけ(床は FLOOR_CLS で A と同じ木目)。**描画の座標源にはしない**
+    // ——入口の絵は PROPS.entrance.cell、客の経由点は GEO.door(表から導く)。
     var PIECE_CLS = {
       "L": ["wall-corner", 2], "#": ["wall-mid", 2], "R": ["wall-corner", 2],
       "l": ["wall-side", 1],
@@ -931,12 +960,10 @@ window.ShopView = (function () {
     // v36-1: 各部品の根は placeAt(マスの中心に足元)で置き、面(壁の立面・カウンターの天板と前板)は
     // 根の子として isoFaces() が菱形の辺から作る。斜めでは隣り合う壁の面は横に並ぶだけで重ならない。
     var pieces = [];
-    var doors = []; // v48-2c: 表の D のマス(入口の絵を置く足元)
     for (var row = 0; row < room.rows; row++) {
       for (var col = 0; col < room.cols; col++) {
         var sym = room.map[row].charAt(col);
         if (PIECE_CLS[sym]) pieces.push({ sym: sym, col: col, row: row, cls: PIECE_CLS[sym] });
-        if (sym === "D") doors.push({ col: col, row: row }); // v48-2c: 入口は立ち物(下で置く)
       }
     }
     // v36-3: 町(ROOMS.town)。地面は店の床と同じ菱形、建物・塀は店の什器と同じ面の作り(isoFaces)。
@@ -971,12 +998,12 @@ window.ShopView = (function () {
       if (!p.town && WALL_SYMS.indexOf(p.sym) >= 0) piece.style.zIndex = WALL_Z;
       cameraEl.appendChild(piece);
     });
-    // v48-2c(§70): 入口(暖簾と格子戸の絵)。表の D のマスに足元を置く立ち物。幅は1マス(TW)ちょうど、高さは絵の縦横比なり。
-    // z は他の立ち物と同じ zForRow(壁の WALL_Z 固定ではない): 店の中(row8 以浅)にいる客は暖簾の奥、
-    // 前庭(row10)にいる客は暖簾の手前に描かれる。同じマス(row9)では actorLayer が後なので客が手前。
-    doors.forEach(function (d) {
-      cameraEl.appendChild(placeAt(propNode("entrance", "🚪"), d.col + 0.5, d.row + 0.5));
-    });
+    // v48-2c(§70): 入口(暖簾と格子戸の絵)。幅は1マス(TW)ちょうど、高さは絵の縦横比なり。
+    // z は他の立ち物と同じ zForRow(壁の WALL_Z 固定ではない): 店の中にいる客は暖簾の奥、前庭にいる客は暖簾の手前に描かれる。
+    // v48-2d(§71): 足元は PROPS.entrance.cell = **店の正面の辺の中点 (5.5, 10.0)**(表の D からは取らない。§70-1 のずれの再発防止)。
+    // 絵の接地線(baseY)をこの点に合わせるので、暖簾の柱の底が床と歩道の境目の線にぴったり乗る。
+    // z = zForRow(5.5, 10.0) = 255: 客は敷居(y=10.0)をまたいだ瞬間に暖簾の奥へ回る(前庭 y=10.5 は z 260 で手前)。
+    cameraEl.appendChild(placeProp("entrance", "🚪"));
 
     // 電灯・ダクト・壁の案内・店名看板は奥壁の面(row0の壁が上へ伸びた部分=部屋の外の負のrow)に
     // 掛ける。yが負のままzForRow()を通すと壁(row0)より奥のzになってしまうため、
@@ -998,12 +1025,12 @@ window.ShopView = (function () {
 
     // 厨房設備(K帯の奥の壁沿い)。
     // v48-2c(§70): 常設の寸胴(v35〜v48-2b は絵文字🍥)と茹で麺機(v48-2b まで常設の絵は無かった)を本素材にした。
-    // 足元は従業員の停止点(GEO.soup / GEO.noodle)の1行手前——従業員は設備の奥に立って作業して見える
-    // (🍥のときと同じ置き方。停止点そのものに置くと従業員と同じマスになり、従業員が設備に重なる)。
+    // 従業員は設備の**奥(背中側)**の1行に立って作業して見える(🍥のときと同じ置き方。同じマスに立たせると従業員が設備に重なる)。
     // 高さは2つとも同じ(PROPS の heightCells): 上端が奥に立つ従業員の胸の高さで、顔を隠さない。
-    // 盛り付け台 GEO.plate=(6.5,2.5) は停止点だけで描画物は無い(丼の山は台の上 (6.5,3.1))ので、茹で麺機はそこに置く。
-    cameraEl.appendChild(placeAt(propNode("stockpot", "🍥"), GEO.soup.x, GEO.soup.y + 1));
-    cameraEl.appendChild(placeAt(propNode("noodle_boiler", "♨️"), GEO.noodle.x, GEO.noodle.y + 1));
+    // v48-2d(§71): 足元は PROPS の cell、停止点 GEO.soup / GEO.noodle は表の work から導く(この行は表を写すだけ)。
+    // 茹で麺機は左奥 (4.5, 2.5) に移し、左右反転して正面をカウンター側(+y、画面左下)へ向けた。
+    cameraEl.appendChild(placeProp("stockpot", "🍥"));
+    cameraEl.appendChild(placeProp("noodle_boiler", "♨️"));
     // 既製品(big_pot/noodle_boiler/extra_boiler)は v31 の img/equipment/(256×256)を
     // v35 の1マス幅(48px)の規約のまま置く(v48-2c でも変えない。指示書 §2-2)。
     var kit = [];

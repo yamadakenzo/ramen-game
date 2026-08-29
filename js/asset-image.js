@@ -12,9 +12,9 @@
 // どちらも「呼び出し元が持つ .emoji-font 要素の子として置く」前提の1文字ぶんのサイズで表示される
 // (img側の実寸はcss/style.cssの .emoji-font img { width:1em; height:1em; ... } が決める)。
 window.AssetImage = (function () {
-  // v14で決めたキャッシュ対策(?v=20260829000555)と同じ形。tools/deploy-pages.shが公開時に
+  // v14で決めたキャッシュ対策(?v=20260829015206)と同じ形。tools/deploy-pages.shが公開時に
   // 実際の日時へ置換する(このファイル自体には常にプレースホルダのまま残る)。
-  var BUILD_V = "20260829000555";
+  var BUILD_V = "20260829015206";
 
   function node(def) {
     if (!def) return document.createTextNode("");

@@ -205,12 +205,21 @@ window.ShopView = (function () {
     noodle_boiler: { W: 757, H: 835, ink: { w: 749, h: 827 }, heightCells: 1.05, cell: { x: 4.5, y: 2.5 }, work: { dx: 0, dy: -1 }, flip: true },
     // レジ(台つき)。カウンターの天板(0.6マス=28.8px)より高く、丸椅子(見た目 38px)より大きい。
     // 足元は入口の内側(A帯)の左端。券売機・POSレジの「1枠」でもある(GEO.ticket はここから導く)
-    register:      { W: 561, H: 763, ink: { w: 553, h: 755 }, heightCells: 0.95, cell: { x: 1.5, y: 8.5 } }
+    register:      { W: 561, H: 763, ink: { w: 553, h: 755 }, heightCells: 0.95, cell: { x: 1.5, y: 8.5 } },
+    // v48-4d(docs/指示書/v48-4d_卓の配置_指示書.md、§76): テーブル卓。絵は設備の img/equipment/table_seats.webp(卓+丸椅子2脚の代表表示、
+    // .sv-table-img 96px)のままで、ここには**置き場所だけ**持つ(W/H/ink/heightCells は無い)。cell はアンカー = 2マスの境目の中心
+    // (x が整数)で、席はその左右のマス (x±0.5, y+0.2)。既定は row7(v48-4a まで GEO.tableAnchors の直値 row6 で、丸椅子の背中に寄りすぎた)。
+    // 描く数は設備(tableSeats → drawMaxTable)で決まり、表は「既定と上書き」だけ。
+    table_0: { table: true, cell: { x: 3.0, y: 7.5 } },
+    table_1: { table: true, cell: { x: 7.0, y: 7.5 } }
   };
+  var TABLE_IDS = ["table_0", "table_1"];
+  // 卓が占める2マス(左右)の中心。アンカー x はマスの境目なので、左マスは (x−0.5)、右マスは (x+0.5)
+  function tableCells(anchor) { return [{ x: anchor.x - 0.5, y: anchor.y }, { x: anchor.x + 0.5, y: anchor.y }]; }
   // v48-4a(docs/完了/v48-4a_配置モード_指示書.md、§72): 置き場所は state.props[id] = {x, y} が上書きし、無ければ表の既定 cell。
   // 読むのは propCell() の1か所だけ——描画(placeProp)も停止点(refreshGeo)も「置けるか」(canPlace)も同じ答えを見る。
   // 旧セーブに props は無い(SAVE_VERSION は 25 のまま。resultYear と同じ「上げずに既定で補う」作法。§65)。
-  var MOVABLE = ["stockpot", "noodle_boiler", "register"]; // 4a で動かせる物。入口は 4b、丸椅子は 4c(v48-4a 調査 1-6)
+  var MOVABLE = ["stockpot", "noodle_boiler", "register", "table_0", "table_1"]; // 4a で動かせる物+4d の卓。入口は v48-6、丸椅子は 4c
   function propCell(id) {
     var o = state && state.props && state.props[id];
     return (o && isFinite(o.x) && isFinite(o.y)) ? { x: o.x, y: o.y } : PROPS[id].cell;
@@ -264,8 +273,7 @@ window.ShopView = (function () {
     hallHome: { x: 5.5, y: 5.5 },    // ホール担当の定位置(A。カウンターの手前)
     ticket: propCell("register"),    // v36-2: 券売機(A。入口のある手前の通路の左端)。v48-2c: レジの1枠 = register の足元
     counterSeatRow: 4.5,             // 丸椅子の行(表のS行)の中心。席はcol1から1マスに1脚
-    // テーブル卓(2マス幅)の接地中心(T帯)。drawMaxTable=4席=2卓ぶんだけ持つ
-    tableAnchors: [{ x: 3.0, y: 6.5 }, { x: 7.0, y: 6.5 }],
+    // テーブル卓の接地中心は v48-4d で PROPS.table_0 / table_1 へ移した(直値は持たない。propCell("table_N") で読む)。drawMaxTable=4席=2卓ぶん
     // v48-1: 行列は前庭の道(row10)に、入口の前から**門の方向(−x)へ**並べる。GEO.queueColsで折り返す。
     // **v36-2 とは向きが逆。** 道の先が右(+x)ではなく左(門)になったので、行列も門へ向かって伸びる
     // ——並んでいる客の列がそのまま「門から入ってきた順」に見える。折り返しの規則は変えていない。
@@ -590,16 +598,28 @@ window.ShopView = (function () {
     if (!p || !cell) return false;
     var sym = cellSym(cell.x, cell.y);
     if (!sym) return false;
-    // 他の立ち物の足元と停止点は空けておく(入口は動かないが占有はする)
+    // 他の立ち物の足元と停止点は空けておく(入口は動かないが占有はする)。v48-4d: 描かれている卓の2マスも
     var taken = [];
     MOVABLE.concat(["entrance"]).forEach(function (o) {
       if (o === id) return;
       var c = propCell(o);
+      if (PROPS[o].table) {
+        if (TABLE_IDS.indexOf(o) < tablesDrawn) tableCells(c).forEach(function (tc) { taken.push(tc); });
+        return;
+      }
       taken.push(c);
       var ow = workFor(o, c); // v48-4a-2: 相手の停止点も置いた行なりの向きで
       if (ow) taken.push(ow);
     });
     var isTaken = function (c) { return taken.some(function (t) { return sameCell(t, c); }); };
+    if (p.table) {
+      // v48-4d(§76): 卓(2×1 マス)。cell は**アンカー**(x はマスの境目)。左右のマスとも卓の帯 T で、入口の列(lane)に掛からず、
+      // 他の卓・レジ・立ち物と重ならない。row5(通路)・row8(卓の客の横移動)・row9(入口)は T でないので自動的に外れる
+      var tc2 = tableCells(cell);
+      return tc2.every(function (c) {
+        return cellSym(c.x, c.y) === "T" && Math.floor(c.x) !== Math.floor(GEO.lane.x) && !isTaken(c);
+      });
+    }
     if (isTaken(cell)) return false;
     if (p.work) {
       // 厨房の設備(寸胴・茹で麺機): 足元も停止点も厨房の床 K。停止点が壁や他の物・他の物の停止点に入る置き方は弾く。
@@ -618,39 +638,52 @@ window.ShopView = (function () {
       var col = Math.floor(cell.x), row = Math.floor(cell.y);
       if (col === Math.floor(GEO.lane.x)) return false;
       if (row === Math.floor(GEO.aisleRow)) return false;
-      var ax = GEO.tableAnchors.map(function (a) { return a.x; });
+      // v48-4d: frontRow の除外範囲は卓の**既定**の列(cols 2〜7)のまま(卓を動かしても広げない。謙蔵さん決定)。
+      // 卓の実位置の2マスは上の taken に入っている(描かれている卓だけ)
+      var ax = TABLE_IDS.map(function (t) { return PROPS[t].cell.x; });
       if (row === Math.floor(GEO.frontRow) && col >= Math.min.apply(null, ax) - 1 && col < Math.max.apply(null, ax) + 1) return false;
       if (sameCell(cell, GEO.door)) return false;
-      var tables = Math.ceil(seatCounts().table / 2);
-      for (var t = 0; t < tables; t++) {
-        var a = GEO.tableAnchors[t];
-        if (a && sym === "T" && Math.abs(cell.x - a.x) <= 1) return false; // 卓は2マス幅(アンカー±0.5 のマス)
-      }
       return true;
     }
     return false;
   }
-  function placeableCells(id) {
-    var room = roomDef(), cells = [];
+  // 置ける先の一覧 [{cell, to}]: cell = 光らせる・タップで当てるマス、to = 確定時に state.props へ書く値。
+  // 立ち物は cell=to。卓(v48-4d)は「左マスを起点にしたアンカー」ごとに左右2マスを光らせ、どちらをタップしても同じアンカーに解決する
+  function placeableTargets(id) {
+    var room = roomDef(), out = [];
     for (var row = 0; row < room.rows; row++) for (var col = 0; col < room.cols; col++) {
-      var c = { x: col + 0.5, y: row + 0.5 };
-      if (canPlace(id, c)) cells.push(c);
+      if (PROPS[id].table) {
+        var anchor = { x: col + 1.0, y: row + 0.5 }; // 左マス (col,row) から
+        if (canPlace(id, anchor)) tableCells(anchor).forEach(function (c) { out.push({ cell: c, to: anchor }); });
+      } else {
+        var c = { x: col + 0.5, y: row + 0.5 };
+        if (canPlace(id, c)) out.push({ cell: c, to: c });
+      }
     }
-    return cells;
+    return out;
   }
   function startPlacing(id) {
     clearPlacing();
-    var cells = placeableCells(id);
-    // 光るマス: 床と同じ菱形(clip-path)を床の上・壁(WALL_Z 90)の下に敷く。タップは通す(マスは座標から特定する)
-    var marks = cells.map(function (c) {
+    var targets = placeableTargets(id);
+    // 光るマス: 床と同じ菱形(clip-path)を世界の物より上(z 900)に敷く。タップは通す(マスは座標から特定する)。
+    // 卓は隣り合うアンカーでマスを共有する(同じマスが一方の右マスで他方の左マス)ので、光らせるのは1マス1枚
+    var marks = [], seen = {};
+    targets.forEach(function (t) {
+      var key = t.cell.x + "," + t.cell.y;
+      if (seen[key]) return;
+      seen[key] = true;
       var m = block("sv-place-cell", {
-        left: toPxX(c.x, c.y) + "px", top: toPxY(c.x, c.y) + "px", width: (TW + 2) + "px", height: (TH + 1) + "px"
+        left: toPxX(t.cell.x, t.cell.y) + "px", top: toPxY(t.cell.x, t.cell.y) + "px", width: (TW + 2) + "px", height: (TH + 1) + "px"
       });
       cameraEl.appendChild(m);
-      return m;
+      marks.push(m);
     });
     propEls[id].classList.add("selected");
-    placing = { id: id, cells: cells, marks: marks };
+    placing = { id: id, targets: targets, marks: marks };
+  }
+  // v48-4d: 卓は2席とも空いているときだけ動かせる(客が向かっている途中も occupant が立っているので含む。4c と同じ規則)
+  function tableFree(id) {
+    return seats.every(function (s) { return s.table !== id || !s.occupant; });
   }
   function clearPlacing() {
     if (!placing) return;
@@ -666,6 +699,8 @@ window.ShopView = (function () {
     var c = propCell(id);
     if (propEls[id]) placeAt(propEls[id], c.x, c.y);
     anchored.forEach(function (a) { var p = a.at(); placeAt(a.el, p.x, p.y); });
+    // v48-4d: 卓なら、その卓の2席の座標を書き換える(seats[] は作り直さない——a.seat / order.seat の参照が切れないように)
+    if (PROPS[id].table) seats.forEach(function (s) { if (s.table === id) { s.x = c.x + s.side; s.y = c.y + 0.2; } });
     if (window.GameState && window.GameState.save) window.GameState.save();
   }
   // タップ点(舞台内 px)→マス。カメラ層の translate と scale を戻してから fromPx(一時停止の復帰と同じ逆変換)
@@ -678,12 +713,21 @@ window.ShopView = (function () {
     var id = (hit && hit.dataset) ? hit.dataset.prop : null;
     if (placing) {
       var cell = tapCell(sx, sy);
-      var ok = placing.cells.some(function (c) { return sameCell(c, cell); });
-      if (ok) moveProp(placing.id, cell);
+      // 当たった候補のうち、卓なら「タップしたマスが左マス」の候補を優先(v48-4d 調査 1-3: 曖昧なら左優先)。無ければ右マスの候補
+      var hitT = null;
+      placing.targets.forEach(function (t) {
+        if (!sameCell(t.cell, cell)) return;
+        if (!hitT || (t.to.x - 0.5 === t.cell.x && hitT.to.x - 0.5 !== hitT.cell.x)) hitT = t;
+      });
+      if (hitT) moveProp(placing.id, hitT.to);
       clearPlacing(); // 光っていない場所・別の立ち物・舞台の外は解除
       return true;
     }
-    if (id && MOVABLE.indexOf(id) >= 0 && propEls[id]) { startPlacing(id); return true; }
+    if (id && MOVABLE.indexOf(id) >= 0 && propEls[id]) {
+      if (PROPS[id].table && !tableFree(id)) return true; // v48-4d: 座っている(向かっている)客がいる卓は反応しない
+      startPlacing(id);
+      return true;
+    }
     return false;
   }
   function bindGestures() {
@@ -934,6 +978,7 @@ window.ShopView = (function () {
   // v48-4a(§72): 立ち物の要素は id で持つ(propEls)。動かすときは ensureBuilt で組み直さず(客・従業員・タイマーが消える)、
   // この要素を placeAt し直す。data-prop はタップで「何を触ったか」を知るための印(onPointerDown が読む)。
   var propEls = {};
+  var tablesDrawn = 0; // v48-4d: いま描いている卓の数(設備 tableSeats から。canPlace が占有に数えるのは描かれている卓だけ)
   // 停止点・枠に付いて動く要素(購入設備 big_pot/noodle_boiler/extra_boiler)。at() が今の置き場所を返す
   var anchored = [];
   function placeProp(id, emojiFallback) {
@@ -1326,18 +1371,22 @@ window.ShopView = (function () {
 
     // テーブル席。v32: v31のimg/equipment/table_seats.webp(卓+丸椅子2脚が1枚に描かれた絵)を
     // 1卓ぶんの代表表示として使う。1枚=2席として数える。
-    // v35: 卓は2マス幅(96px)としてT帯の固定アンカー(GEO.tableAnchors)に置く。
+    // v35: 卓は2マス幅(96px)としてT帯のアンカーに置く(v48-4d までは GEO.tableAnchors の直値、いまは PROPS.table_N)。
+    // v48-4d(§76): 位置は PROPS.table_N(state.props で上書き可)。要素は propEls に持ち、席には table/side を印して moveProp が書き換える
+    tablesDrawn = counts.table > 0 ? Math.ceil(counts.table / 2) : 0;
     if (counts.table > 0) {
-      var tableCount = Math.ceil(counts.table / 2);
-      var tPts = GEO.tableAnchors.slice(0, tableCount);
       var tableDef = U.findById(EQUIP, "table_seats");
       var seatIdx = 0;
-      tPts.forEach(function (pt) {
+      TABLE_IDS.slice(0, tablesDrawn).forEach(function (tid) {
+        var pt = propCell(tid);
         var tEl = block("sv-table-img", {}, [AI.node(tableDef)]);
         placeAt(tEl, pt.x, pt.y);
+        tEl.dataset.prop = tid;
+        propEls[tid] = tEl;
         cameraEl.appendChild(tEl);
         for (var k = 0; k < 2 && seatIdx < counts.table; k++, seatIdx++) {
-          seats.push({ x: pt.x + (k === 0 ? -0.5 : 0.5), y: pt.y + 0.2, kind: "table", occupant: null });
+          var side = (k === 0 ? -0.5 : 0.5);
+          seats.push({ x: pt.x + side, y: pt.y + 0.2, kind: "table", occupant: null, table: tid, side: side });
         }
       });
     }

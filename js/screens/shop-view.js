@@ -84,22 +84,27 @@ window.ShopView = (function () {
   // カウンターの端の位置も記号で書き切る(式で求めない——表を見るだけで目視検証できるように)。
   var ROOMS = {
     shotengai: {
-      cols: 12, rows: 10,
+      cols: 14, rows: 10, // v48-5(§73): 右へ2列広げて14列(cols 0〜13)。右側壁 r は col13
       // v36-2: 入口Dを手前(row9の正面)へ移し、店の外の道(P、rows10-11)を表に足した。
       // 道を表の一部として持つ理由: 入口・湧き場所・行列の置き場がすべて同じマス座標で書け、
       // 変換関数1つで済む(§43-1)。部屋の外の別座標系を持つと、出典が2つになる。
-      // 手前側の2辺(右=col11の外面、手前=row末尾)の壁は描かない(§1、PIECE_CLSの注記)。
+      // 手前側の2辺(右=col13の外面、手前=row末尾)の壁は描かない(§1、PIECE_CLSの注記)。
+      // v48-5(docs/指示書/v48-5_店の拡幅と厨房の隙間_指示書.md、§73): **店を右へ2列広げて14列にした。** 広がった2列のうち
+      // row3(カウンターの行)は台を延ばさず床 P(厨房の市松を続ける)にして、従業員が厨房とホールを行き来できる隙間にする。
+      // P は FLOOR_CLS で床を敷くだけで、部品(PIECE_CLS)にも機器の置き場(canPlace は K だけ)にも入れない——通路を塞げないように。
+      // 席は10のまま(counterSlots)。GEO・PROPS の既定・state.props は絶対座標で col0 側が動かないので不変。
+      // 隙間を通る動作(配膳の経路)は別版。いまはカウンターをすり抜ける直線移動のまま(v48-5 調査 1-2)。
       map: [
-        "L##########R", // row0 奥壁
-        "lKKKKKKKKKKr", // row1 厨房
-        "lKKKKKKKKKKr", // row2 厨房
-        "l(========)r", // row3 カウンター(左端+中間×8+右端)。両端が側壁に接して1本の台になる
-        "lSSSSSSSSSSr", // row4 カウンター席(内側10マス=商店街のcounterSlots=10と一致)
-        "lAAAAAAAAAAr", // row5 通路
-        "lTTTTTTTTTTr", // row6 テーブル席
-        "lTTTTTTTTTTr", // row7 テーブル席
-        "lAAAAAAAAAAr", // row8 通路
-        "lAAAADAAAAAr"  // row9 通路。入口D(暖簾)は正面(row9とrow10の境)のcol5
+        "L############R", // row0 奥壁
+        "lKKKKKKKKKKKKr", // row1 厨房(cols1〜12。v48-5 で右へ2列)
+        "lKKKKKKKKKKKKr", // row2 厨房
+        "l(========)PPr", // row3 カウンター(左端 col1+中間×8+右端 col10)。v48-5: 右端 ) の先の cols11〜12 は隙間 P(床のまま。厨房⇄ホールの通り道)、r は col13
+        "lSSSSSSSSSSAAr", // row4 カウンター席(cols1〜10=商店街のcounterSlots=10と一致)。v48-5: cols11〜12 は通路 A(隙間から下りる列。枠に見える床を作らない)
+        "lAAAAAAAAAAAAr", // row5 通路
+        "lTTTTTTTTTTAAr", // row6 テーブル席(卓の帯は cols1〜10 のまま。v48-5: 右2列は通路)
+        "lTTTTTTTTTTAAr", // row7 テーブル席
+        "lAAAAAAAAAAAAr", // row8 通路
+        "lAAAADAAAAAAAr"  // row9 通路。入口D(暖簾)は正面(row9とrow10の境)のcol5
         // v48-2c(§70): row9 の D は v36-2 から index 6(col6)に書かれていて、GEO.door(5.5)・客の経路(lane 5.5)・
         // 行列の起点(x−y=−4)より1マス右に入口が描かれていた(v48-2c 調査 1-2 で実測)。col5 へ直した。
         // 画面の上では入口の絵が1マス左へ動くだけで、経路・行列・GEO は1文字も変えていない。
@@ -134,16 +139,16 @@ window.ShopView = (function () {
           "EEFTTTTTTTTTTTTTTTTTTTTTTFEE", // row -3  v48-2 はここに小屋2棟(各4×4+通路1)
           "EEFTTTTTTTTTTTTTTTTTTTTTTFEE", // row -2
           "EEFTTTTTTTTTTTTTTTTTTTTTTFEE", // row -1
-          "EEFTTTTT............TTTTTFEE", // row  0  '.' が店(cols0-11 rows0-9)。左右に敷地が5列ずつ
-          "EEFTTTTT............TTTTTFEE", // row  1
-          "EEFTTTTT............TTTTTFEE", // row  2
-          "EEFTTTTT............TTTTTFEE", // row  3
-          "EEFTTTTT............TTTTTFEE", // row  4
-          "EEFTTTTT............TTTTTFEE", // row  5
-          "EEFTTTTT............TTTTTFEE", // row  6
-          "EEFTTTTT............TTTTTFEE", // row  7
-          "EEFTTTTT............TTTTTFEE", // row  8
-          "EEFTTTTT............TTTTTFEE", // row  9  店の最終行。入口 D は店の表の (5,9)
+          "EEFTTTTT..............TTTFEE", // row  0  '.' が店(cols0-11 rows0-9)。左右に敷地が5列ずつ
+          "EEFTTTTT..............TTTFEE", // row  1
+          "EEFTTTTT..............TTTFEE", // row  2
+          "EEFTTTTT..............TTTFEE", // row  3
+          "EEFTTTTT..............TTTFEE", // row  4
+          "EEFTTTTT..............TTTFEE", // row  5
+          "EEFTTTTT..............TTTFEE", // row  6
+          "EEFTTTTT..............TTTFEE", // row  7
+          "EEFTTTTT..............TTTFEE", // row  8
+          "EEFTTTTT..............TTTFEE", // row  9  店の最終行。入口 D は店の表の (5,9)
           "EEFSSSSSSSSSSSSSSSSSTTTTTFEE", // row 10  前庭の道(入口の前。行列が並ぶ行)
           "EEFSSSSSSSSSSSSSSSSSTTTTTFEE", // row 11  前庭の道(歩く行)
           "EEFSSGGGTTTTTTTTTTTTTTTGGFEE", // row 12  道が門へ折れる / 左手前と右手前は草地
@@ -210,7 +215,7 @@ window.ShopView = (function () {
     var o = state && state.props && state.props[id];
     return (o && isFinite(o.x) && isFinite(o.y)) ? { x: o.x, y: o.y } : PROPS[id].cell;
   }
-  // v48-4a-2(docs/指示書/v48-4a-2_厨房機器を壁際にも_指示書.md、§72-8): **停止点の向きは置いた行で決まる。**
+  // v48-4a-2(docs/完了/v48-4a-2_厨房機器を壁際にも_指示書.md、§72-8): **停止点の向きは置いた行で決まる。**
   // 表の work は「既定の向き(奥=−1行)」。その先が厨房の床 K でなければ(壁際 row1 に置いたとき、先は奥壁 row0)
   // 逆向き(手前 +1行)にする——コックは壁に向かって作業する。表は変えず、読む側 workFor() の1か所で決める。
   // canPlace(候補のマス)と refreshGeo(いまのマス)の両方がこれを通るので、光るマスと停止点が食い違わない。
@@ -964,8 +969,8 @@ window.ShopView = (function () {
     switch (sym) {
       case "#": back("sv-face-wall"); break;
       case "L": back("sv-face-wall"); side("sv-face-wall-side"); break;
-      case "R": back("sv-face-wall"); break;      // v36-2: 右角は奥壁の面だけ(col11側の面は外面=描かない)
-      case "l": side("sv-face-wall-side"); break;  // v36-2: r(col11)は部品なし(手前側の壁は描かない)
+      case "R": back("sv-face-wall"); break;      // v36-2: 右角は奥壁の面だけ(col13側の面は外面=描かない。v48-5 までは col11)
+      case "l": side("sv-face-wall-side"); break;  // v36-2: r(col13。v48-5 までは col11)は部品なし(手前側の壁は描かない)
       // v48-2c: 入口 D はここでは作らない(v36-2〜v48-2b は back 面1枚の赤い色板だった)。
       // 絵(img/stage/entrance.webp)を立ち物として placeAt で置く(buildScenery の「入口」参照)
       case "(": case "=": back("sv-face-counter-front"); top("sv-face-counter-top"); break;
@@ -1014,9 +1019,10 @@ window.ShopView = (function () {
     // v48-2b で削除した。
     var FLOOR_CLS = {
       "K": "tile", "S": "wood", "A": "wood", "T": "wood", "(": "tile", "=": "tile", ")": "tile", "D": "wood",
+      "P": "tile", // v48-5(§73): カウンターの行の隙間。厨房の市松を続ける(部品なし・機器は置けない)
       // v48-1(§2-4、v47-lot §66-5 の部品をそのまま): **壁のマスにも足元の地面を敷く。**
       // v36-2 以来「壁マスには床を敷かない(壁の絵が接地マスごと覆う前提)」だったが、その前提が
-      // 成り立つのは**絵のある壁**だけだった。手前側の壁(col11 の r)は「外側の面はプレイヤーに
+      // 成り立つのは**絵のある壁**だけだった。手前側の壁(col13 の r。v48-5 までは col11)は「外側の面はプレイヤーに
       // 背を向けて店の中を隠すだけ」という理由で**部品を描いていない**ので、床も部品も無い
       // 1マス幅の穴が右の縁に v36-2 からずっと開いていた。v46 までは右隣の塀(0.5マス)がその穴の
       // 前に立って隠していただけで、v48-1 で右隣を撤去すると黒い筋として露出する。
@@ -1080,8 +1086,8 @@ window.ShopView = (function () {
     // 側壁の帯の部品まで2マスにすると、入口が上下両方の隣(row4・row6)と重なり、どちらの描画順でも
     // 片方に半分隠される(実測で踏んだ)。奥壁(#)は横に並ぶだけなので2マスのまま。
     // v36-2(§1): 手前側の壁は描かない。根拠: 斜めの投影で見えるのは「奥の2辺(row0側・col0側)の内側の面」と
-    // 「手前の2辺(row末尾側・col11側)の外側の面」で、外側の面はプレイヤーに背を向けて店の中を隠すだけ。
-    // よって col11 の側壁 r は部品を持たず(表には厚みとして残す)、角 R は奥壁の面だけを持つ。
+    // 「手前の2辺(row末尾側・col13側)の外側の面」で、外側の面はプレイヤーに背を向けて店の中を隠すだけ。
+    // よって col13(v48-5 までは col11)の側壁 r は部品を持たず(表には厚みとして残す)、角 R は奥壁の面だけを持つ。
     // v36-2(§2): 高さの単位は従来どおりCELL=48pxだが、斜めでは行の奥行き差が TH/2=16px しかないため
     // 「立っている物の高さ÷16px」がそのまま隠す行数になる。
     //   カウンター 0.6マス=28.8px → 1行奥の人物(60px)の足元12.8pxだけ隠す(2行奥は隠さない)。

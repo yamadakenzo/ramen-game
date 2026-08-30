@@ -65,7 +65,7 @@ window.DATA.characters = {
       "stats": { "noodle": 30, "prep": 20, "service": 60, "numbers": 15, "teach": 5 },
       "newStats": { "cooking": 3, "speed": 7, "service": 6, "development": 2 },
       "maxLevel": 5, // growth:mid → 5
-      "wage": 22000, "growth": "mid", // v23: 月額95,000→週額換算
+      "wage": 30000, "growth": "mid", // v23: 月額95,000→週額換算。v49-3(§2-4): 22,000→30,000(現実寄りに)
       "traits": ["学生・観光客の流入に補正", "SNS拡散イベントを誘発", "無断欠勤あり"],
       "backstory": "近所の大学生。仕事は雑だが、外向きの発信力がある。",
       "route_bias": { "independent": 0.1, "stay": 0.2, "betray": 0.1, "retire": 0.6 }

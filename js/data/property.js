@@ -26,7 +26,9 @@ window.DATA.property = {
     {
       "id": "shotengai", "name": "商店街の空き店舗", "name_en": "Shopping Street Vacancy", "emoji": "🏪",
       "img": "property/shotengai",
-      "initial_cost": 0, "rent": 14500, "counterSlots": 10, "seats_table": 0, "condition": "居抜き",
+      // v49-3(docs/指示書/v49-3_時計と処理能力の物差し_指示書.md §2-4): 家賃 14,500 → 23,000(週額。現実寄りに)。
+      // ほかの物件は触っていない。
+      "initial_cost": 0, "rent": 23000, "counterSlots": 10, "seats_table": 0, "condition": "居抜き",
       "segment_flow": { "regular": 1.4, "salaryman": 0.8, "ol": 0.5, "student": 0.6, "family": 0.7, "tourist": 0.3 },
       "traits": ["前の店の設備が使える（初期投資が安い）", "常連文化が根付いている", "商店街の付き合いイベントが多い"],
       "desc": "シャッターが半分閉まった商店街。人通りは多くないが、地元の人が毎日通る。"

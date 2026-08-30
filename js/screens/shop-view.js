@@ -352,8 +352,20 @@ window.ShopView = (function () {
   // 代表旅程(入店/厨房/ホール/退店/兼任1周)の距離を実測して求めた比の平均(≈10.2、
   // 第2段階着手前報告)。この校正で旅程の所要時間と、厨房サイクルの移動:静止の配分
   // (0.62→0.61)が現行とほぼ同じに保たれる。
-  var WALK_MIN_PER_CELL = 220 / OLD_MS_PER_MIN;      // 通常の歩行、距離1マスあたりの分
-  var SEAT_WALK_MIN_PER_CELL = 200 / OLD_MS_PER_MIN; // 席へ向かう/席から出るときの歩行
+  // v49-3(docs/指示書/v49-3_時計と処理能力の物差し_指示書.md §2-3): **歩きの値段を物差しから逆算する。**
+  // v49-2 までは 2.64 分/マス(旧実秒からの換算値)で、1杯ぶんの往復(26〜28マス)だけで
+  // 約67ゲーム分——「一番弱いスタッフの1杯 = 8ゲーム分」の8倍以上かかっていた(v49-3 §1 調査)。
+  // 1杯 = 8分の内訳を 調理4分 / 歩き4分 と決め、歩きの4分を往復のマス数で割って1マスあたりを出す。
+  //   BOWL_WALK_CELLS … 1杯ぶんの往復マス数(§1 で実測した 26〜28 マスの上限)
+  //   BOWL_COOK_RATIO … 8分のうち調理に充てる割合(残りが歩き)
+  // **8 という数値はここには書かない**——出典は js/scoring.js の minutesPerBowl(1) 1か所だけ。
+  // 従業員・プレイヤー・客のどれもこの1つの値で歩く(§2-3「従業員・プレイヤーとも同じ値」。
+  // 客も同じにした理由は実装報告の「指示書から変えた点」参照)。
+  var BOWL_WALK_CELLS = 28;
+  var BOWL_COOK_RATIO = 0.5;
+  function bowlBaseMin() { return window.Scoring.minutesPerBowl(1); }          // = 8(物差しの出典)
+  function walkMinPerCell() { return bowlBaseMin() * (1 - BOWL_COOK_RATIO) / BOWL_WALK_CELLS; } // ≒0.143 分/マス
+  function cookMinOf(totalMin) { return totalMin * BOWL_COOK_RATIO; }          // 1杯の尺のうち調理ぶん
   var ENTER_EXTRA_MIN = 200 / OLD_MS_PER_MIN;        // 席へ向かう前の一拍
   var SIT_MIN = 420 / OLD_MS_PER_MIN;                // 席に着く/席を立つ(間合いの一拍)
   var LEAVE_WAIT_MIN = 460 / OLD_MS_PER_MIN;         // 席を立ってから実際に歩き出すまでの間
@@ -372,30 +384,25 @@ window.ShopView = (function () {
   // v35-2指示書 §1-3。walkMs()も同じ理由で削除済み)
   // v13-1: 厨房の作業ポーズの基準値(ゲーム内分)。
   // v28-2(docs/指示書/v28-2追補2_移動時間を含めた目標間隔の実現.md §J)以降、これらは
-  // 「pace=1のときの基準値」としてのみ使う。実際の所要時間は目標間隔(targetIntervalMin()、
-  // Scoring.staffProcessingCapacity()由来のW、window.Scoring.totalSeats()×
-  // window.SEATS_TO_WEEKLY_CAPACITY由来のSから決まる)へ一致するよう、移動時間も含めて
-  // 一律にスケールする(runSoloCycle/runKitchenCycle/runHallCycleが1件ごとにpaceを逆算する)。
-  // 従業員個人の能力(旧5能力)は絵の速度からは参照しない——Wを決める新4能力と二重に効かせない
-  // ため(同追補§J後半)。ここは「絵の忙しさ」のためだけの尺で、週次計算には一切フィードバック
-  // しない(この原則自体はv13から変わっていない)。
-  var KITCHEN_STATION_MIN = 2.5; // 中継地点(スープ/麺/盛り付け)1箇所あたりの作業ポーズの基準
-  var KITCHEN_HANDOFF_MIN = 1;   // 客に渡す一拍の基準
-  // v49-1(指示書§2-a): プレイヤーの調理にかかる尺。**目標間隔 T からは逆算しない**(従業員の
-  // 速さはWから決まるが、プレイヤーの速さは「指で押してから待たされる時間」であって、
-  // 店の処理能力から導くものではない)。仮の固定値。単位は1x基準ms——later() が spd() で
-  // 割るので、×2 なら 1.5秒、一時停止では止まる(既存のタイマーと同じ扱い)。
-  var PLAYER_COOK_MS = 3000;
-  // 席まで運ぶ/戻るときの歩き。客が席へ向かうときと同じ物差しを使う(新しい数値を作らない)。
-  var PLAYER_WALK_MIN_PER_CELL = SEAT_WALK_MIN_PER_CELL;
+  // v49-3(§2-2): **週の目標杯数からの逆算(pace)はやめた。** 1サイクルの長さはその従業員の
+  // minutesPerBowl(speed)(js/scoring.js。週の処理能力とまったく同じ物差し)で、歩きは
+  // walkMinPerCell() の実費、残りをこの比で作業ポーズへ回す。週次計算へは今までどおり
+  // 一切フィードバックしない(この原則自体はv13から変わっていない)。
+  // v49-3(§2-2): これらは**配分の比**としてだけ使う(2.5 : 2.5 : 2.5 : 1)。1サイクルの長さは
+  // その従業員の minutesPerBowl(speed) で決まり、歩きに使ったぶんの残りをこの比で分ける。
+  var KITCHEN_STATION_MIN = 2.5; // 中継地点(スープ/麺/盛り付け)1箇所あたりの作業ポーズの比
+  var KITCHEN_HANDOFF_MIN = 1;   // 客に渡す一拍の比
+  // v49-3(§2-3): プレイヤーの調理の尺。**実 ms 固定(v49-1 の PLAYER_COOK_MS = 3000)をやめ、
+  // ゲーム分に持ち替えた。** 実 ms 固定のままだと「1杯が何ゲーム分か」が時計の速さで変わってしまい、
+  // 従業員と同じ物差しに乗らない(v49-3 §1 調査)。一番弱いスタッフと同じ 8分の半分 = 4分
+  // (×1 で 2.5秒)。later() 経由なので一時停止・速度追随は今までどおり効く。
+  function playerCookMin() { return cookMinOf(bowlBaseMin()); } // = 4 ゲーム分
   // v49-2(指示書§1-1): 注文を取りに行くときの「席の脇」= 席の何マス手前に立つか。
   // +y は画面の手前側なので、カウンター席(row4)なら通路(row5)側、卓席(row7)なら卓の手前側に立つ。
   // 半マスにしてあるのは、席そのものと重ならず、かつ客に話しかけている距離に見せるため。
   var PLAYER_SIDE_DY = 0.5;
-  // v28-2: 週の営業ゲーム分(BANDSの合計×7日)。既存のwindow.BANDSから導出するだけで、
-  // 新しい数値は増やさない。他のファイル(loop.js)もDAYS_PER_WEEK=7を前提にしている
-  // (週7日はゲーム全体の既存の前提であり、ここで新設する定数ではない)。
-  var WEEK_OPERATING_MIN = (window.BANDS || []).reduce(function (s, b) { return s + (b.end - b.start) * 60; }, 0) * 7;
+  // v49-3(§2-2): WEEK_OPERATING_MIN はここでは参照0件になったので削除した(§34)。
+  // 同じ値が要る側(週の処理能力)は js/scoring.js の weekOpenMinutes() が持つ。
 
   function gm(min) { return U.gameMinMs(min); }
 
@@ -792,9 +799,8 @@ window.ShopView = (function () {
   // (客数と絵が一致しない原因そのものだったため。v10指示3)。
   // v26(追補§B-2): weekは客が湧いた時点の週番号(a.spawnWeekへ渡す元)。priceOwedと同じ経路で
   // traffic経由に1キー足すだけ(新しい仕組みは増やさない)。
-  // v28-2: targetIntervalは絵の配膳1杯あたりの目標ゲーム分(T=WEEK_OPERATING_MIN÷min(W,S))。
-  // 週替わり・設備/座席購入のたびにupdate()で再計算する(pricePerCustomer/weekと同じ経路)。
-  var traffic = { schedule: null, queueLevel: 0, satBySeg: {}, pricePerCustomer: 0, week: 0, targetInterval: WEEK_OPERATING_MIN };
+  // v49-3(§2-2): targetInterval は撤去した(絵の速さは各従業員の minutesPerBowl で決まる)。
+  var traffic = { schedule: null, queueLevel: 0, satBySeg: {}, pricePerCustomer: 0, week: 0 };
   // v09-1: 中央の pauseReasons(js/screens/loop.js)から setPaused() で渡される、唯一の一時停止フラグ。
   // 以前は state.speed===0 を「止まっている」の代用にしていたが、v09で速度の選択と一時停止を
   // 分離したため(停止中でも「選んでいる速度」自体は保持し続ける)、ここでは専用のフラグを持つ。
@@ -820,7 +826,27 @@ window.ShopView = (function () {
     });
   }
 
-  function spd() { return state && state.speed > 0 ? state.speed : 1; }
+  // v49-3(§2-3): 閑散時の自動早送り。**手動の ×1/×2/×4 は閑散中は無視する**(この倍率が勝つ)。
+  // 停止(×0)のときは freeze() 側で全部止まるので、ここでは 1 扱いのまま(既存と同じ)。
+  var fastMode = false;
+  function spd() {
+    if (fastMode) return window.IDLE_FAST_MULT || 1;
+    return state && state.speed > 0 ? state.speed : 1;
+  }
+  // 「誰も居ない」= 店内の客0・行列0・プレイヤーが手あき。loop.js の見張りがこれを見て
+  // setFast() を切り替える(判定はここ、時計を動かすのは loop.js、と持ち場を分ける)。
+  function isQuiet() {
+    if (!stage || !state) return false;
+    if (!actors.length && !queue.length && (!player || player.state === PL_IDLE)) return true;
+    return false;
+  }
+  function setFast(on) {
+    on = !!on;
+    if (on === fastMode) return false;
+    fastMode = on;
+    syncSpeed(); // retime() が保留中のタイマーと移動中の俳優を新しい速さへ作り直す
+    return true;
+  }
   function paused() { return frozen; }
 
   // v35: 重なり順(z-index)はrowから作る、唯一の関数(素材仕様§2-3「z=row」)。「奥の行ほど
@@ -1561,8 +1587,8 @@ window.ShopView = (function () {
 
   // ---------- v13-1/v14-5: 厨房の作業動線(寸胴→茹で麺器→盛り付け→[受け渡し口]→客席→戻る) ----------
   // 「絵は計算を決めない」の指示どおり、ここは既に計算済みの値(客の入店タイミング=既存の週次客数を
-  // 帯へ配分したスケジュール由来、traffic.targetInterval=Scoring.staffProcessingCapacity()由来の
-  // Wと座席数から導出した目標間隔)を読むだけで、ここから週次計算(scoring.js)側へ書き戻すことは
+  // 帯へ配分したスケジュール由来)を読むだけで、速さは各自の minutesPerBowl(speed)。
+  // ここから週次計算(scoring.js)側へ書き戻すことは
   // 一切しない。v28-2(追補2§J)以降、従業員個人の能力(旧5能力)は絵の速度からは参照しない
   // (Wを決める新4能力と二重に効かせないため。assignRoles()の役割選定だけは既存のまま
   // effectiveOf()=旧5能力を使い続ける。触れない範囲)。
@@ -1640,7 +1666,7 @@ window.ShopView = (function () {
   //       → weekCount +1 → 待機位置へ。客が先に帰っていたら台で丼が消えて「…」のポップ
   //
   // 立ち位置(§0の一方向の原則。v49-1 から変えていない):
-  //   計算 → 絵 … 何も新しく増やしていない(プレイヤーの速さは T から逆算しない。PLAYER_COOK_MS 固定)
+  //   計算 → 絵 … 何も新しく増やしていない(プレイヤーの速さは T から逆算しない。物差し minutesPerBowl(1) の半分)
   //   絵 → 計算 … **「届いた杯数」の整数1つだけ**(state.playerWork.weekCount)。位置・時間・
   //                ゲージの中間値は一切渡さない。しかもその整数を読むのは**翌週**の
   //                staffProcessingCapacity() だけ(js/scoring.js の playerWeeklyCups)。
@@ -1843,7 +1869,7 @@ window.ShopView = (function () {
         if (!player) return;
         stopGauge();
         toPlate();
-      }, PLAYER_COOK_MS);
+      }, gm(playerCookMin()));
     });
   }
   // ゲージは俳優の子なので位置を書かなくてよい。尺だけ書いて動かす
@@ -1854,7 +1880,7 @@ window.ShopView = (function () {
     f.style.animation = "none";
     void f.offsetWidth;
     f.style.animation = "";
-    f.style.animationDuration = (PLAYER_COOK_MS / spd()) + "ms";
+    f.style.animationDuration = (gm(playerCookMin()) / spd()) + "ms";
     player.el.classList.add("gauge-on");
   }
   function stopGauge() {
@@ -1910,17 +1936,33 @@ window.ShopView = (function () {
   function movePlayer(x, y, done) {
     var fromX = parseFloat(player.el.dataset.x);
     var fromY = player.tgtY;
-    var ms = walkMs2(fromX, fromY, x, y, PLAYER_WALK_MIN_PER_CELL);
+    var ms = walkMs2(fromX, fromY, x, y, walkMinPerCell());
     move(player, x, y, ms);
     later(function () { if (player) done(); }, ms);
   }
 
-  // v28-2(指示書§4、追補2§J): 絵の配膳能力をWから導出する。
-  // traffic.targetInterval(T、update()で算出。ゲーム分/杯)から、店全体で一律の速度係数
-  // (pace)を作る。従業員個人の能力(旧5能力)は参照しない——その能力は既にW
-  // (Scoring.staffProcessingCapacity())に入っており、絵の側でも掛けると同じ能力が二重に
-  // 効いてしまうため(追補2§J後半)。
-  function targetIntervalMin() { return traffic.targetInterval || WEEK_OPERATING_MIN; }
+  // v49-3(docs/指示書/v49-3_時計と処理能力の物差し_指示書.md §2-2): **1サイクルの長さは
+  // その従業員自身の「1杯何分」で決まる。** v28-2 以来の「週の目標杯数(T = WEEK_OPERATING_MIN ÷
+  // min(W,S))から逆算し、店全体で一律の pace を掛ける」をやめた——あれは時間の実体が無く、
+  // 需要が減ると従業員が勝手に遅くなる作りだった(v49-3 §1 調査)。
+  // これからは **需要が少なければ手が空くだけ**(指示書§2-2「それでよい」)。
+  // 速さの出典は js/scoring.js の minutesPerBowl(speed) 1か所で、週の処理能力とまったく同じ物差し。
+  function workerBowlMin(w) {
+    var sp = w && w.id ? window.Scoring.effectiveNewStat(w.id, "speed", state) : null;
+    return window.Scoring.minutesPerBowl(sp == null ? 1 : sp);
+  }
+  // 1サイクルの内訳: 歩きは walkMinPerCell() で実費、残り(= 1杯の分数 − 歩き)を作業ポーズへ回す。
+  // 道のりが長くて残りが負になる場合は 0 に留める(そのサイクルは 1杯の分数を超える。
+  // 卓席など遠い席で起こり得る。実装報告の「気になった点」)。
+  function restWaitMs(w, baseTravelMs) {
+    return Math.max(0, gm(workerBowlMin(w)) - baseTravelMs);
+  }
+  // 残りを既存の比(中継地点 2.5 : 手渡し 1)で分ける。比だけを使い、絶対値は使わない。
+  function splitWait(restMs, stationCount, withHandoff) {
+    var units = KITCHEN_STATION_MIN * stationCount + (withHandoff ? KITCHEN_HANDOFF_MIN : 0);
+    if (units <= 0) return { pause: 0, handoff: 0 };
+    return { pause: restMs * (KITCHEN_STATION_MIN / units), handoff: restMs * (KITCHEN_HANDOFF_MIN / units) };
+  }
 
   // 現在地(fromX,fromY)からある地点(toX,toY)までの「pace=1のときの」移動ゲーム分(1x基準ms)。
   // v32: 斜め上視点では移動が斜めになるため、x・y両方の距離を合成する(旧版はxだけ・yだけを
@@ -1975,15 +2017,12 @@ window.ShopView = (function () {
 
   // v14-5: 兼任(1人)。v13までと同じ、寸胴→茹で麺器→盛り付け→客席→定位置、の一続き。
   // 客席へ届けた瞬間に食べ始めさせる(以前は席に着いてから固定時間で自動的に食べ始めていた)。
-  // v28-2(追補2§J):「1人兼任(従業員1人)の場合=調理+ホール1サイクルの合計=目標間隔」。
-  // 移動時間を含む全行程の合計がtargetIntervalMin()と一致するよう、pace(店全体で共通の速度係数)を
-  // この1件ぶんの実際の距離から逆算する。個人の能力(旧5能力)は参照しない。
+  // v49-3(§2-2): 1人兼任は「調理+ホール」を1サイクルでやる。長さはその人の minutesPerBowl(speed)。
   // v32(§37): カウンター席は「客席へ運ぶ」を「受け渡し口=GEO.plateで直接手渡す」に短縮する
   // (実際には客がすぐそこに座っているという設定のため、盛り付け台から先の移動が要らない)。
   function runSoloCycle(w, order) {
     w.busy = true;
     w.el.classList.add("carrying");
-    var target = targetIntervalMin();
     var fromX = parseFloat(w.el.dataset.x != null ? w.el.dataset.x : w.homeX);
     var fromY = w.curY != null ? w.curY : GEO.kitchenHome.y;
     var seat = order.seat;
@@ -2000,14 +2039,21 @@ window.ShopView = (function () {
       { x: seat.x, y: seat.y, wait: 0, deliver: true },
       { x: w.homeX, y: w.homeY, wait: 0 }
     ];
-    var stationCount = isCounter ? 3 : 3; // 寸胴・茹で麺器・盛り付け(共通)
     var baseTravel = 0;
     var fx = fromX, fy = fromY;
     stops.forEach(function (s) { baseTravel += legBaseMs(fx, fy, s.x, s.y); fx = s.x; fy = s.y; });
-    var baseWait = gm(KITCHEN_STATION_MIN) * stationCount + gm(KITCHEN_HANDOFF_MIN);
-    var pace = (baseTravel + baseWait) / gm(target);
-    var pauseMs = gm(KITCHEN_STATION_MIN) / pace;
-    var handoffMs = gm(KITCHEN_HANDOFF_MIN) / pace;
+    // v49-3(§2-2): 歩きは実費(pace=1)。残りを作業ポーズへ回すので、合計が 1杯の分数になる。
+    // **待ちを受け取る停止点は「実際に待ちが付く stop」から数える。** カウンター席は盛り付け台が
+    // そのまま手渡しになるので中継地点が2つしかない——ここを3つ固定で見積もると、配った待ちが
+    // 見積もりより 6/8.5 に痩せて 1サイクルが目標より約25%短くなる(v49-3 §3-2 の実測で発覚。
+    // v28-2 の pace 方式にも同じ食い違いが潜んでいたが、誰も測っていなかった)。
+    var pauseStops = 0, handoffStops = 0;
+    stops.forEach(function (s, i) {
+      if (i === stops.length - 1) return; // 最後(定位置へ戻る)は待ちを付けない
+      if (s.deliver) handoffStops++; else pauseStops++;
+    });
+    var wait = splitWait(restWaitMs(w, baseTravel), pauseStops, handoffStops > 0);
+    var pauseMs = wait.pause, handoffMs = wait.handoff;
     stops.forEach(function (s, i) {
       if (i === stops.length - 1) return; // 最後(定位置へ戻る)は待ちを付けない
       s.wait = s.deliver ? handoffMs : pauseMs;
@@ -2016,7 +2062,7 @@ window.ShopView = (function () {
       if (w.gone) return;
       if (i >= stops.length) { w.busy = false; dispatchOrders(); return; }
       var s = stops[i];
-      var travelMs = moveWorker(w, s.x, s.y, pace);
+      var travelMs = moveWorker(w, s.x, s.y, 1);
       later(function () {
         if (s.deliver) { w.el.classList.remove("carrying"); deliverToSeat(order); }
         step(i + 1);
@@ -2028,21 +2074,18 @@ window.ShopView = (function () {
   // v14-5: 厨房担当。寸胴→茹で麺器→盛り付けまでで、客席へは行かない。
   // v32(§37): テーブル客ぶんは今までどおりreadyQueueへ置いてホール待ちにするが、
   // カウンター客ぶんは盛り付けた瞬間にそのままdeliverToSeat()する(ホールを挟まない)。
-  // v28-2(追補2§J):「厨房1人の1サイクル=目標間隔×厨房人数」。dispatchOrders()で人数比例に
-  // 並列化される前提のため、1人あたりの持ち時間は目標間隔にその時点の厨房役割の人数を掛けた値。
+  // v49-3(§2-2): 1サイクルはその人自身の minutesPerBowl(speed)。人数で割り増ししない
+  // (人が増えれば dispatchOrders() が並列に走らせるので、店全体の杯数は自然に増える)。
   function runKitchenCycle(w, order) {
     w.busy = true;
     w.el.classList.add("carrying");
-    var kCount = kitchenWorkers.filter(function (x) { return x.role === "kitchen"; }).length || 1;
-    var target = targetIntervalMin() * kCount;
     var fromX = parseFloat(w.el.dataset.x != null ? w.el.dataset.x : w.homeX);
     var fromY = w.curY != null ? w.curY : GEO.kitchenHome.y;
     var baseTravel = legBaseMs(fromX, fromY, GEO.soup.x, GEO.soup.y) +
       legBaseMs(GEO.soup.x, GEO.soup.y, GEO.noodle.x, GEO.noodle.y) +
       legBaseMs(GEO.noodle.x, GEO.noodle.y, GEO.plate.x, GEO.plate.y);
-    var baseWait = gm(KITCHEN_STATION_MIN) * 3;
-    var pace = (baseTravel + baseWait) / gm(target);
-    var pauseMs = gm(KITCHEN_STATION_MIN) / pace;
+    // v49-3(§2-2): 歩きは実費、残りを3つの中継地点へ均等に(手渡しは無いので withHandoff=false)
+    var pauseMs = splitWait(restWaitMs(w, baseTravel), 3, false).pause;
     var stops = [
       { x: GEO.soup.x, y: GEO.soup.y, wait: pauseMs },
       { x: GEO.noodle.x, y: GEO.noodle.y, wait: pauseMs },
@@ -2062,7 +2105,7 @@ window.ShopView = (function () {
         dispatchOrders(); // 次の注文と、待っているホール担当の両方へ回す
         return;
       }
-      var travelMs = moveWorker(w, stops[i].x, stops[i].y, pace);
+      var travelMs = moveWorker(w, stops[i].x, stops[i].y, 1);
       later(function () { step(i + 1); }, travelMs + stops[i].wait);
     }
     step(0);
@@ -2070,20 +2113,18 @@ window.ShopView = (function () {
 
   // v14-5: ホール担当。受け渡し口の丼を取る→客席へ運ぶ→受け渡し口寄りの定位置へ戻る。調理設備には触れない。
   // v32(§37): readyQueueにはもうテーブル客ぶんしか積まれない(カウンター客は厨房が直接届けるため)。
-  // v28-2(追補2§B・§J):「ホール1サイクル=目標間隔」。常に1人(assignRoles()、変更なし)の
-  // ため、この1サイクル(移動時間込み)がそのまま系全体のボトルネックになる。
+  // v49-3(§2-2): ホールも自分の minutesPerBowl(speed)。常に1人(assignRoles()、変更なし)なので、
+  // この1サイクル(移動時間込み)がそのまま系全体のボトルネックになる。
   function runHallCycle(w, order) {
     w.busy = true;
-    var target = targetIntervalMin();
     var fromX = parseFloat(w.el.dataset.x != null ? w.el.dataset.x : w.homeX);
     var fromY = w.curY != null ? w.curY : GEO.kitchenHome.y;
     var seat = order.seat;
     var baseTravel = legBaseMs(fromX, fromY, GEO.plate.x, GEO.plate.y) +
       legBaseMs(GEO.plate.x, GEO.plate.y, seat.x, seat.y) +
       legBaseMs(seat.x, seat.y, w.homeX, w.homeY);
-    var baseWait = gm(KITCHEN_HANDOFF_MIN);
-    var pace = (baseTravel + baseWait) / gm(target);
-    var handoffMs = gm(KITCHEN_HANDOFF_MIN) / pace;
+    // v49-3(§2-2): 歩きは実費、残りは客に渡す一拍へ全部回す(中継地点は通らない)
+    var handoffMs = restWaitMs(w, baseTravel);
     var stops = [
       { x: GEO.plate.x, y: GEO.plate.y, wait: 0, pickup: true },
       { x: seat.x, y: seat.y, wait: handoffMs, deliver: true },
@@ -2093,7 +2134,7 @@ window.ShopView = (function () {
       if (w.gone) return;
       if (i >= stops.length) { w.busy = false; dispatchOrders(); return; }
       var s = stops[i];
-      var travelMs = moveWorker(w, s.x, s.y, pace);
+      var travelMs = moveWorker(w, s.x, s.y, 1);
       later(function () {
         if (s.pickup) w.el.classList.add("carrying");
         if (s.deliver) { w.el.classList.remove("carrying"); deliverToSeat(order); }
@@ -2329,7 +2370,7 @@ window.ShopView = (function () {
   // v35: 距離の単位はマス(旧walkMs<横1軸だけ・参照0件>は削除した)。
   function walkMs2(fromX, fromY, toX, toY, minPerCell) {
     var dx = toX - fromX, dy = toY - fromY;
-    return Math.sqrt(dx * dx + dy * dy) * gm(minPerCell || WALK_MIN_PER_CELL);
+    return Math.sqrt(dx * dx + dy * dy) * gm(minPerCell || walkMinPerCell());
   }
 
   // v36-3: 経由点を順に歩く(各区間は move() + later())。合計の所要msを返す。状態遷移の判断(いつ帰るか・
@@ -2479,7 +2520,7 @@ window.ShopView = (function () {
     a.orderedAt = nowLabel(); // v15-1: 着席が決まった瞬間=注文発生(既存のplaceOrderと同じ瞬間)
     placeOrder(seat, a); // v13-1: 入店=注文発生。手が空いている厨房担当がいなければ席で待ったままになる
     // v36-3: 入口→通路→席の道筋を歩く(壁・什器を通り抜けない)。着席の処理は到着後+ENTER_EXTRA_MINの一拍
-    walkVia(a, routeDoorToSeat(seat), SEAT_WALK_MIN_PER_CELL, function () { later(afterArrive, gm(ENTER_EXTRA_MIN) + gm(SIT_MIN)); }); // 尺は旧「歩行+ENTER_EXTRA+SIT」と同じ内訳
+    walkVia(a, routeDoorToSeat(seat), walkMinPerCell(), function () { later(afterArrive, gm(ENTER_EXTRA_MIN) + gm(SIT_MIN)); }); // 尺は旧「歩行+ENTER_EXTRA+SIT」と同じ内訳
     function afterArrive() {
       if (a.gone) return;
       a.seatedAt = nowLabel();
@@ -2539,7 +2580,7 @@ window.ShopView = (function () {
         if (a.gone) return;
         seat.occupant = null;
         a.seat = null;
-        walkVia(a, routeSeatToOff(seat), SEAT_WALK_MIN_PER_CELL, function () { removeActor(a); }); // v36-3: 入口を通って歩道へ
+        walkVia(a, routeSeatToOff(seat), walkMinPerCell(), function () { removeActor(a); }); // v36-3: 入口を通って歩道へ
         pullFromQueue();
       }, gm(LEAVE_WAIT_MIN));
     });
@@ -2563,7 +2604,7 @@ window.ShopView = (function () {
       window.GameAudio.se("coin"); // v39: 会計(コイン演出と同時)。演出のみ
       seat.occupant = null;
       a.seat = null;
-      walkVia(a, routeSeatToOff(seat), SEAT_WALK_MIN_PER_CELL, function () { removeActor(a); }); // v36-3: 入口を通って歩道へ
+      walkVia(a, routeSeatToOff(seat), walkMinPerCell(), function () { removeActor(a); }); // v36-3: 入口を通って歩道へ
       pullFromQueue();
     }, gm(LEAVE_WAIT_MIN));
   }
@@ -2668,22 +2709,10 @@ window.ShopView = (function () {
     // v26(追補§B-2): 湧かせる客に持たせる週番号。state.weekRevenue.week(loop.jsのstageWeekCustomers
     // が確定させる、既存の週番号)をそのまま使う。新しい通し番号は作らない。
     traffic.week = (state.weekRevenue && state.weekRevenue.week) || 0;
-    // v28-2(指示書§2、追補§A): 絵の配膳1杯あたりの目標ゲーム分 T = WEEK_OPERATING_MIN ÷ min(W, S)。
-    // A = min(D', S, W) より A <= min(W, S) が常に成立するため、絵が保証すべき上限はWではなく
-    // min(W, S)で足りる(Wだけだと過剰に速くなる。追補§A)。D'(需要側)は絶対に入れない
-    // (需要が絵の速さを決めると逆流になる。追補§A)。
-    // W=customers.staffOnlyCapacity(既存のstaffCapacityと同じ式で、**プレイヤーぶんを含まない**方)。
-    // S=座席数×45(既存のwindow.SEATS_TO_WEEKLY_CAPACITY、Scoring.computeWeeklyCustomers()と
-    // 同じ式・同じ定数を再利用するだけで、新しい係数は作らない)。
-    // v49-1(指示書§0-①): **ここは従業員と設備だけで T を決める。** プレイヤーが手伝った回数は
-    // 週の客数の上限(customers.staffCapacity)には入るが、**絵の速さには一切入れない**——入れると
-    // 「プレイヤーが手伝うと従業員まで速くなる」見え方になる(v49 調査 付記1)。
-    // staffOnlyCapacity が無い古い呼び出し(setup.js の update(state,null,null,null) 等)では
-    // 従来どおり staffCapacity に落ちる(値は同じ式。プレイヤーぶんが 0 なら完全に一致する)。
-    var W = customers ? (customers.staffOnlyCapacity != null ? customers.staffOnlyCapacity : customers.staffCapacity) : 0;
-    var S = window.Scoring.totalSeats(state) * window.SEATS_TO_WEEKLY_CAPACITY;
-    var T = Math.min(W > 0 ? W : Infinity, S > 0 ? S : Infinity);
-    traffic.targetInterval = (T > 0 && isFinite(T)) ? WEEK_OPERATING_MIN / T : WEEK_OPERATING_MIN;
+    // v49-3(§2-2): **ここにあった「絵の目標間隔 T を週の目標杯数から逆算する」計算は撤去した。**
+    // 従業員の1サイクルは各自の minutesPerBowl(speed) で決まるようになり(workerBowlMin)、
+    // 需要側・キャパ側から絵の速さを作る経路は無くなった。v49-1 で分けた staffOnlyCapacity の
+    // 入口も、そのためだけの値だったので読まなくなった(値そのものは scoring.js に残してある)。
 
     traffic.satBySeg = {};
     if (customers) {
@@ -2720,8 +2749,9 @@ window.ShopView = (function () {
     builtSig = "";
     prevDrawnCounter = null;
     frozen = false;
+    fastMode = false; // v49-3: 閑散の早送りも解除して作り直す
     onServeCb = null;
-    traffic = { schedule: null, queueLevel: 0, satBySeg: {}, pricePerCustomer: 0, week: 0, targetInterval: WEEK_OPERATING_MIN };
+    traffic = { schedule: null, queueLevel: 0, satBySeg: {}, pricePerCustomer: 0, week: 0 };
   }
 
   // v09-1: 中央のpauseReasons(js/screens/loop.js)から呼ばれる、唯一の一時停止スイッチ。
@@ -2748,6 +2778,7 @@ window.ShopView = (function () {
     mount: mount, update: update, syncSpeed: syncSpeed, destroy: destroy, setPaused: setPaused,
     openBand: openBand, closeBand: closeBand, skipSeatPop: skipSeatPop,
     clearSeatedWaiters: clearSeatedWaiters, // v25(追補§B-2): 週の切り替わりの安全弁
+    isQuiet: isQuiet, setFast: setFast,    // v49-3(§2-3): 閑散の判定と自動早送りの切り替え
     getLifecycleLog: function () { return lifecycleLog; } // v15-6: 確認用(客ごとの着席/注文/丼受取/食事開始/退店ログ)
   };
 })();

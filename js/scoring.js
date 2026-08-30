@@ -155,12 +155,6 @@ window.Scoring = (function () {
     if (!vals.length) return 0;
     return vals.reduce(function (a, b) { return a + b; }, 0) / vals.length;
   }
-  // 速度の合計(平均ではない。§2-2の式どおり全員分を足す)。誰もいなければ0。
-  function staffSpeedSum(state) {
-    var vals = (state.staffHired || []).map(function (id) { return effectiveNewStat(id, "speed", state); })
-      .filter(function (v) { return v != null; });
-    return vals.reduce(function (a, b) { return a + b; }, 0);
-  }
   // STEP8(docs/新設計/08_STEP8_複数ラーメンとサイドメニュー_修正版.md §1): 開発の合計
   // (厨房にいる=雇っている従業員全員ぶん)。メニュー枠の解放判定に使う。誰もいなければ0。
   function staffDevelopmentSum(state) {
@@ -243,6 +237,31 @@ window.Scoring = (function () {
     return U.clamp(1 + (s - 50) / SATISFACTION_CAP_MULT_SLOPE, SATISFACTION_CAP_MULT_MIN, SATISFACTION_CAP_MULT_MAX);
   }
 
+  // v49-3(docs/指示書/v49-3_時計と処理能力の物差し_指示書.md §2-1): **1杯に何ゲーム分かかるか。**
+  // 週の処理能力(人/週)と、店内アニメの1杯の尺(shop-view.js)と、プレイヤーの手作業の尺を、
+  // **この1つの関数で同じ物差しに乗せる**——v49-2 までは「週の目標杯数から速さを逆算」していて
+  // 時間の実体が無く、実時間で動くプレイヤーと噛み合わなかった(v49-3 §1 調査)。
+  // 一番弱い(速度1)で 8分、一番速い(速度10)で 3分、あいだは線形。**数値はここ1か所だけ。**
+  function minutesPerBowl(speed) {
+    var s = U.clamp(typeof speed === "number" && isFinite(speed) ? speed : 1, 1, 10);
+    return 8 - (s - 1) * 5 / 9;
+  }
+  // 1週の営業ゲーム分。window.BANDS(昼/昼下がり/夕/夜 = 各3時間 = 計12時間)×7日から導くだけで、
+  // 新しい数値は作らない(shop-view.js の WEEK_OPERATING_MIN と同じ導き方・同じ値 5040)。
+  function weekOpenMinutes() {
+    return (window.BANDS || []).reduce(function (a, b) { return a + (b.end - b.start) * 60; }, 0) * 7;
+  }
+  // 従業員1人が1週に捌ける杯数 = 週の営業ゲーム分 ÷ その人の1杯の分数。
+  // v49-3(§2-1): capacityBase の第1項にあった `staffSpeedSum(state) × 30`(速度1あたり週30人、
+  // 時間の実体なし)を、これに置き換えた。**速度がそのまま「1杯何分」になる。**
+  function staffWeeklyBowls(state) {
+    var wk = weekOpenMinutes();
+    return (state && state.staffHired || []).reduce(function (sum, id) {
+      var sp = effectiveNewStat(id, "speed", state);
+      return sp == null ? sum : sum + wk / minutesPerBowl(sp);
+    }, 0);
+  }
+
   // v49-1(docs/指示書/v49-1_プレイヤー作業_試作指示書.md §3): **プレイヤー(店主)が先週こなした杯数。**
   // 単位の換算は要らない——この関数群の単位はもともと「人/週」で、**客1人=1杯**
   // (computeWeeklyFinance の revenue += c × price、1人が1杯だけ買う)、かつ絵の上の1杯は
@@ -272,8 +291,10 @@ window.Scoring = (function () {
   // 分けた理由(指示書§0-①): プレイヤーが手伝うと W が増え、T = min(W,S) が縮んで**従業員の絵まで
   // 速くなる**。それは「計算→絵」の向きとしては正しいが、見え方として意図と違う(v49 調査 付記1)。
   // 絵の側は従業員ぶんだけを見る。
+  // v49-3(§2-1): 第1項の従業員ぶんを `staffSpeedSum × 30` から `staffWeeklyBowls`(1杯何分の物差し)へ
+  // 置き換えた。**素の下駄 120・設備補正・プレイヤー項(1杯=1)は触っていない。**
   function capacityBase(state, includePlayer) {
-    return 120 + staffSpeedSum(state) * 30 + equipmentProcessingBonus(state)
+    return 120 + staffWeeklyBowls(state) + equipmentProcessingBonus(state)
       + (includePlayer ? playerWeeklyCups(state) : 0);
   }
   function staffProcessingCapacity(state, satisfaction) {
@@ -862,12 +883,14 @@ window.Scoring = (function () {
     effectiveNewStat: effectiveNewStat,
     staffCookingAvg: staffCookingAvg,
     staffServiceAvg: staffServiceAvg,
-    staffSpeedSum: staffSpeedSum,
     staffDevelopmentSum: staffDevelopmentSum,
     cookingQualityBonus: cookingQualityBonus,
     staffProcessingCapacity: staffProcessingCapacity,
     staffOnlyProcessingCapacity: staffOnlyProcessingCapacity, // v49-1: 絵の目標間隔専用
     playerWeeklyCups: playerWeeklyCups,                       // v49-1: 先週プレイヤーが捌いた杯数(表示用)
+    minutesPerBowl: minutesPerBowl,     // v49-3: 1杯に何ゲーム分か(速度1=8分〜速度10=3分)。物差しの出典
+    weekOpenMinutes: weekOpenMinutes,   // v49-3: 1週の営業ゲーム分(=5040)
+    staffWeeklyBowls: staffWeeklyBowls, // v49-3: 従業員ぶんの週の処理杯数
     equipmentProcessingBonus: equipmentProcessingBonus,
     weeklyEquipUpkeep: weeklyEquipUpkeep,
     unlockedRamenSlots: unlockedRamenSlots,

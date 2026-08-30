@@ -171,8 +171,18 @@ window.StatusPanel = (function () {
     return block;
   }
 
+  // v49-1(docs/指示書/v49-1_プレイヤー作業_試作指示書.md §3): プレイヤー(店主)が自分の手で
+  // 配膳した杯数の仮表示。**見た目は気にしない一行**(試作。本実装で作り直す前提)。
+  // 週の計算が実際に読むのは先週ぶん(lastWeekCount)だけなので、両方を並べて出す。
+  function playerWorkRow(state) {
+    var pw = state.playerWork || {};
+    var now = pw.weekCount || 0, last = pw.lastWeekCount || 0;
+    return h("div", { className: "dim", text: "店主 今週 " + now + "杯 / 先週 " + last + "杯（先週ぶんが週の処理可能人数に加わる）" });
+  }
+
   function renderStaff(state) {
     var box = h("div", { className: "status-card" }, [h("h3", { className: "emoji-font", text: "👥 従業員" })]);
+    box.appendChild(playerWorkRow(state)); // v49-1(試作)
     if (!state.staffHired.length) {
       box.appendChild(h("p", { className: "dim", text: "従業員がいない。全部ひとりでやっている。" }));
       return box;

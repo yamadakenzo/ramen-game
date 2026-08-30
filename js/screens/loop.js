@@ -469,7 +469,16 @@ window.ScreenLoop = (function () {
       state.money += remaining;
       state.weekRevenue.paid += remaining; // 精算後はpaid===plannedになる(次週のstageWeekCustomersで作り直す)
     }
-    var profit = finance.revenue - finance.foodCost - fixedCosts - equipUpkeep + sideSales.revenue - sideSales.cost;
+    // v49-1(docs/指示書/v49-1_プレイヤー作業_試作指示書.md §3): プレイヤー(店主)が自分の手で
+    // 配膳した杯数を、今週(weekCount)から先週(lastWeekCount)へ移す。**ここが唯一の移し替え。**
+    // 次の週の頭(stageWeekCustomers → computeWeeklyCustomers → staffProcessingCapacity)が
+    // lastWeekCount を読むので、「今週数えて翌週の入力にする」が成り立つ(指示書§0-②)。
+    // この関数は次週へ進む advanceWeek() より必ず前に走る(週末シーケンスの起点)。
+    // 旧セーブに playerWork は無いのでここで補う(SAVE_VERSION は 25 のまま。§65・§72)。
+    if (!state.playerWork) state.playerWork = { weekCount: 0, lastWeekCount: 0 };
+    state.playerWork.lastWeekCount = state.playerWork.weekCount || 0;
+    state.playerWork.weekCount = 0;
+    var profit =finance.revenue - finance.foodCost - fixedCosts - equipUpkeep + sideSales.revenue - sideSales.cost;
 
     state.reputation = U.clamp(state.reputation + (avgSat - 50) * 0.04, 0, 100);
     // STEP10(docs/新設計/10_STEP10_広告_認知度_評判_修正版.md §3): 宣伝を止めると毎週1.5%ずつ

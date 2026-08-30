@@ -244,7 +244,16 @@ window.GameState = (function () {
       // v48-4a(docs/完了/v48-4a_配置モード_指示書.md、§72): プレイヤーが動かした立ち物の置き場所 {id: {x, y}}(マスの連続座標)。
       // 無い id は js/screens/shop-view.js の PROPS の既定(cell)。**SAVE_VERSION は上げていない(25 のまま)。**
       // 旧セーブにこのキーは無いが、読む側(propCell)が既定で補うので正しく開く(resultYear と同じ作法。§65・§72)。
-      props: {}
+      props: {},
+      // v49-1(docs/指示書/v49-1_プレイヤー作業_試作指示書.md §0-②): プレイヤー(店主)が自分の手で
+      // 配膳した杯数。weekCount = 今週ぶん(配膳のたびに js/screens/shop-view.js が +1)、
+      // lastWeekCount = 先週ぶん(週末に js/screens/loop.js が weekCount から移す)。
+      // **週の計算が読むのは lastWeekCount だけ**——週の客数は週の開始時に1回確定するので、
+      // 今週の途中で増える値を入れると同じ週の計算が途中で変わってしまう(js/scoring.js の
+      // playerWeeklyCups のコメント参照)。
+      // **SAVE_VERSION は上げていない(25 のまま)。** 旧セーブにこのキーは無いが、読む側が
+      // 既定 0 で補うので正しく開く(resultYear・props と同じ作法。§65・§72)。
+      playerWork: { weekCount: 0, lastWeekCount: 0 }
     };
   }
 

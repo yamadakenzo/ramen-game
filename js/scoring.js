@@ -243,13 +243,44 @@ window.Scoring = (function () {
     return U.clamp(1 + (s - 50) / SATISFACTION_CAP_MULT_SLOPE, SATISFACTION_CAP_MULT_MIN, SATISFACTION_CAP_MULT_MAX);
   }
 
+  // v49-1(docs/指示書/v49-1_プレイヤー作業_試作指示書.md §3): **プレイヤー(店主)が先週こなした杯数。**
+  // 単位の換算は要らない——この関数群の単位はもともと「人/週」で、**客1人=1杯**
+  // (computeWeeklyFinance の revenue += c × price、1人が1杯だけ買う)、かつ絵の上の1杯は
+  // 週客数をそのまま曜日×帯へ配分したもの(weeklyBandSchedule)なので、**絵の上で1杯届けた=週の
+  // 処理能力1人ぶん**がそのまま成り立つ。新しい係数・定数は1つも作らない(指示書§3)。
+  // **今週の回数(weekCount)ではなく先週(lastWeekCount)を読む。** 週の客数は週の開始時に1回だけ
+  // 確定する(loop.js の stageWeekCustomers)ので、今週の途中で増える値を入れると同じ週の計算が
+  // 途中で変わってしまう。逆流は「週境界をまたぐ一方向」に留める(v49 調査 付記2)。
+  // 旧セーブに state.playerWork は無い(SAVE_VERSION は 25 のまま。propCell と同じ「読む側が
+  // 既定で補う」作法。§65・§72)。ここでは state を書き換えない(読むだけ)。
+  function playerWeeklyCups(state) {
+    var pw = state && state.playerWork;
+    var n = pw && pw.lastWeekCount;
+    return (typeof n === "number" && isFinite(n) && n > 0) ? n : 0;
+  }
+
   // §2-2(STEP5): 週の処理可能人数(客数の上限キャップ)。120 + 速度の合計×30 + 設備補正、に
   // STEP8(§3)のメニュー係数を掛ける。
   // STEP13(§1): さらに満足度係数を1つ掛けるだけ(「新しい仕組みを足さないこと」に対応、既存の
   // 式はそのまま)。satisfactionは省略可(呼び出し元がまだ客数を計算していない場面向けの保険。
   // 省略時は基準の50=×1.0として扱う。既存の呼び出し元(UI表示等)の挙動を壊さないため)。
+  // v49-1: 式を1か所(capacityBase)にまとめ、**プレイヤーぶんを含む/含まない**の2つの入口を出した。
+  //   staffProcessingCapacity()     … プレイヤーぶん込み。**週の客数の上限**(computeWeeklyCustomers)と
+  //                                   パネルの「週の処理可能人数」表示(loop.js)が使う。名前は既存の
+  //                                   呼び出し元を壊さないためそのまま(意味は「店の処理可能人数」に広がった)。
+  //   staffOnlyProcessingCapacity() … 従業員と設備だけ。**絵の目標間隔 T**(shop-view.js の update)専用。
+  // 分けた理由(指示書§0-①): プレイヤーが手伝うと W が増え、T = min(W,S) が縮んで**従業員の絵まで
+  // 速くなる**。それは「計算→絵」の向きとしては正しいが、見え方として意図と違う(v49 調査 付記1)。
+  // 絵の側は従業員ぶんだけを見る。
+  function capacityBase(state, includePlayer) {
+    return 120 + staffSpeedSum(state) * 30 + equipmentProcessingBonus(state)
+      + (includePlayer ? playerWeeklyCups(state) : 0);
+  }
   function staffProcessingCapacity(state, satisfaction) {
-    return (120 + staffSpeedSum(state) * 30 + equipmentProcessingBonus(state)) * menuCoefficient(state) * satisfactionCapMultiplier(satisfaction);
+    return capacityBase(state, true) * menuCoefficient(state) * satisfactionCapMultiplier(satisfaction);
+  }
+  function staffOnlyProcessingCapacity(state, satisfaction) {
+    return capacityBase(state, false) * menuCoefficient(state) * satisfactionCapMultiplier(satisfaction);
   }
 
   // STEP8(§2): サイドメニューの週間販売。客がどのラーメンを選ぶかの判定(STEP9)とは独立に、
@@ -569,6 +600,9 @@ window.Scoring = (function () {
     // 現状の客数(週120人前後)ではまだ届かない可能性が高い(§0)。座席キャップ適用後の合計に
     // さらにこれを掛けるので、両方のうちより厳しい方が効く。
     var staffCapacity = staffProcessingCapacity(state, avgSatForCapacity);
+    // v49-1: 絵の目標間隔 T 専用の、**プレイヤーぶんを含まない**同じ式の値。満足度は上と同じ
+    // avgSatForCapacity を渡す(2つの値の差がプレイヤーぶんだけになるように)。
+    var staffOnlyCapacity = staffOnlyProcessingCapacity(state, avgSatForCapacity);
     var afterSeatTotal = 0;
     Object.keys(results).forEach(function (id) { afterSeatTotal += results[id].count; });
     // v25(§A/§F): T1(③の座席キャパ適用後の合計)。同じく既存の値をそのまま持ち出すだけ。
@@ -591,7 +625,9 @@ window.Scoring = (function () {
     // ことで、万一この間にstateが変わっても計算に使った一覧とズレない)。
     return {
       results: results, totalDemand: totalDemand, weeklyCapacity: weeklyCapacity, queueLevel: queueLevel,
-      staffCapacity: staffCapacity, ramens: ramens,
+      staffCapacity: staffCapacity,
+      staffOnlyCapacity: staffOnlyCapacity, // v49-1: 絵の目標間隔専用(プレイヤーぶんを含まない)
+      ramens: ramens,
       // v25(§A/§F): 逃した客の内訳表示・絵の湧き人数専用の通過点(D/D'/T1/A)。
       // D=totalDemand(既存)。ここでは新規に増えた3つだけを持ち出す。
       demandAfterQueuePushout: demandAfterQueuePushout, demandAfterSeatCap: demandAfterSeatCap,
@@ -830,6 +866,8 @@ window.Scoring = (function () {
     staffDevelopmentSum: staffDevelopmentSum,
     cookingQualityBonus: cookingQualityBonus,
     staffProcessingCapacity: staffProcessingCapacity,
+    staffOnlyProcessingCapacity: staffOnlyProcessingCapacity, // v49-1: 絵の目標間隔専用
+    playerWeeklyCups: playerWeeklyCups,                       // v49-1: 先週プレイヤーが捌いた杯数(表示用)
     equipmentProcessingBonus: equipmentProcessingBonus,
     weeklyEquipUpkeep: weeklyEquipUpkeep,
     unlockedRamenSlots: unlockedRamenSlots,

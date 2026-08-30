@@ -206,7 +206,7 @@ window.ShopView = (function () {
     // レジ(台つき)。カウンターの天板(0.6マス=28.8px)より高く、丸椅子(見た目 38px)より大きい。
     // 足元は入口の内側(A帯)の左端。券売機・POSレジの「1枠」でもある(GEO.ticket はここから導く)
     register:      { W: 561, H: 763, ink: { w: 553, h: 755 }, heightCells: 0.95, cell: { x: 1.5, y: 8.5 } },
-    // v48-4d(docs/指示書/v48-4d_卓の配置_指示書.md、§76): テーブル卓。絵は設備の img/equipment/table_seats.webp(卓+丸椅子2脚の代表表示、
+    // v48-4d(docs/完了/v48-4d_卓の配置_指示書.md、§76): テーブル卓。絵は設備の img/equipment/table_seats.webp(卓+丸椅子2脚の代表表示、
     // .sv-table-img 96px)のままで、ここには**置き場所だけ**持つ(W/H/ink/heightCells は無い)。cell はアンカー = 2マスの境目の中心
     // (x が整数)で、席はその左右のマス (x±0.5, y+0.2)。既定は row7(v48-4a まで GEO.tableAnchors の直値 row6 で、丸椅子の背中に寄りすぎた)。
     // 描く数は設備(tableSeats → drawMaxTable)で決まり、表は「既定と上書き」だけ。
@@ -271,6 +271,14 @@ window.ShopView = (function () {
     noodle: workPoint("noodle_boiler"), // 茹で麺器の停止点(K)。v48-2d: 絵の1行奥 = 既定 (4.5, 1.5)。購入設備の絵もここ
     plate: { x: 6.5, y: 2.5 },       // 盛り付け台=受け渡し口の立ち位置(K。カウンターのすぐ奥。絵は無い)
     hallHome: { x: 5.5, y: 5.5 },    // ホール担当の定位置(A。カウンターの手前)
+    // v49-1(指示書§1): プレイヤー(店主)の待機位置。**盛り付け台 plate(6.5,2.5)の隣**の厨房の床。
+    // 最初 (6.5,1.5)(台の1行奥)に置いたが、**初期表示の画面の外だった**(390幅で画面 x=393。
+    // 実測: docs/v49-1_確認/実装報告.md)。頭上に出るゲージ・丼札まで画面の外になり、指が届かない。
+    // (5.5,2.5) は画面 x=332 で初期表示に入る。厨房担当の定位置とも重ならない——従業員は
+    // 最大2人(MAX_STAFF)で、厨房役は常に1人なので kitchenSpots は isoSpread(1)=kitchenHome(7.5,2.5)
+    // の1点だけになる。既定の寸胴の停止点(8.5,1.5)・茹で麺機の停止点(4.5,1.5)とも重ならない。
+    // 占有判定(canPlace)は通していない——ここは「立たせるだけ」で、機器を動かせば重なり得る(指示書§1)。
+    playerHome: { x: 5.5, y: 2.5 },
     ticket: propCell("register"),    // v36-2: 券売機(A。入口のある手前の通路の左端)。v48-2c: レジの1枠 = register の足元
     counterSeatRow: 4.5,             // 丸椅子の行(表のS行)の中心。席はcol1から1マスに1脚
     // テーブル卓の接地中心は v48-4d で PROPS.table_0 / table_1 へ移した(直値は持たない。propCell("table_N") で読む)。drawMaxTable=4席=2卓ぶん
@@ -373,6 +381,13 @@ window.ShopView = (function () {
   // しない(この原則自体はv13から変わっていない)。
   var KITCHEN_STATION_MIN = 2.5; // 中継地点(スープ/麺/盛り付け)1箇所あたりの作業ポーズの基準
   var KITCHEN_HANDOFF_MIN = 1;   // 客に渡す一拍の基準
+  // v49-1(指示書§2-a): プレイヤーの調理にかかる尺。**目標間隔 T からは逆算しない**(従業員の
+  // 速さはWから決まるが、プレイヤーの速さは「指で押してから待たされる時間」であって、
+  // 店の処理能力から導くものではない)。仮の固定値。単位は1x基準ms——later() が spd() で
+  // 割るので、×2 なら 1.5秒、一時停止では止まる(既存のタイマーと同じ扱い)。
+  var PLAYER_COOK_MS = 3000;
+  // 席まで運ぶ/戻るときの歩き。客が席へ向かうときと同じ物差しを使う(新しい数値を作らない)。
+  var PLAYER_WALK_MIN_PER_CELL = SEAT_WALK_MIN_PER_CELL;
   // v28-2: 週の営業ゲーム分(BANDSの合計×7日)。既存のwindow.BANDSから導出するだけで、
   // 新しい数値は増やさない。他のファイル(loop.js)もDAYS_PER_WEEK=7を前提にしている
   // (週7日はゲーム全体の既存の前提であり、ここで新設する定数ではない)。
@@ -751,6 +766,12 @@ window.ShopView = (function () {
                             // v32(§37): カウンター席の注文はここを経由せず厨房から直接届ける(下記参照)。
   var orderSeq = 0;
   var orderPileEl = null;  // 積まれた丼を表示するDOM
+  // v49-1(指示書§1・§2): プレイヤー(店主)の俳優と、その操作札を載せる層。
+  // player は kitchenWorkers の1人と同じ形の最小限(el / dataset.x / tgtY / gone)を持たせてある
+  // ので、move() / pinActor() / resumeActor() / setActorZ() がそのまま通る。
+  var player = null;   // { el, body, state: "idle"|"cooking"|"carrying", order, cookTimer, gone, tgtY }
+  var hitLayer = null; // .sv-hits: 札(タップを受ける要素)だけを載せる層。層自体は pointer-events:none
+  var playerTags = {}; // { order, bowl, gauge } 出ている札の要素
   var timers = [];       // {fn, remaining(ms), id, startedAt} v09: 残り時間を持たせ、凍結中は完全に止める
   var builtSig = "";
   // v24(指示書§3-3): 前回buildScenery()時点で描いていたカウンター席の所持数。nullは
@@ -884,7 +905,9 @@ window.ShopView = (function () {
 
   // v13-1: 客(actors)だけでなく厨房の店員(kitchenWorkers)も同じ「移動中の俳優」として
   // 一時停止・速度追随の対象にする(move()/later()を共用しているため形は同じ)。
-  function movingActors() { return actors.concat(kitchenWorkers); }
+  // v49-1: プレイヤーも同じ「移動中の俳優」に含める。これだけで一時停止(freeze/unfreeze)も
+  // 速度追随(retime)も従業員とまったく同じに効く(v49 調査「触らずに済む関数」の一覧どおり)。
+  function movingActors() { return actors.concat(kitchenWorkers).concat(player ? [player] : []); }
 
   function freeze() {
     if (frozen) return;
@@ -1075,6 +1098,7 @@ window.ShopView = (function () {
     staffActors = [];
     queue = [];
     propEls = {}; anchored = []; placing = null; // v48-4a: 要素ごと消えるので参照と選択も捨てる
+    player = null; hitLayer = null; playerTags = {}; // v49-1: 同上(下の buildPlayer/buildHitLayer が作り直す)
     refreshGeo();                                 // v48-4a: state.props を反映(読み込み直後・組み直しのたび)
 
     var counts = seatCounts();
@@ -1454,7 +1478,13 @@ window.ShopView = (function () {
 
     stage.className = "shop-stage" + (has("bright_light") ? " bright" : "");
 
+    // v49-1(指示書§1・§2): プレイヤーの俳優(actorLayer の子)と札の層(cameraEl の子)。
+    // buildStaff() の後に作る——札は俳優より手前に出したいので、DOM の出現順でも後にしておく
+    // (z は 1000 帯で明示しているが、同点の重なりは出現順で決まる。§45-1 と同じ考え方)。
     buildStaff();
+    buildPlayer();
+    buildHitLayer();
+    renderPlayerTags();
   }
 
   // v14-5: 店員の役割を「厨房」「ホール」に分ける(プレイヤーには選ばせない。既存の接客能力から
@@ -1590,6 +1620,205 @@ window.ShopView = (function () {
       renderReadyPile();
       runHallCycle(w, ready);
     });
+    renderPlayerTags(); // v49-1: 従業員に配り終えた「残り」を見て、プレイヤーの注文札を出し直す
+  }
+
+  // ---------- v49-1: プレイヤー(店主)が自分の手で作って運ぶ(試作。矩形とゲージだけ) ----------
+  // docs/指示書/v49-1_プレイヤー作業_試作指示書.md。絵は作らない——矩形と文字とバーだけ。
+  //
+  // 立ち位置(§0の一方向の原則):
+  //   計算 → 絵 … 何も新しく増やしていない(プレイヤーの速さは T から逆算しない。PLAYER_COOK_MS 固定)
+  //   絵 → 計算 … **「届いた杯数」の整数1つだけ**(state.playerWork.weekCount)。位置・時間・
+  //                ゲージの中間値は一切渡さない。しかもその整数を読むのは**翌週**の
+  //                staffProcessingCapacity() だけ(js/scoring.js の playerWeeklyCups)。
+  //
+  // 注文の所有権: プレイヤーが札をタップした瞬間に orderQueue から shift する。以後その注文は
+  // どのキューにも無いので、**従業員が同じ注文を取ることは構造上あり得ない**(w.busy の従業員が
+  // 抱えている注文と同じ扱い。cancelOrderFor も届かないが、客が先に帰っていれば deliverToSeat が
+  // false を返して静かに捨てるので、作り直しのループにはならない——既存と同じ作法)。
+  var PLAYER_STATE_IDLE = "idle", PLAYER_STATE_COOKING = "cooking", PLAYER_STATE_CARRYING = "carrying";
+
+  // §0-④: 開発チュートリアルを終えるまでは操作を出さない。loop.js の tutorialStepVal() と同じ読み方
+  // (旧セーブ・未定義は "done" 扱い)。既知24(dev-tutorial-dim)には触らない。
+  function playerEnabled() {
+    return !!state && (state.tutorialStep || "done") === "done";
+  }
+
+  // 作業回数の器。旧セーブには state.playerWork が無いので、**書く直前にここで補う**
+  // (読む側 js/scoring.js の playerWeeklyCups は state を書き換えない)。
+  function bumpPlayerWork() {
+    if (!state) return;
+    if (!state.playerWork) state.playerWork = { weekCount: 0, lastWeekCount: 0 };
+    state.playerWork.weekCount = (state.playerWork.weekCount || 0) + 1;
+    if (window.GameState && window.GameState.save) window.GameState.save();
+  }
+
+  // 俳優。従業員(.sv-staff)と同じ「根は足元の点・本体(.sv-body)に接地アンカーと z」の形にする
+  // (§45-2。根に transform / z-index を持たせるとスタッキング文脈ができて札が部屋の物に潜る)。
+  function buildPlayer() {
+    var home = GEO.playerHome;
+    // **丼は .sv-body の外(根の直下)に置く。** 客(.sv-cust)・従業員(.sv-staff)と同じ構造で、
+    // .sv-body は translate(-50%,-100%) が掛かった箱なので、その中に入れると付属物まで
+    // 二重にずれる(実測で踏んだ: 丼が足元から左へ半身・上へ1体分ずれた)。
+    var el = h("div", { className: "sv-player" }, [
+      h("span", { className: "sv-body" }, [h("span", { className: "sv-player-box", text: "店主" })]),
+      h("span", { className: "sv-player-bowl emoji-font", text: "🍜" })
+    ]);
+    el.style.fontSize = staffFontEm() + "em"; // 従業員と同じ背丈の基準
+    placeAt(el, home.x, home.y);
+    setActorZ(el, home.x, home.y);
+    el.dataset.x = home.x;
+    actorLayer.appendChild(el);
+    player = {
+      el: el, body: el.querySelector(".sv-body"), walk: null, gone: false,
+      state: PLAYER_STATE_IDLE, order: null, cookTimer: null, tgtY: home.y
+    };
+  }
+
+  // 札の層。**cameraEl の子**にして世界の座標に置く(スクロール・ピンチに自動で追従する)。
+  // 層そのものは大きさ0・pointer-events:none で、指を受けるのは札の要素だけ(.sv-tag)。
+  // 指示書§2は「stage 直下」と書いていたが、stage 直下だとカメラの transform が掛からず
+  // 札が部屋から剥がれる。どちらでも指は同じく stage へ上がるので、衝突の回避は
+  // 札側の stopPropagation だけで足りる(実装報告の「指示書から変えた点」参照)。
+  function buildHitLayer() {
+    hitLayer = block("sv-hits", {});
+    cameraEl.appendChild(hitLayer);
+    playerTags = {};
+  }
+
+  // 札を1枚作って世界の (x, y) に置く。z は付属物と同じ 1000 帯(部屋の物より必ず手前)。
+  function makeTag(cls, text, x, y, onTap) {
+    var el = h("div", { className: "sv-tag " + cls }, [h("span", { text: text })]);
+    el.style.left = toPxX(x, y) + "px";
+    el.style.top = toPxY(x, y) + "px";
+    // 指を札で止める。bindGestures() の4本は stage に付いているので、ここで止めれば
+    // カメラのドラッグ・ダブルタップ戻し・配置モードのどれにも渡らない(指示書§2)。
+    el.addEventListener("pointerdown", function (e) { e.stopPropagation(); e.preventDefault(); });
+    el.addEventListener("pointerup", function (e) { e.stopPropagation(); e.preventDefault(); onTap(); });
+    hitLayer.appendChild(el);
+    return el;
+  }
+
+  function clearPlayerTags() {
+    Object.keys(playerTags).forEach(function (k) {
+      var el = playerTags[k];
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+    });
+    playerTags = {};
+  }
+
+  // いまの状態から札を出し直す。**この関数だけが札を作る**(出る条件が1か所)。
+  //   idle    かつ orderQueue に残りがある → 盛り付け台の上に「注文 N」
+  //   cooking                              → 頭上にゲージ(札ではない。タップを受けない)
+  //   cooking が満ちた(=丼を持っている)   → 頭上に「🍜」
+  //   carrying                             → 何も出さない
+  // 「idle でないときは注文札を出さない」が、1度に1作業までの上限そのもの(指示書§2)。
+  // いま出ているべき札の**種類**。数(注文の件数)は種類に含めない——下の renderPlayerTags が
+  // 「種類が変わったときだけ作り直し、数だけなら文字を書き換える」ようにするため。
+  function playerTagKind() {
+    if (!player || !playerEnabled()) return "none";
+    if (player.state === PLAYER_STATE_IDLE) return orderQueue.length ? "order" : "none";
+    if (player.state === PLAYER_STATE_COOKING) return player.cooked ? "bowl" : "gauge";
+    return "none"; // carrying 中は何も出さない
+  }
+  // **同じ種類の札なら要素を作り直さない。** 理由が2つある:
+  //  1. ゲージ … update()(設備購入・週替わり)や dispatchOrders()(従業員のサイクルが1周するたび)は
+  //     調理中でも呼ばれる。毎回作り直すと CSS アニメーションが 0 からやり直しになり、いつまでも満ちない。
+  //  2. 注文札 … orderQueue の件数は営業中ずっと動く。件数が変わるたびに要素を捨てて作り直すと、
+  //     **指を置いた瞬間に札が別の要素に入れ替わってタップが空振りする**(実測で踏んだ。
+  //     ×4 速度では作り直しが頻繁で、ほぼ毎回空振りした)。件数の表示は文字だけ書き換える。
+  function renderPlayerTags() {
+    if (!hitLayer || !player) return;
+    var kind = playerTagKind();
+    if (kind !== player.tagKind) {
+      player.tagKind = kind;
+      clearPlayerTags();
+      if (kind === "order") {
+        var p = GEO.plate; // 盛り付け台の上(指示書§2-a)
+        playerTags.order = makeTag("sv-tag-order", "注文 " + orderQueue.length, p.x, p.y, takeOrder);
+      } else if (kind === "bowl" || kind === "gauge") {
+        var px = parseFloat(player.el.dataset.x), py = player.tgtY; // 調理中は待機位置から動かない
+        if (kind === "bowl") {
+          playerTags.bowl = makeTag("sv-tag-bowl emoji-font", "🍜", px, py, carryBowl);
+        } else {
+          // ゲージは「見せるだけ」。タップは受けない(pointer-events は CSS で none)。
+          // 満ちる動きは CSS アニメーションで、**JS は中間値を一切読まない**(指示書§2-a)。
+          var g = block("sv-tag sv-gauge", {
+            left: toPxX(px, py) + "px", top: toPxY(px, py) + "px"
+          }, [block("sv-gauge-fill", { animationDuration: (PLAYER_COOK_MS / spd()) + "ms" })]);
+          hitLayer.appendChild(g);
+          playerTags.gauge = g;
+        }
+      }
+    }
+    // 件数だけの変化は文字の書き換えで済ませる(要素は入れ替えない)
+    if (kind === "order" && playerTags.order) {
+      var t = "注文 " + orderQueue.length;
+      var span = playerTags.order.firstChild;
+      if (span && span.textContent !== t) span.textContent = t;
+    }
+  }
+
+  // (a) 注文札のタップ: orderQueue から1件もらって調理に入る。
+  function takeOrder() {
+    if (!player || player.state !== PLAYER_STATE_IDLE || !playerEnabled()) return;
+    if (!orderQueue.length) { renderPlayerTags(); return; }
+    player.order = orderQueue.shift(); // ここで所有権が移る(従業員はもう取れない)
+    player.state = PLAYER_STATE_COOKING;
+    player.cooked = false;
+    player.el.classList.add("cooking");
+    renderPlayerTags();
+    player.cookTimer = later(function () {
+      if (!player) return;
+      player.cooked = true;
+      player.el.classList.remove("cooking");
+      // **ここではまだ .carrying を付けない。** 付けると持っている丼(.sv-player-bowl)と
+      // タップ待ちの丼札(🍜)が同時に出て、丼が2つ見える。持つのは実際に運び出す carryBowl から。
+      renderPlayerTags();
+    }, PLAYER_COOK_MS);
+  }
+
+  // (b) 丼札のタップ: 席まで運んで deliverToSeat()、届いたら回数を1つ数えて待機位置へ戻る。
+  // 経路は直線(指示書§2-b「従業員と同じ経路の考え方で直線でよい」)。従業員の配膳も
+  // moveWorker() の直線移動なので、見え方は揃っている。
+  function carryBowl() {
+    if (!player || player.state !== PLAYER_STATE_COOKING || !player.cooked) return;
+    var order = player.order;
+    if (!order) { resetPlayer(); return; }
+    player.state = PLAYER_STATE_CARRYING;
+    player.el.classList.add("carrying"); // ここで丼を持つ(絵は .sv-player-bowl)
+    renderPlayerTags();
+    var seat = order.seat;
+    movePlayer(seat.x, seat.y, function () {
+      player.el.classList.remove("carrying");
+      // カウンター席・卓席の区別は付けない(指示書§2)。どちらも席まで運ぶ。
+      if (deliverToSeat(order)) bumpPlayerWork(); // 届いたときだけ数える
+      player.order = null;
+      player.cooked = false;
+      movePlayer(GEO.playerHome.x, GEO.playerHome.y, function () {
+        player.state = PLAYER_STATE_IDLE;
+        renderPlayerTags();
+        dispatchOrders(); // 手が空いたので、待っている注文があれば札を出し直す
+      });
+    });
+  }
+
+  // 直線移動1区間。move() / later() を使うので一時停止・速度追随がそのまま効く。
+  function movePlayer(x, y, done) {
+    var fromX = parseFloat(player.el.dataset.x);
+    var fromY = player.tgtY;
+    var ms = walkMs2(fromX, fromY, x, y, PLAYER_WALK_MIN_PER_CELL);
+    move(player, x, y, ms);
+    later(function () { if (player) done(); }, ms);
+  }
+
+  function resetPlayer() {
+    if (!player) return;
+    player.state = PLAYER_STATE_IDLE;
+    player.order = null;
+    player.cooked = false;
+    player.el.classList.remove("cooking", "carrying");
+    renderPlayerTags();
   }
 
   // v28-2(指示書§4、追補2§J): 絵の配膳能力をWから導出する。
@@ -1624,9 +1853,12 @@ window.ShopView = (function () {
   // つまり食べ終わった瞬間だった。待ちきれず帰った客は元々ここへ来ないので二重取りではないが、
   // 「食べ終わるまでの30〜40分ぶん、実際の受け渡しと所持金の増加がずれて見える」ことが
   // 「怒って帰った客の分も売上に乗っているように見える」という体感の原因になっていた)。
+  // v49-1: **戻り値を足した**(実際に客へ届いたら true、客が先に帰っていて静かに捨てたら false)。
+  // 呼び出し元の従業員のサイクルは戻り値を見ていないので挙動は変わらない。プレイヤーの配膳だけが
+  // これを見て、**届いたときだけ**作業回数を数える(帰った客に空振りした分を計算へ足さないため)。
   function deliverToSeat(order) {
     var seat = order.seat, a = order.actor;
-    if (!a || a.gone || seat.occupant !== a) return;
+    if (!a || a.gone || seat.occupant !== a) return false;
     a.deliveredAt = nowLabel();
     window.GameAudio.se("serve"); // v39: 丼が客に届いた瞬間。演出のみ(onServeCb の金銭処理より前だが、順序には影響しない)
     // v26(追補§B-2): spawnWeekも渡す。loop.js側で今週の週番号と比較し、週をまたいで配膳された
@@ -1634,6 +1866,7 @@ window.ShopView = (function () {
     // スキップする。絵の配膳シーケンス(このあとのstartEating等)はそのまま完走させる。
     if (onServeCb) onServeCb(a.segId, a.priceOwed, a.spawnWeek);
     startEating(a);
+    return true;
   }
 
   // v15-3: 客ごとの注文を、厨房未着手(orderQueue)・盛り付け済みでホール待ち(readyQueue)の
@@ -2345,10 +2578,15 @@ window.ShopView = (function () {
     // A = min(D', S, W) より A <= min(W, S) が常に成立するため、絵が保証すべき上限はWではなく
     // min(W, S)で足りる(Wだけだと過剰に速くなる。追補§A)。D'(需要側)は絶対に入れない
     // (需要が絵の速さを決めると逆流になる。追補§A)。
-    // W=customers.staffCapacity(既存、Scoring.staffProcessingCapacity()の戻り値そのもの)。
+    // W=customers.staffOnlyCapacity(既存のstaffCapacityと同じ式で、**プレイヤーぶんを含まない**方)。
     // S=座席数×45(既存のwindow.SEATS_TO_WEEKLY_CAPACITY、Scoring.computeWeeklyCustomers()と
     // 同じ式・同じ定数を再利用するだけで、新しい係数は作らない)。
-    var W = customers ? customers.staffCapacity : 0;
+    // v49-1(指示書§0-①): **ここは従業員と設備だけで T を決める。** プレイヤーが手伝った回数は
+    // 週の客数の上限(customers.staffCapacity)には入るが、**絵の速さには一切入れない**——入れると
+    // 「プレイヤーが手伝うと従業員まで速くなる」見え方になる(v49 調査 付記1)。
+    // staffOnlyCapacity が無い古い呼び出し(setup.js の update(state,null,null,null) 等)では
+    // 従来どおり staffCapacity に落ちる(値は同じ式。プレイヤーぶんが 0 なら完全に一致する)。
+    var W = customers ? (customers.staffOnlyCapacity != null ? customers.staffOnlyCapacity : customers.staffCapacity) : 0;
     var S = window.Scoring.totalSeats(state) * window.SEATS_TO_WEEKLY_CAPACITY;
     var T = Math.min(W > 0 ? W : Infinity, S > 0 ? S : Infinity);
     traffic.targetInterval = (T > 0 && isFinite(T)) ? WEEK_OPERATING_MIN / T : WEEK_OPERATING_MIN;
@@ -2359,6 +2597,7 @@ window.ShopView = (function () {
         traffic.satBySeg[id] = customers.results[id].satisfaction;
       });
     }
+    renderPlayerTags(); // v49-1: チュートリアルが終わった直後などに札の出る条件が変わる
     syncSpeed();
   }
 
@@ -2380,6 +2619,9 @@ window.ShopView = (function () {
     readyQueue = [];
     orderSeq = 0;
     orderPileEl = null;
+    player = null;      // v49-1: 俳優は cameraEl ごと消えるので、参照を切るだけでよい
+    hitLayer = null;
+    playerTags = {};
     activePopups = 0;
     builtSig = "";
     prevDrawnCounter = null;

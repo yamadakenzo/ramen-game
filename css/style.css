@@ -1503,7 +1503,7 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    (絵が読めなかったときに舞台の地の濃茶が透けて黒い穴にならないため)。
    **木目は1種のまま。** 板の線が隣のマスへつながる絵なので、土のように複数種を混ぜると
    線が切れて「菱形が並んでいる」ように見える(§69-3)。 */
-.sv-tile-wood { background-image: url(../img/stage/shop_wood.webp?v=20260830203352); background-size: 100% 100%; background-repeat: no-repeat; background-color: #d9a648; } /* S/A/T/D 客席の木目床。v48-2b で本素材へ(旧 仮色 #d9a648) */
+.sv-tile-wood { background-image: url(../img/stage/shop_wood.webp?v=20260830235818); background-size: 100% 100%; background-repeat: no-repeat; background-color: #d9a648; } /* S/A/T/D 客席の木目床。v48-2b で本素材へ(旧 仮色 #d9a648) */
 /* K と カウンターのマス ( = ) の床。**v48-2b で市松を新設した(§69-2)。**
    v35-4 の floor_tile.webp は市松を絵の中に持っていたが、その画像は v36-1 以来
    どこからも参照されておらず(§66-7)、この床はずっと1色のべた塗りだった。
@@ -1512,10 +1512,10 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    記号→クラスの対応(tile かどうか)はこの土台が担い、a/b は絵だけを足す。
    どちらになるかは (col + row) の偶奇だけ(js/screens/shop-view.js の tileVariant)。 */
 .sv-tile-tile   { background-color: #cfe3d6; }
-.sv-tile-tile-a { background-image: url(../img/stage/shop_tile_cream.webp?v=20260830203352); background-size: 100% 100%; background-repeat: no-repeat; }
-.sv-tile-tile-b { background-image: url(../img/stage/shop_tile_mint.webp?v=20260830203352); background-size: 100% 100%; background-repeat: no-repeat; }
+.sv-tile-tile-a { background-image: url(../img/stage/shop_tile_cream.webp?v=20260830235818); background-size: 100% 100%; background-repeat: no-repeat; }
+.sv-tile-tile-b { background-image: url(../img/stage/shop_tile_mint.webp?v=20260830235818); background-size: 100% 100%; background-repeat: no-repeat; }
 /* v48-2a(§68): 歩道は本素材(ベージュの砂利)。background-color は画像が読めなかったときの下地として残す */
-.sv-tile-walk { background-image: url(../img/stage/sidewalk.webp?v=20260830203352); background-size: 100% 100%; background-repeat: no-repeat; background-color: #d6d0c4; } /* W 歩道 v48-2a(旧 仮色 #d6d0c4) */
+.sv-tile-walk { background-image: url(../img/stage/sidewalk.webp?v=20260830235818); background-size: 100% 100%; background-repeat: no-repeat; background-color: #d6d0c4; } /* W 歩道 v48-2a(旧 仮色 #d6d0c4) */
 .sv-tile-road { background: #8d8880; } /* C 車道(仮) v36-3 */
 .sv-tile-lot  { background: #c4bdb0; } /* B 向かいの建物の敷地(仮) v36-3 */
 /* v48-1(§2-2): 敷地の地面。**v48-2a(§68)で土・草・道・歩道の4種を本素材の画像に差し替えた。**
@@ -1542,11 +1542,11 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    記号→クラスの対応(dirt かどうか)はこの土台のクラスが担い、1/2/3 は絵だけを足す。
    **判定・経路・当たり判定に 1/2/3 の区別は持ち込まない。** */
 .sv-tile-dirt   { background-color: #ae6244; }
-.sv-tile-dirt-1 { background-image: url(../img/stage/yard_dirt_1.webp?v=20260830203352); background-size: 100% 100%; background-repeat: no-repeat; }
-.sv-tile-dirt-2 { background-image: url(../img/stage/yard_dirt_2.webp?v=20260830203352); background-size: 100% 100%; background-repeat: no-repeat; }
-.sv-tile-dirt-3 { background-image: url(../img/stage/yard_dirt_3.webp?v=20260830203352); background-size: 100% 100%; background-repeat: no-repeat; }
-.sv-tile-grass { background-image: url(../img/stage/yard_grass.webp?v=20260830203352); background-size: 100% 100%; background-repeat: no-repeat; background-color: #7d9c4e; } /* G 草地(敷地の四隅)。v48-2a で本素材へ(旧 仮色 #7d9c4e) */
-.sv-tile-path  { background-image: url(../img/stage/yard_path.webp?v=20260830203352); background-size: 100% 100%; background-repeat: no-repeat; background-color: #cdbd96; } /* S/O 前庭の道と門(灰の敷石)。v48-2a で本素材へ(旧 仮色 #cdbd96)。門は地面だけで部品を持たず、同じクラスを共有するので敷石が門まで1本につながる(§67の設計どおり) */
+.sv-tile-dirt-1 { background-image: url(../img/stage/yard_dirt_1.webp?v=20260830235818); background-size: 100% 100%; background-repeat: no-repeat; }
+.sv-tile-dirt-2 { background-image: url(../img/stage/yard_dirt_2.webp?v=20260830235818); background-size: 100% 100%; background-repeat: no-repeat; }
+.sv-tile-dirt-3 { background-image: url(../img/stage/yard_dirt_3.webp?v=20260830235818); background-size: 100% 100%; background-repeat: no-repeat; }
+.sv-tile-grass { background-image: url(../img/stage/yard_grass.webp?v=20260830235818); background-size: 100% 100%; background-repeat: no-repeat; background-color: #7d9c4e; } /* G 草地(敷地の四隅)。v48-2a で本素材へ(旧 仮色 #7d9c4e) */
+.sv-tile-path  { background-image: url(../img/stage/yard_path.webp?v=20260830235818); background-size: 100% 100%; background-repeat: no-repeat; background-color: #cdbd96; } /* S/O 前庭の道と門(灰の敷石)。v48-2a で本素材へ(旧 仮色 #cdbd96)。門は地面だけで部品を持たず、同じクラスを共有するので敷石が門まで1本につながる(§67の設計どおり) */
 /* E 隣地(フェンスの外)。**敷地の中と地続きに見えないよう、色相ごと冷たい側へ振った**(灰緑 93°)。
    土(17°)から 76°離れていて、「ここから外は自分の土地ではない」が色で分かる。 */
 .sv-tile-next  { background: #8f9a86; }
@@ -1567,10 +1567,10 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    面は 32×48 の矩形を skewY した平行四辺形(JS の isoFaces.lowWall)なので、横板の線と笠木が辺と平行に歪む。
    絵は元画像の各象限の中央 600×896 を 256×384(2:3)に切ったもので、面(32×48=2:3)に等倍で入る(押し込まない。§75-4)。
    background-color は板壁の平均色 #432a20(読み込み前の色)。窓は variant のクラスで絵を差し替える(出し分けは JS の lowWallVariant)。 */
-.sv-face-lowwall { background-color: #432a20; background-image: url(../img/stage/wall_front_plain.webp?v=20260830203352); background-size: 100% 100%; background-repeat: no-repeat; }
-.sv-face-lowwall.win-square { background-image: url(../img/stage/wall_front_win_square.webp?v=20260830203352); }
-.sv-face-lowwall.win-round { background-image: url(../img/stage/wall_front_win_round.webp?v=20260830203352); }
-.sv-face-lowwall.win-slit { background-image: url(../img/stage/wall_front_win_slit.webp?v=20260830203352); }
+.sv-face-lowwall { background-color: #432a20; background-image: url(../img/stage/wall_front_plain.webp?v=20260830235818); background-size: 100% 100%; background-repeat: no-repeat; }
+.sv-face-lowwall.win-square { background-image: url(../img/stage/wall_front_win_square.webp?v=20260830235818); }
+.sv-face-lowwall.win-round { background-image: url(../img/stage/wall_front_win_round.webp?v=20260830235818); }
+.sv-face-lowwall.win-slit { background-image: url(../img/stage/wall_front_win_slit.webp?v=20260830235818); }
 .sv-face-counter-top { background: var(--sv-wood); }     /* カウンターの天板 */
 .sv-face-counter-front { background: var(--sv-front); }  /* カウンターの前板 */
 .sv-face-counter-end { background: #e8d8bc; }            /* カウンター右端の側板 */
@@ -1640,9 +1640,19 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    斜めの線なので、線の中央を足元に合わせるぶんだけ絵を下げる(無い物は 0px=下端)。
    .flip は左右反転。客の .sv-cust.flip .sv-body と同じく translate の**後ろ**に scaleX(-1)(CSS は右から適用)——
    要素の中心で鏡にするので足元(下端中央)は動かない。 */
-.sv-prop { position: absolute; transform: translate(-50%, calc(-100% + var(--sv-base, 0px))); line-height: 0; }
+/* v49-5: --sv-basex は接地アンカーの横の補正(既定 0px = 既存の立ち物は変わらない)。
+   ストック台のようにアイソメの箱を「手前の辺の中点」で接地させる立ち物は、その点がキャンバスの
+   横中央に無いので、propNode が実測値(PROPS.anchor.u)から書く。flip とは併用しない(反転する立ち物は基準のまま)。 */
+.sv-prop { position: absolute; transform: translate(calc(-50% + var(--sv-basex, 0px)), calc(-100% + var(--sv-base, 0px))); line-height: 0; }
 .sv-prop.flip { transform: translate(-50%, calc(-100% + var(--sv-base, 0px))) scaleX(-1); }
 .sv-prop img { display: block; }
+/* v49-5: ストック台の丸座に載る丼(renderStockBowls が左上からの px を書く)。台の要素の子なので
+   z は台と同じ行を継ぐ(指示書§2)。**タップは「取る」**(丼側で stopPropagation するので台の配置モードと衝突しない)。
+   claimed = 運ぶ人が決まった丼(薄くする。拾われた瞬間に消える)。 */
+.sv-slot-bowl { position: absolute; transform: translate(-50%, -58%); line-height: 0; pointer-events: auto; cursor: pointer; }
+.sv-slot-bowl.claimed { opacity: 0.45; cursor: default; }
+/* v49-5: 台が満杯で置けずに待っている印(確認用。見た目は変えない) */
+.stock-wait { }
 /* v48-4a(§72): 配置モード。data-prop を持つ要素(動かせる立ち物・レジの枠)はタップで選べる。
    選択中は輪郭が生成り(--c-panel)で光り、少し浮く——img 側に掛け、根の足元アンカーの transform には触らない。
    置けるマスは床と同じ菱形を半透明の緑(--c-up)で敷く。**z は世界の物より上(900。吹き出しの 1000 の下)**——
@@ -1857,6 +1867,13 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
   border: 2px solid var(--c-ink); border-radius: var(--r); background: var(--c-panel);
 }
 .sv-player.gauge-on .sv-player-gauge { display: block; }
+/* v49-5(§4): 従業員も同じゲージを使う(runGauge が owner を選ばない)。位置・見た目はプレイヤーと同一 */
+.sv-staff .sv-player-gauge {
+  position: absolute; left: 0; top: -82px; transform: translateX(-50%); z-index: 1000;
+  display: none; width: 40px; padding: 3px;
+  border: 2px solid var(--c-ink); border-radius: var(--r); background: var(--c-panel);
+}
+.sv-staff.gauge-on .sv-player-gauge { display: block; }
 
 /* 札の層。**層そのものは大きさ0で指を吸わない**(.sv-actors と同じ作り)。
    指を受けるのは札の要素だけ——ここを層ごと auto にすると部屋全体がタップを飲む。 */
@@ -1883,7 +1900,9 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    札の層(.sv-hits)は俳優の層(.sv-actors)より後に cameraEl へ足しているため(§45-1 と同じ考え方)。
    上へ逃がす案は実測で**かえって悪化した**(席の列は斜めに並ぶので、上げると2つ隣の
    吹き出しの帯に入る。重なりは 3組 → 9組に増えた)。近さを優先して頭のすぐ上に置く。 */
-.sv-tag-order { background: var(--c-up); color: var(--c-panel); font-size: 0.18em; padding: 3px 5px; }
+/* v49-5: 置く点が「席の手前の通路」(頭上ではない)になったので、持ち上げは小さく(-130%)。
+   頭上に出すとカウンター席の札が厨房のストック台(と丼のタップ)に重なる(走行で実測) */
+.sv-tag-order { background: var(--c-up); color: var(--c-panel); font-size: 0.18em; padding: 3px 5px; transform: translate(-50%, -130%); }
 /* (4) ストック札「🍜 ×N」。盛り付け台(6.5,2.5)の上。**その点は初期表示では画面の右端**
    (390幅で x=362)なので、中央揃えのままだと右半分が画面の外へ出る(v49-1 で実測)。
    左へ寄せて中に収める——置く点は台のまま(出典は GEO.plate 1つ)で、はみ出しぶんだけ寄せる。 */

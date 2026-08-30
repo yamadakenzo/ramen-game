@@ -75,21 +75,12 @@ window.ScreenLoop = (function () {
   }
   document.addEventListener("visibilitychange", onVisibilityChange);
 
-  // v12-1: ×1 = 1時間1.7秒(window.BASE_HOUR_MS。js/utils.jsの1箇所だけで持つ)。
+  // v12-1: ×1 の1時間の実秒は window.BASE_HOUR_MS(js/utils.jsの1箇所だけで持つ)。v49-4 で 7500(=1日90秒)。
   // TICK_MIN(15分)刻みで進めるので、1ティックの実時間はこの1/4。
   // 倍率テーブルはここには持たない(U.hourMsがBASE_HOUR_MS/速度倍率を計算する)。
-  // v49-3(docs/指示書/v49-3_時計と処理能力の物差し_指示書.md §2-3): 時計を2段にした。
-  // 通常は state.speed(手動の ×1/×2/×4)、**閑散のあいだだけ window.IDLE_FAST_MULT が勝つ**
-  // (手動の倍率は無視する)。停止(×0)は早送りしない——0 のままにして pause を効かせる。
-  // 判定は絵の側(ShopView.isQuiet)、時計を動かすのはここ、と持ち場を分けてある。
-  var quietFast = false;   // いま自動早送り中か(state には持たない。リロードで解ける一時値)
-  var quietTimer = null;
-  function effSpeed() {
-    if (!state.speed) return state.speed; // 0(停止)はそのまま
-    return quietFast ? (window.IDLE_FAST_MULT || 1) : state.speed;
-  }
+  // v49-4(§1): v49-3 の「時計を2段(閑散だけ自動早送り)」は撤回した。速さは手動の ×1/×2/×4 だけ。
   function hourMs() {
-    return U.hourMs(effSpeed());
+    return U.hourMs(state.speed);
   }
   function tickMs() {
     var hm = hourMs();
@@ -98,27 +89,6 @@ window.ScreenLoop = (function () {
 
   function clearTick() { if (tickTimer) { clearTimeout(tickTimer); tickTimer = null; } }
 
-  // v49-3(§2-3): 閑散の見張り。**時計の刻み(通常は1ティック9.4秒)では客の出現に間に合わない**ので、
-  // 実時間の短い間隔で見る。やっているのは長さの判定だけなので負荷は無視できる。
-  // 一時停止中(パネル・モーダル・週末・非表示タブ)は早送りしない——止まっているものを飛ばさない。
-  var QUIET_WATCH_MS = 400;
-  function syncQuiet() {
-    if (!window.ShopView || !window.ShopView.isQuiet) return;
-    var want = !isPaused() && state.speed > 0 && window.ShopView.isQuiet();
-    if (want === quietFast) return;
-    quietFast = want;
-    window.ShopView.setFast(want); // 絵の側の spd() も同じ倍率に切り替える
-    syncClock();                   // 時計の刻みを新しい速さで組み直す
-    renderSpeedDock();             // 「早送り中」の仮表示を出し入れする
-  }
-  function startQuietWatch() {
-    if (quietTimer) return;
-    quietTimer = setInterval(syncQuiet, QUIET_WATCH_MS);
-  }
-  function stopQuietWatch() {
-    if (quietTimer) { clearInterval(quietTimer); quietTimer = null; }
-    quietFast = false;
-  }
 
   // ---------- v10-2: 営業時間帯のヘルパー ----------
   // v17(docs/新設計/v17_ラーメン屋_修正指示書.md §1-5/§1-6): 営業時間の選択が無くなり、
@@ -206,8 +176,6 @@ window.ScreenLoop = (function () {
   function setSpeed(n) {
     state.speed = n;
     if (n === 0) pause("speed0"); else resume("speed0"); // pause/resumeが内部でsyncClock()を呼ぶ
-    // v49-3(§2-3): 停止を選んだら早送りも解く(次の見張りを待たずにその場で)。
-    if (n === 0 && quietFast) { quietFast = false; window.ShopView.setFast(false); }
     window.ShopView.syncSpeed(); // アニメーションの速さのスケーリングを更新(一時停止の可否とは別軸)
     renderTopBar();
     renderSpeedDock();
@@ -749,7 +717,6 @@ window.ScreenLoop = (function () {
     G.hide();
     // v15-6: destroy()の前に読む(destroy自体はログを消さないが、読む場所を明示するため先に確保)
     var lifecycleLog = window.ShopView.getLifecycleLog();
-    stopQuietWatch(); // v49-3(§2-3)
     window.ShopView.destroy();
     pauseReasons.clear(); // 次のプレイに影響しないよう、理由集合をリセットしておく
     console.log("=== イベント密度ログ ===");
@@ -986,9 +953,6 @@ window.ScreenLoop = (function () {
     // v07-2/v09-2: 週末の完全停止中は速度ボタンを効かせず、代わりに「停止中」と明示する
     var locked = state.weekEndActive;
     if (locked) dock.appendChild(h("div", { className: "speed-locked", text: "停止中" }));
-    // v49-3(§2-3): 閑散の自動早送り中の仮表示。**見た目は気にしない**(試作)。
-    // 手動の倍率は無視されているので、選択中のボタンと食い違って見えるのを一言で説明する。
-    if (quietFast && !locked) dock.appendChild(h("div", { className: "speed-fast", text: "早送り中" }));
     [[0, "■"], [1, "×1"], [2, "×2"], [4, "×4"]].forEach(function (pair) {
       dock.appendChild(h("button", {
         className: "btn small" + (state.speed === pair[0] && !locked ? " selected" : ""),
@@ -2041,7 +2005,6 @@ window.ScreenLoop = (function () {
     window.ShopView.destroy();
     // v26(追補§C-1): onEnterコールバック(weekLiveCountの加算専用だった)は削除済みなので渡さない。
     window.ShopView.mount(document.getElementById("shop-fill"), state, { onServe: onCustomerServed });
-    startQuietWatch(); // v49-3(§2-3): 閑散の自動早送りの見張り
     // v12-2: 新規開始・セーブからの再開のどちらでも、この時点で「今この瞬間の状態」を使って
     // 今週ぶんの客数・湧きスケジュールを確定させる(内部でrenderTopBar/refreshShopも行う)。
     // これで1週目から(セーブ再開なら週の途中からでも)絵に客が出るようになる。

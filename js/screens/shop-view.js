@@ -382,19 +382,32 @@ window.ShopView = (function () {
   // ことで「1杯8ゲーム分」という物差しは絵の側では意味を失った。**minutesPerBowl は週の計算専用**に戻し
   // (js/scoring.js。今回1文字も触っていない)、絵と操作はここの実ms定数だけで決める。
   // 単位は ×1 基準の実ms——later()/move() が spd() で割るので、×4 なら見た目も4倍速くなる(既存と同じ)。
-  var PLAYER_COOK_MS = 3000;          // プレイヤーの調理。v49-2 と同じ3秒(指示書§2)
-  var PLAYER_WALK_MS_PER_CELL = 68;   // プレイヤーの歩き。v49-2 の実時間(2.4ゲーム分/マス × 1700ms/60 = 68ms)
-  var STAFF_WALK_MS_PER_CELL = 68;    // 従業員の歩き。プレイヤーと揃える(同じ床を同じ速さで歩く)
-  // 客の歩き。**入店〜着席が2〜3秒に収まる速さ**(指示書§2)。歩道の湧き場所から席まで約24マスなので
-  // 110ms/マス で約2.6秒。v49-3 で「客だけ極端に遅いと絵が破綻する」と分かった判断を実秒で引き継ぐ。
-  var CUST_WALK_MS_PER_CELL = 110;
-  // 従業員の1杯の見た目の所要の**下限**(指示書§2)。速度1で5秒、速度10で2秒、あいだは線形。
+  var PLAYER_COOK_MS = 3000;          // プレイヤーの調理。v49-2 から変えていない3秒(v49-6 §1 も「3秒のまま」)
+  // v49-6(docs/指示書/v49-6_テンポ調整と食事ゲージ_指示書.md §1): **歩きは客・従業員・プレイヤーで
+  // 共通の定数1つ。1マス 0.25秒。** v49-4/5 は プレイヤー・従業員 68ms/客 110ms(ならすと1マス0.09秒)
+  // だったが、実機の所見が「歩きが速すぎて何が起きているか見えない」だった。**読める速さまで落とし、
+  // そのぶん1日の長さを 90→60秒に詰める**(js/utils.js の BASE_HOUR_MS。§2)——動きは遅く、1日は密に。
+  // 単位は ×1 基準の実ms(later()/move() が spd() で割るので ×4 なら見た目も4倍速くなる)。
+  var WALK_MS_PER_CELL = 250;
+  // v49-6(§1・§3): **プレイヤーが1杯を配り切るまでの実時間**(注文札のタップ → 席で注文 → 寸胴で3秒 →
+  // 台へ置く → 台へ取りに戻る → 席へ運ぶ → 定位置)。走行 MODE=player の実測は 9.4/10.5/11.3 秒
+  // (席の遠さで振れる)、平均 10.4 秒——その丸めがこの値(実装報告 §2)。
+  // 従業員の下限はこの値から導く——**従業員はプレイヤーより一拍遅い**(§3)。
+  var PLAYER_BOWL_REF_MS = 10000;
+  // 従業員の1杯の見た目の所要の**下限**。**速度1 = プレイヤー1杯の1.5倍、速度10 = 0.7倍**、あいだは線形(§3)。
   // これより速くは動かない——忙しい日に配り切れないぶんは待ち・行列になる(雇う・鍛える動機)。
-  var STAFF_BOWL_MS_SLOW = 5000, STAFF_BOWL_MS_FAST = 2000;
+  // v49-4 の「速度1で5秒・10で2秒」はプレイヤーより速く、リンがいると自分の出番が無かった(7章 32)。
+  var STAFF_BOWL_RATIO_SLOW = 1.5, STAFF_BOWL_RATIO_FAST = 0.7;
   function staffBowlFloorMs(speed) {
     var s = U.clamp(typeof speed === "number" && isFinite(speed) ? speed : 1, 1, 10);
-    return STAFF_BOWL_MS_SLOW - (s - 1) * (STAFF_BOWL_MS_SLOW - STAFF_BOWL_MS_FAST) / 9;
+    var r = STAFF_BOWL_RATIO_SLOW - (s - 1) * (STAFF_BOWL_RATIO_SLOW - STAFF_BOWL_RATIO_FAST) / 9;
+    return PLAYER_BOWL_REF_MS * r;
   }
+  // v49-6(§3): **プレイヤー優先の猶予。** 注文札が出てから／台に丼が置かれてから、この間だけ
+  // 従業員は手を出さない(=プレイヤーが取れる隙)。過ぎたら従来どおり従業員が取る。
+  // プレイヤーが移動中・調理中で取れない状況でも猶予は同じ(単純にする、という指示書の決め)。
+  // ×1 基準の実ms(later() 経由なので一時停止で止まり、速度倍率で縮む)。
+  var PLAYER_GRACE_MS = 2000;
   var ENTER_EXTRA_MIN = 200 / OLD_MS_PER_MIN;        // 席へ向かう前の一拍
   var SIT_MIN = 420 / OLD_MS_PER_MIN;                // 席に着く/席を立つ(間合いの一拍)
   var LEAVE_WAIT_MIN = 460 / OLD_MS_PER_MIN;         // 席を立ってから実際に歩き出すまでの間
@@ -406,15 +419,22 @@ window.ShopView = (function () {
   // 頻発するほど短すぎたため、v16で十分に長く取り直した(150〜300分。詳細はPROGRESS.md参照)。
   var PATIENCE_BASE_MIN = 150;
   var PATIENCE_TOL_MIN = 150;
-  var MEAL_MIN_MIN = 2500 / OLD_MS_PER_MIN;          // 提供+食事(最短)。約30分
-  var MEAL_MIN_MAX = 3500 / OLD_MS_PER_MIN;          // 提供+食事(最長)。約42分
+  // v49-6(§4): **食事の所要は実msの定数1つ。** v49-5 までは gm(30〜42ゲーム内分)= ×1 で 3750〜5250ms
+  // だった(MEAL_MIN_MIN/MAX。参照0件になったので削除した。§34)。その**中央値をそのまま実msに固定**
+  // しているので体感の尺は変えていない——変えたのは「時計を短くしても食事だけは同じ長さで見える」こと。
+  var EAT_BASE_MS = 4500;
+  // **回転率。いまは常に 1.0 を返すだけの関数。** 将来「卓のグレード・器・BGM で客の長居が変わる」を
+  // つなぐ穴を1か所だけ先に開けてある(§4)。1.0 を返しているあいだ、食事時間は EAT_BASE_MS そのもの。
+  // **食事時間は絵だけ**——週の計算(js/scoring.js)へは一切渡さない(§0 の一方向の原則)。
+  function turnoverFactor() { return 1.0; }
+  function eatMs() { return EAT_BASE_MS * turnoverFactor(); }
   var RESUME_FLOOR_MIN = 200 / OLD_MS_PER_MIN;       // 一時停止/速度変更からの再開時の最短尺
   // v35: RESUME_Y_MIN_PER_PCT は参照0件の死にコードだったため削除(単位変換の対象を減らす。
   // v35-2指示書 §1-3。walkMs()も同じ理由で削除済み)
   // v13-1: 厨房の作業ポーズの基準値(ゲーム内分)。
   // v28-2(docs/指示書/v28-2追補2_移動時間を含めた目標間隔の実現.md §J)以降、これらは
   // v49-4(§2): 1サイクルの長さは max(実秒の下限, 需要からの間隔) = workerBowlMs(w)。歩きは
-  // STAFF_WALK_MS_PER_CELL の実費、残りをこの比で作業ポーズへ回す。週次計算へは今までどおり
+  // WALK_MS_PER_CELL の実費、残りをこの比で作業ポーズへ回す。週次計算へは今までどおり
   // 一切フィードバックしない(この原則自体はv13から変わっていない)。
   // v49-5: KITCHEN_STATION_MIN / KITCHEN_HANDOFF_MIN(旧サイクルの待ちの配分比)は
   // 4工程化で参照0件になったので削除した(§34)。
@@ -1175,6 +1195,11 @@ window.ShopView = (function () {
     queue = [];
     propEls = {}; anchored = []; placing = null; // v48-4a: 要素ごと消えるので参照と選択も捨てる
     stock = []; pendingCook = []; // v49-5: 台の中身は一時値(組み直しで消える。v49-2 の割り切りと同じ)
+    // v49-6: **未着手の注文も同じ扱いにした。** 組み直しで actors は空になる(上)ので、残った注文は
+    // もう居ない客を指したまま——札は消えた席の座標に浮き、従業員は届かない丼を作り続けていた。
+    // 加えて ensureBuilt() が直前に clearTimers() を呼ぶため、猶予(§3)のタイマーごと落ちて
+    // **その注文が永久に「猶予中」のまま**になる。一時値なので捨てるのが筋。
+    orderQueue = [];
     player = null; hitLayer = null; playerTags = {}; // v49-1: 同上(下の buildPlayer/buildHitLayer が作り直す)
     refreshGeo();                                 // v48-4a: state.props を反映(読み込み直後・組み直しのたび)
 
@@ -1658,16 +1683,41 @@ window.ShopView = (function () {
   function placeIntoStock(order) {
     var slot = freeStockSlot();
     if (slot < 0) return false;
-    stock.push({ order: order, slot: slot, claimed: false });
+    var e = { order: order, slot: slot, claimed: false, free: false };
+    stock.push(e);
+    armGrace(e); // v49-6(§3): 置かれてから2秒はプレイヤーの取り分(従業員は手を出さない)
     renderStockBowls();
     dispatchOrders(); // 待っているホール役がすぐ取れるように
     return true;
   }
-  // 取る権利は**ここを呼んだ瞬間**に決まる(指示書§3。二重運びなし)。最古の未予約の丼。
+  // 取る権利は**ここを呼んだ瞬間**に決まる(v49-5 §3。二重運びなし)。最古の未予約の丼。
   // 丼の絵は運ぶ人が台で実際に拾う(removeStockEntry)まで残る(薄くなるだけ)。
-  function claimOldestStock() {
+  // v49-6(§3): forStaff=true(従業員が取りに来た)のときは**猶予の明けた丼だけ**を見る
+  // (置かれてから PLAYER_GRACE_MS のあいだはプレイヤーの取り分)。プレイヤー(forStaff 無し)は
+  // 置かれた瞬間から取れる。列は置いた順なので、猶予中の丼を飛ばすことは起こらない。
+  function claimOldestStock(forStaff) {
     for (var i = 0; i < stock.length; i++) {
-      if (!stock[i].claimed) { stock[i].claimed = true; renderStockBowls(); return stock[i]; }
+      if (stock[i].claimed) continue;
+      if (forStaff && !stock[i].free) continue;
+      stock[i].claimed = true; renderStockBowls(); return stock[i];
+    }
+    return null;
+  }
+  // v49-6(§3): プレイヤー優先の猶予を1つ仕掛ける。明けたら dispatchOrders() で従業員に配り直す。
+  // later() 経由なので一時停止で止まり、速度倍率にも追随する(舞台の他の尺と同じ扱い)。
+  function armGrace(o) {
+    if (!o || o.graceArmed) return;
+    o.graceArmed = true;
+    o.free = false;
+    later(function () { o.free = true; dispatchOrders(); }, PLAYER_GRACE_MS);
+  }
+  // 従業員が取れる注文(= 猶予の明けたもの)を1件、orderQueue から抜く。無ければ null。
+  // **まだ席に着いていない客の注文もここでは取れない**(猶予は札が出る=着席の瞬間から始まるので、
+  // free は着席まで付かない)。v49-5 までは客が歩いているうちに従業員が取ってしまい、
+  // リンがいるとプレイヤーに札がほとんど出なかった(7章 32)。
+  function takeFreeOrder() {
+    for (var i = 0; i < orderQueue.length; i++) {
+      if (orderQueue[i].free) return orderQueue.splice(i, 1)[0];
     }
     return null;
   }
@@ -1705,8 +1755,10 @@ window.ShopView = (function () {
   // いればすぐに掴む。全員手一杯なら(厨房側は絵を出さず)客が席で待ったままになる。
   // v14-5: 客の実体(actor)も持たせておき、配膳時に「まだその客がその席にいるか」を確認できるようにする。
   function placeOrder(seat, actor) {
-    orderQueue.push({ id: ++orderSeq, seat: seat, actor: actor });
+    var o = { id: ++orderSeq, seat: seat, actor: actor, free: false, graceArmed: false };
+    orderQueue.push(o);
     dispatchOrders();
+    return o; // v49-6(§3): 呼び側(enterAndSit)が着席の瞬間に armGrace() を仕掛けるため
   }
 
   // v49-5(§4): 手あきの従業員に仕事を配る。役割で優先順位が違う:
@@ -1715,25 +1767,32 @@ window.ShopView = (function () {
   //   both    … 運ぶ > 調理 > 取りに行く(1人で全部やる)
   // **取る権利は配った瞬間に確定する**(orderQueue.shift / claimOldestStock)。以後その注文・丼は
   // どのキューにも無いので、プレイヤーと従業員が同じものを二重に扱うことは構造上あり得ない。
+  // v49-6(§3): 台の丼・注文はどちらも**猶予(PLAYER_GRACE_MS)の明けたものだけ**を配る
+  // (claimOldestStock(true) / takeFreeOrder())。pendingCook はホール役が既に席で取ってきた注文で、
+  // その時点で猶予は済んでいるので**二重には待たせない**。
   function dispatchOrders() {
     kitchenWorkers.forEach(function (w) {
       if (w.gone || w.busy) return;
+      var o;
       if (w.role === "hall") {
-        var e = claimOldestStock();
+        var e = claimOldestStock(true);
         if (e) { runStaffCarry(w, e, STAFF_SHARE.hallCarry); return; }
-        if (orderQueue.length) { runStaffTake(w, orderQueue.shift(), STAFF_SHARE.hallTake); return; }
+        o = takeFreeOrder();
+        if (o) { runStaffTake(w, o, STAFF_SHARE.hallTake); return; }
         return;
       }
       if (w.role === "kitchen") {
         if (pendingCook.length) { runStaffCook(w, pendingCook.shift(), false, STAFF_SHARE.kitchenCook); return; }
-        if (orderQueue.length) { runStaffCook(w, orderQueue.shift(), true, STAFF_SHARE.kitchenCook); return; }
+        o = takeFreeOrder();
+        if (o) { runStaffCook(w, o, true, STAFF_SHARE.kitchenCook); return; }
         return;
       }
       // both(1人)
-      var e2 = claimOldestStock();
+      var e2 = claimOldestStock(true);
       if (e2) { runStaffCarry(w, e2, STAFF_SHARE.soloCarry); return; }
       if (pendingCook.length) { runStaffCook(w, pendingCook.shift(), false, STAFF_SHARE.soloCook); return; }
-      if (orderQueue.length) { runStaffCook(w, orderQueue.shift(), true, STAFF_SHARE.soloCook); return; }
+      o = takeFreeOrder();
+      if (o) { runStaffCook(w, o, true, STAFF_SHARE.soloCook); return; }
     });
     renderPlayerTags(); // 従業員に配り終えた「残り」を見て、プレイヤーの注文札を出し直す
   }
@@ -2060,19 +2119,20 @@ window.ShopView = (function () {
   function movePlayer(x, y, done) {
     var fromX = parseFloat(player.el.dataset.x);
     var fromY = player.tgtY;
-    var ms = walkMs2(fromX, fromY, x, y, PLAYER_WALK_MS_PER_CELL);
+    var ms = walkMs2(fromX, fromY, x, y, WALK_MS_PER_CELL);
     move(player, x, y, ms);
     later(function () { if (player) done(); }, ms);
   }
 
   // v49-4(docs/指示書/v49-4_シフト時計_指示書.md §2): **1杯の見た目の所要 = max(実秒の下限, 需要からの間隔)。**
-  //   下限     … staffBowlFloorMs(speed)。速度1で5秒、速度10で2秒。**これより速くは動かない**
-  //   需要から … その日の客数を1日(90秒)で配り切る間隔。暇な日ほど長い＝ゆっくり働く
+  //   下限     … staffBowlFloorMs(speed)。v49-6(§3)で**プレイヤー1杯の1.5倍(速度1)〜0.7倍(速度10)**に
+  //                置き直した。**これより速くは動かない**
+  //   需要から … その日の客数を1日(v49-6 で60秒)で配り切る間隔。暇な日ほど長い＝ゆっくり働く
   // 忙しくて配り切れないぶんは待ち・行列になる(指示書§2「それでよい。雇う・鍛える動機」)。
   // v49-3 の「minutesPerBowl のゲーム分」は撤回した——minutesPerBowl は週の計算専用に戻した(§0)。
   // 1日の実ms は BANDS の営業時間 × BASE_HOUR_MS から導くだけで、新しい数値は作らない。
   function dayRealMs() {
-    return (window.BANDS || []).reduce(function (a, b) { return a + (b.end - b.start); }, 0) * (window.BASE_HOUR_MS || 7500);
+    return (window.BANDS || []).reduce(function (a, b) { return a + (b.end - b.start); }, 0) * (window.BASE_HOUR_MS || 5000);
   }
   // 今日ぶんの客数(traffic.schedule = 週の客数を曜日×帯へ配分した表。可視化専用の既存データ)。
   function todayCustomerCount() {
@@ -2098,7 +2158,7 @@ window.ShopView = (function () {
   // v32: 斜め上視点では移動が斜めになるため、x・y両方の距離を合成する(旧版はxだけ・yだけを
   // 別々に足すマンハッタン距離に近い式だったが、斜め移動の実態に合わせ直線距離にした)。
   function legBaseMs(fromX, fromY, toX, toY) {
-    return walkMs2(fromX, fromY, toX, toY, STAFF_WALK_MS_PER_CELL);
+    return walkMs2(fromX, fromY, toX, toY, WALK_MS_PER_CELL);
   }
 
   // moveWorker()と同じ移動を、渡されたpaceで一律にスケールして実行する(CSS遷移の尺と
@@ -2373,7 +2433,10 @@ window.ShopView = (function () {
     var el = h("div", { className: "sv-cust" }, [
       h("span", { className: "sv-bowl" }, [AI.node(stageDef("bowl", "🍜"))]),
       h("span", { className: "sv-body" }, [AI.node(useWalk ? walkImgDef(def, 0) : def || stageDef(null, "🧑"))]),
-      h("span", { className: "sv-bubble", text: "" })
+      h("span", { className: "sv-bubble", text: "" }),
+      // v49-6(§4): 食事ゲージ。**調理ゲージ(.sv-player-gauge)と同じ作り・色だけ違う**。
+      // 根(足元の点)の直下に置くので、客が歩いても席に着いてもそのまま付いてくる。
+      h("span", { className: "sv-eat-gauge" }, [h("span", { className: "sv-gauge-fill" })])
     ]);
     placeAt(el, GEO.off.x, GEO.off.y);
     setActorZ(el, GEO.off.x, GEO.off.y);
@@ -2394,7 +2457,8 @@ window.ShopView = (function () {
       body: el.querySelector(".sv-body"),
       walk: null, // v37-1: 歩行2コマの状態(適用する客層だけ非null)
       bowl: el.querySelector(".sv-bowl"),
-      bubble: el.querySelector(".sv-bubble")
+      bubble: el.querySelector(".sv-bubble"),
+      fillEl: el.querySelector(".sv-gauge-fill") // v49-6(§4): runGauge/stopGauge が使う(owner を選ばない)
     };
     if (useWalk) {
       a.body.style.fontSize = walkFontEm() + "em";
@@ -2499,7 +2563,7 @@ window.ShopView = (function () {
   // v35: 距離の単位はマス(旧walkMs<横1軸だけ・参照0件>は削除した)。
   function walkMs2(fromX, fromY, toX, toY, msPerCell) {
     var dx = toX - fromX, dy = toY - fromY;
-    return Math.sqrt(dx * dx + dy * dy) * (msPerCell || CUST_WALK_MS_PER_CELL);
+    return Math.sqrt(dx * dx + dy * dy) * (msPerCell || WALK_MS_PER_CELL);
   }
 
   // v36-3: 経由点を順に歩く(各区間は move() + later())。合計の所要msを返す。状態遷移の判断(いつ帰るか・
@@ -2647,12 +2711,15 @@ window.ShopView = (function () {
     // v26(指示書§3-1、追補§C-1):「今週の客」はweeklyBandSchedule由来の理論値から都度計算する
     // 方式に変わったため、着席イベントを数えるコールバック(onEnterCb)は廃止した。
     a.orderedAt = nowLabel(); // v15-1: 着席が決まった瞬間=注文発生(既存のplaceOrderと同じ瞬間)
-    placeOrder(seat, a); // v13-1: 入店=注文発生。手が空いている厨房担当がいなければ席で待ったままになる
+    var order = placeOrder(seat, a); // v13-1: 入店=注文発生。手が空いている厨房担当がいなければ席で待ったままになる
     // v36-3: 入口→通路→席の道筋を歩く(壁・什器を通り抜けない)。着席の処理は到着後+ENTER_EXTRA_MINの一拍
-    walkVia(a, routeDoorToSeat(seat), CUST_WALK_MS_PER_CELL, function () { later(afterArrive, gm(ENTER_EXTRA_MIN) + gm(SIT_MIN)); }); // 尺は旧「歩行+ENTER_EXTRA+SIT」と同じ内訳
+    walkVia(a, routeDoorToSeat(seat), WALK_MS_PER_CELL, function () { later(afterArrive, gm(ENTER_EXTRA_MIN) + gm(SIT_MIN)); }); // 尺は旧「歩行+ENTER_EXTRA+SIT」と同じ内訳
     function afterArrive() {
       if (a.gone) return;
       a.seatedAt = nowLabel();
+      // v49-6(§3): **注文札が出るのはここ**(taggableOrders は seatedAt を見る)。猶予はこの瞬間から。
+      armGrace(order);
+      renderPlayerTags(); // 札が出た瞬間に描く(次の dispatchOrders を待たない=猶予の2秒を丸ごと使える)
       setBubbleText(a, "🕐");
       a.bubble.className = "sv-bubble mood-neutral";
       a.el.classList.add("show-bubble");
@@ -2681,9 +2748,12 @@ window.ShopView = (function () {
     setBubbleText(a, "");
     a.el.classList.remove("show-bubble");
     a.el.classList.add("eating");
-    // v10-3/v12-1: 滞在時間はゲーム内時間で持つ(提供+食事で30〜40分程度)。実秒は
-    // BASE_HOUR_MS(js/utils.js)から作るので、速度体系を変えても比率は崩れない。
-    later(function () { finishMeal(a); }, gm(U.rand(MEAL_MIN_MIN, MEAL_MIN_MAX)));
+    // v49-6(§4): **頭上に食事ゲージ**を出し、満ちたら finishMeal へ。尺は EAT_BASE_MS × turnoverFactor()
+    // の実ms(1日の長さを変えても食事の見た目の長さは変わらない)。ゲージは絵で、数値には触らない
+    // ——満ちる動きは CSS アニメーション、JS は中間値を一切読まない(調理ゲージと同じ作法)。
+    var ms = eatMs();
+    runGauge(a, ms);
+    later(function () { finishMeal(a); }, ms);
   }
 
   // v25(指示書§2/追補§B-2): 週の切り替わりの安全弁。着席していてまだ丼を受け取っていない客
@@ -2709,7 +2779,7 @@ window.ShopView = (function () {
         if (a.gone) return;
         seat.occupant = null;
         a.seat = null;
-        walkVia(a, routeSeatToOff(seat), CUST_WALK_MS_PER_CELL, function () { removeActor(a); }); // v36-3: 入口を通って歩道へ
+        walkVia(a, routeSeatToOff(seat), WALK_MS_PER_CELL, function () { removeActor(a); }); // v36-3: 入口を通って歩道へ
         pullFromQueue();
       }, gm(LEAVE_WAIT_MIN));
     });
@@ -2720,6 +2790,7 @@ window.ShopView = (function () {
     a.exitAt = nowLabel();
     a.exitReason = "食べ終わった";
     logLifecycle(a);
+    stopGauge(a); // v49-6(§4): 食事ゲージを片付ける(満ちた瞬間=ここ)
     a.el.classList.remove("eating");
     setBubbleFace(a, moodKeyFor(a.segId));
     a.bubble.className = "sv-bubble " + moodClassFor(a.segId);
@@ -2733,7 +2804,7 @@ window.ShopView = (function () {
       window.GameAudio.se("coin"); // v39: 会計(コイン演出と同時)。演出のみ
       seat.occupant = null;
       a.seat = null;
-      walkVia(a, routeSeatToOff(seat), CUST_WALK_MS_PER_CELL, function () { removeActor(a); }); // v36-3: 入口を通って歩道へ
+      walkVia(a, routeSeatToOff(seat), WALK_MS_PER_CELL, function () { removeActor(a); }); // v36-3: 入口を通って歩道へ
       pullFromQueue();
     }, gm(LEAVE_WAIT_MIN));
   }
@@ -2907,6 +2978,21 @@ window.ShopView = (function () {
     openBand: openBand, closeBand: closeBand, skipSeatPop: skipSeatPop,
     clearSeatedWaiters: clearSeatedWaiters, // v25(追補§B-2): 週の切り替わりの安全弁
     getLifecycleLog: function () { return lifecycleLog; }, // v15-6: 確認用(客ごとの着席/注文/丼受取/食事開始/退店ログ)
-    getStockCount: function () { return stock.length; } // v49-5: 確認用(台の上の丼の数。読み取り専用)
+    getStockCount: function () { return stock.length; }, // v49-5: 確認用(台の上の丼の数。読み取り専用)
+    // v49-6(§5): 確認用。**テンポの定数をそのまま読ませるだけ**(getLifecycleLog と同じ読み取り専用の窓)。
+    // 走行スクリプトが「実測 vs 定数」を突き合わせるために要る——期待値をスクリプト側に二重に書かない。
+    getTempo: function () {
+      return {
+        walkMsPerCell: WALK_MS_PER_CELL,
+        playerCookMs: PLAYER_COOK_MS,
+        playerBowlRefMs: PLAYER_BOWL_REF_MS,
+        graceMs: PLAYER_GRACE_MS,
+        eatBaseMs: EAT_BASE_MS,
+        turnoverFactor: turnoverFactor(),
+        staffFloorSlow: staffBowlFloorMs(1),
+        staffFloorFast: staffBowlFloorMs(10)
+      };
+    },
+    staffFloorMs: function (speed) { return staffBowlFloorMs(speed); } // v49-6(§5): 確認用(速度→1杯の下限)
   };
 })();

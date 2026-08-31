@@ -1351,6 +1351,23 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
 
 /* 2-3: 変化した瞬間に絵の上へ浮かせる */
 .float-layer { position: absolute; inset: 0; z-index: 19; pointer-events: none; overflow: hidden; }
+
+/* v49-8(docs/指示書/v49-8_移動モードと吹き出し位置_指示書.md §1): 移動モードのバー。
+   画面の上のほう(HUD の下)に横一本で出す。ふだんは display:none で、.open のときだけ出る。
+   z は速度ドックと同じ 22(舞台より上・パネル 30 より下。移動中はパネルを開いていない)。 */
+.move-bar {
+  position: absolute; left: 8px; right: 8px; z-index: 22;
+  top: calc(var(--frame-w) * 0.30);
+  display: none; align-items: center; gap: 8px; justify-content: space-between;
+  background: var(--c-panel); border: 2px solid var(--c-ink); border-radius: var(--r-s);
+  padding: 5px 8px;
+}
+.move-bar.open { display: flex; }
+.move-bar .move-hint { font-size: var(--fs-note); font-weight: 700; }
+
+/* 設備パネルの「機器の移動」。買い物の一覧の前に1行だけ置く */
+.equip-move { margin: 4px 0 10px; }
+.equip-move .sub { font-size: var(--fs-note); color: var(--c-ink-64); margin-top: 4px; }
 .float-item {
   position: absolute;
   font-size: var(--fs-note);
@@ -1503,7 +1520,7 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    (絵が読めなかったときに舞台の地の濃茶が透けて黒い穴にならないため)。
    **木目は1種のまま。** 板の線が隣のマスへつながる絵なので、土のように複数種を混ぜると
    線が切れて「菱形が並んでいる」ように見える(§69-3)。 */
-.sv-tile-wood { background-image: url(../img/stage/shop_wood.webp?v=20260831025207); background-size: 100% 100%; background-repeat: no-repeat; background-color: #d9a648; } /* S/A/T/D 客席の木目床。v48-2b で本素材へ(旧 仮色 #d9a648) */
+.sv-tile-wood { background-image: url(../img/stage/shop_wood.webp?v=20260831213609); background-size: 100% 100%; background-repeat: no-repeat; background-color: #d9a648; } /* S/A/T/D 客席の木目床。v48-2b で本素材へ(旧 仮色 #d9a648) */
 /* K と カウンターのマス ( = ) の床。**v48-2b で市松を新設した(§69-2)。**
    v35-4 の floor_tile.webp は市松を絵の中に持っていたが、その画像は v36-1 以来
    どこからも参照されておらず(§66-7)、この床はずっと1色のべた塗りだった。
@@ -1512,10 +1529,10 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    記号→クラスの対応(tile かどうか)はこの土台が担い、a/b は絵だけを足す。
    どちらになるかは (col + row) の偶奇だけ(js/screens/shop-view.js の tileVariant)。 */
 .sv-tile-tile   { background-color: #cfe3d6; }
-.sv-tile-tile-a { background-image: url(../img/stage/shop_tile_cream.webp?v=20260831025207); background-size: 100% 100%; background-repeat: no-repeat; }
-.sv-tile-tile-b { background-image: url(../img/stage/shop_tile_mint.webp?v=20260831025207); background-size: 100% 100%; background-repeat: no-repeat; }
+.sv-tile-tile-a { background-image: url(../img/stage/shop_tile_cream.webp?v=20260831213609); background-size: 100% 100%; background-repeat: no-repeat; }
+.sv-tile-tile-b { background-image: url(../img/stage/shop_tile_mint.webp?v=20260831213609); background-size: 100% 100%; background-repeat: no-repeat; }
 /* v48-2a(§68): 歩道は本素材(ベージュの砂利)。background-color は画像が読めなかったときの下地として残す */
-.sv-tile-walk { background-image: url(../img/stage/sidewalk.webp?v=20260831025207); background-size: 100% 100%; background-repeat: no-repeat; background-color: #d6d0c4; } /* W 歩道 v48-2a(旧 仮色 #d6d0c4) */
+.sv-tile-walk { background-image: url(../img/stage/sidewalk.webp?v=20260831213609); background-size: 100% 100%; background-repeat: no-repeat; background-color: #d6d0c4; } /* W 歩道 v48-2a(旧 仮色 #d6d0c4) */
 .sv-tile-road { background: #8d8880; } /* C 車道(仮) v36-3 */
 .sv-tile-lot  { background: #c4bdb0; } /* B 向かいの建物の敷地(仮) v36-3 */
 /* v48-1(§2-2): 敷地の地面。**v48-2a(§68)で土・草・道・歩道の4種を本素材の画像に差し替えた。**
@@ -1542,11 +1559,11 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    記号→クラスの対応(dirt かどうか)はこの土台のクラスが担い、1/2/3 は絵だけを足す。
    **判定・経路・当たり判定に 1/2/3 の区別は持ち込まない。** */
 .sv-tile-dirt   { background-color: #ae6244; }
-.sv-tile-dirt-1 { background-image: url(../img/stage/yard_dirt_1.webp?v=20260831025207); background-size: 100% 100%; background-repeat: no-repeat; }
-.sv-tile-dirt-2 { background-image: url(../img/stage/yard_dirt_2.webp?v=20260831025207); background-size: 100% 100%; background-repeat: no-repeat; }
-.sv-tile-dirt-3 { background-image: url(../img/stage/yard_dirt_3.webp?v=20260831025207); background-size: 100% 100%; background-repeat: no-repeat; }
-.sv-tile-grass { background-image: url(../img/stage/yard_grass.webp?v=20260831025207); background-size: 100% 100%; background-repeat: no-repeat; background-color: #7d9c4e; } /* G 草地(敷地の四隅)。v48-2a で本素材へ(旧 仮色 #7d9c4e) */
-.sv-tile-path  { background-image: url(../img/stage/yard_path.webp?v=20260831025207); background-size: 100% 100%; background-repeat: no-repeat; background-color: #cdbd96; } /* S/O 前庭の道と門(灰の敷石)。v48-2a で本素材へ(旧 仮色 #cdbd96)。門は地面だけで部品を持たず、同じクラスを共有するので敷石が門まで1本につながる(§67の設計どおり) */
+.sv-tile-dirt-1 { background-image: url(../img/stage/yard_dirt_1.webp?v=20260831213609); background-size: 100% 100%; background-repeat: no-repeat; }
+.sv-tile-dirt-2 { background-image: url(../img/stage/yard_dirt_2.webp?v=20260831213609); background-size: 100% 100%; background-repeat: no-repeat; }
+.sv-tile-dirt-3 { background-image: url(../img/stage/yard_dirt_3.webp?v=20260831213609); background-size: 100% 100%; background-repeat: no-repeat; }
+.sv-tile-grass { background-image: url(../img/stage/yard_grass.webp?v=20260831213609); background-size: 100% 100%; background-repeat: no-repeat; background-color: #7d9c4e; } /* G 草地(敷地の四隅)。v48-2a で本素材へ(旧 仮色 #7d9c4e) */
+.sv-tile-path  { background-image: url(../img/stage/yard_path.webp?v=20260831213609); background-size: 100% 100%; background-repeat: no-repeat; background-color: #cdbd96; } /* S/O 前庭の道と門(灰の敷石)。v48-2a で本素材へ(旧 仮色 #cdbd96)。門は地面だけで部品を持たず、同じクラスを共有するので敷石が門まで1本につながる(§67の設計どおり) */
 /* E 隣地(フェンスの外)。**敷地の中と地続きに見えないよう、色相ごと冷たい側へ振った**(灰緑 93°)。
    土(17°)から 76°離れていて、「ここから外は自分の土地ではない」が色で分かる。 */
 .sv-tile-next  { background: #8f9a86; }
@@ -1567,10 +1584,10 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    面は 32×48 の矩形を skewY した平行四辺形(JS の isoFaces.lowWall)なので、横板の線と笠木が辺と平行に歪む。
    絵は元画像の各象限の中央 600×896 を 256×384(2:3)に切ったもので、面(32×48=2:3)に等倍で入る(押し込まない。§75-4)。
    background-color は板壁の平均色 #432a20(読み込み前の色)。窓は variant のクラスで絵を差し替える(出し分けは JS の lowWallVariant)。 */
-.sv-face-lowwall { background-color: #432a20; background-image: url(../img/stage/wall_front_plain.webp?v=20260831025207); background-size: 100% 100%; background-repeat: no-repeat; }
-.sv-face-lowwall.win-square { background-image: url(../img/stage/wall_front_win_square.webp?v=20260831025207); }
-.sv-face-lowwall.win-round { background-image: url(../img/stage/wall_front_win_round.webp?v=20260831025207); }
-.sv-face-lowwall.win-slit { background-image: url(../img/stage/wall_front_win_slit.webp?v=20260831025207); }
+.sv-face-lowwall { background-color: #432a20; background-image: url(../img/stage/wall_front_plain.webp?v=20260831213609); background-size: 100% 100%; background-repeat: no-repeat; }
+.sv-face-lowwall.win-square { background-image: url(../img/stage/wall_front_win_square.webp?v=20260831213609); }
+.sv-face-lowwall.win-round { background-image: url(../img/stage/wall_front_win_round.webp?v=20260831213609); }
+.sv-face-lowwall.win-slit { background-image: url(../img/stage/wall_front_win_slit.webp?v=20260831213609); }
 .sv-face-counter-top { background: var(--sv-wood); }     /* カウンターの天板 */
 .sv-face-counter-front { background: var(--sv-front); }  /* カウンターの前板 */
 .sv-face-counter-end { background: #e8d8bc; }            /* カウンター右端の側板 */
@@ -1667,10 +1684,21 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    置けるマスは床と同じ菱形を半透明の緑(--c-up)で敷く。**z は世界の物より上(900。吹き出しの 1000 の下)**——
    床の高さ(z 50)に置くと厨房の row2 のマスがカウンターの天板(z 170 前後)に隠れて見えない(v48-4a §2-3 で実測)。
    これは世界の一部ではなく UI の目印なので、重なり順の規則(§46-3)の外に置く。タップは通す(JS がマスを座標から特定する)。 */
-[data-prop] { cursor: pointer; }
-[data-prop].selected img { filter: drop-shadow(0 0 2px var(--c-panel)) drop-shadow(0 0 6px var(--c-panel)); transform: translateY(-4px); }
+/* v49-8(§1): 通常時の機器タップでは何も起きないので、指の形も出さない。
+   動かせるのは移動モードのあいだだけ(.shop-stage.move-mode の中の .movable)。 */
+[data-prop] { cursor: default; }
+.shop-stage.move-mode [data-prop].movable { cursor: grab; }
+.shop-stage.move-mode [data-prop].movable img { filter: drop-shadow(0 0 2px var(--c-panel)) drop-shadow(0 0 6px var(--c-panel)); }
+/* 掴んでいるあいだは少し持ち上げる(指の下にあることを見せる) */
+[data-prop].dragging img { transform: translateY(-6px); }
+/* 移動モード中は台の丼の当たり(v49-7)を消す——機器を掴む指を奪わせない */
+.shop-stage.move-mode .sv-tag-bowlhit { display: none; }
+/* 足元のマスの印。v48-4a は「置ける先を全部光らせる」1色だったが、v49-8 は
+   **掴んでいる機器の足元だけ**を緑(置ける)/赤(置けない)でライブに出す。 */
 .sv-place-cell { position: absolute; transform: translate(-50%, -50%); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-  background: rgba(47, 122, 74, 0.45); z-index: 900; pointer-events: none; }
+  z-index: 900; pointer-events: none; }
+.sv-place-cell.ok { background: rgba(47, 122, 74, 0.45); }
+.sv-place-cell.ng { background: rgba(168, 50, 26, 0.45); }
 .sv-wall-sign {
   position: absolute; transform: translate(-50%, -100%);
   font-size: 9px; background: var(--c-panel); border: 1px solid var(--c-ink); padding: 2px 4px;
@@ -1738,7 +1766,12 @@ p { line-height: 1.6; margin: 0 0 6px 0; }
    厨房のストック台を軒並み覆っていた(v49-6 のスクショで実測)。
    **位置は変えない。** left/top は自分の font-size 基準の em なので、縮めた分だけ数を増やして
    絶対位置を保つ: 0.68×0.62=0.4216em(親) → 2.04×0.2067、-2.21×0.62=-1.3702em(親) → -6.63×0.2067。 */
-.sv-cust .sv-bubble.wait { font-size: 0.2067em; left: 2.04em; top: -6.63em; }
+/* v49-8(§2): **頭のすぐ上**へ寄せる。v49-7 は v49-6 の位置(足元から 31.4px 右・102.2px 上)を
+   そのまま引き継いだので、1/3 に縮めたぶん頭から離れて浮いて見えた。
+   人物の背丈は 60px(PERSON_HEIGHT_CELLS×CELL)、🕐 の高さは自分の font-size(15.41px)なので、
+   すき間 3px なら下端 −63px・上端 −78.41px。自分の font-size 基準の em に直すと 78.41/15.41 = 5.088em。
+   横は translateX(-50%) で**頭の中心**に載せる(left は 0 = 足元の点)。 */
+.sv-cust .sv-bubble.wait { font-size: 0.2067em; left: 0; top: -5.088em; transform: translateX(-50%); }
 /* v14-2: 🕐(丼待ち)・😡(退店)は絵文字のまま(v32でも画像化していない)なので、単色フォントでも
    区別が付くよう満足/普通/不満を色で分ける。満足度3種の表情自体はv32で画像化した(img/stage/
    face_*.webp)ため、この色分けは主に🕐/😡向けに残す。 */

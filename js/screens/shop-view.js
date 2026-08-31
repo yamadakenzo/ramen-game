@@ -199,10 +199,14 @@ window.ShopView = (function () {
     // 寸胴・茹で麺機。奥に立つ従業員(背丈 60px、1行奥=画面上 16px 上)の胸の高さ=足元から約 52px。2つ同じ値。
     // 従業員は絵の**奥(−y、背中側)**の1行に立って作業する(work.dy = −1。v48-2c と同じ型)。
     // v48-4a-2: 壁際 row1 に置いたときは手前 row2 に立つ(workFor が向きを決める。表の work は既定の向き)。
-    stockpot:      { W: 594, H: 886, ink: { w: 586, h: 882 }, heightCells: 1.05, cell: { x: 8.5, y: 2.5 }, work: { dx: 0, dy: -1 } },
+    // v49-8(§3): 既定を厨房の**奥の壁沿い(row1)**へ。茹で麺機(col2)の右、1マス空けて col4。
+    // 壁際なのでコックは手前 row2 に立つ(workFor が向きを決める。§72-8)。既存セーブの state.props は動かない。
+    stockpot:      { W: 594, H: 886, ink: { w: 586, h: 882 }, heightCells: 1.05, cell: { x: 4.5, y: 1.5 }, work: { dx: 0, dy: -1 } },
     // 茹で麺機。v48-2d: 左奥(col4)へ動かし、**左右反転して正面(引き戸とつまみ)を +y=カウンター側(画面左下)へ向ける**。
     // 残骸を削った後の寸法(§70)。反転しても 2:1 のアイソメは崩れない(v48-2d 調査 1-2)
-    noodle_boiler: { W: 757, H: 835, ink: { w: 749, h: 827 }, heightCells: 1.05, cell: { x: 4.5, y: 2.5 }, work: { dx: 0, dy: -1 }, flip: true },
+    // v49-8(§3): 既定を奥の壁沿い(row1)の**左端**(col1)へ。col2 だと画面の上ではプレイヤーの
+    // 定位置(3.5,2.5)と同じ列(x−y=1.0)に来て、「店主」の札(z1000)に隠れる(走行で実測)。
+    noodle_boiler: { W: 757, H: 835, ink: { w: 749, h: 827 }, heightCells: 1.05, cell: { x: 1.5, y: 1.5 }, work: { dx: 0, dy: -1 }, flip: true },
     // レジ(台つき)。カウンターの天板(0.6マス=28.8px)より高く、丸椅子(見た目 38px)より大きい。
     // 足元は入口の内側(A帯)の左端。券売機・POSレジの「1枠」でもある(GEO.ticket はここから導く)
     register:      { W: 561, H: 763, ink: { w: 553, h: 755 }, heightCells: 0.95, cell: { x: 1.5, y: 8.5 } },
@@ -230,6 +234,11 @@ window.ShopView = (function () {
         { u: 0.2205, v: 0.2179 }, { u: 0.3437, v: 0.1261 }, { u: 0.4454, v: 0.3739 },
         { u: 0.5676, v: 0.2824 }, { u: 0.6712, v: 0.5298 }, { u: 0.7933, v: 0.4391 }
       ],
+      // v49-8(§3): カウンター寄りの手前列(row2)の**右寄り**(cols5〜6)。長辺は +x のまま。
+      // 停止点は台の奥 row1(cols5〜6)。機器が row1 の左(cols2/4)へ移ったので互いに重ならない。
+      // **これが「右寄り」の限界。** アンカーは2マスの境目なので次は 7.0 だが、そこだと初期表示で
+      // 台の右端が画面からはみ出す(走行 init で実測。この投影の横位置は x−y だけで決まり、
+      // 7.0 だと絵の右端が窓の右端 x−y≈+4.9 を越える)。
       stock: true, cell: { x: 6.0, y: 2.5 }, work: { dx: 0, dy: -1 }
     }
   };
@@ -591,14 +600,34 @@ window.ShopView = (function () {
     if (!stage || !cameraEl) return;
     if (e.pointerType === "mouse" && e.button !== 0) return;
     var sr = stage.getBoundingClientRect();
-    gesture.pts[e.pointerId] = { x: e.clientX - sr.left, y: e.clientY - sr.top };
+    var px = e.clientX - sr.left, py = e.clientY - sr.top;
     // v48-4a(§72): 何を触ったかは pointerdown で記録する。setPointerCapture の後は pointerup の target が舞台になる(調査 1-4)
-    gesture.hit = (e.target && e.target.closest) ? e.target.closest("[data-prop]") : null;
+    var hit = (e.target && e.target.closest) ? e.target.closest("[data-prop]") : null;
     try { stage.setPointerCapture(e.pointerId); } catch (err) { /* 古い環境 */ }
+    // v49-8(§1): 移動モードでは**機器を掴むだけ**。カメラは動かさない(gesture には何も積まない)
+    if (moveMode) {
+      var mid = (hit && hit.dataset) ? hit.dataset.prop : null;
+      if (!mid || MOVABLE.indexOf(mid) < 0) {
+        var p0 = dragPoint(px, py); // 絵で当たらなかったら足元のマスで引き当てる(上の propAtCell)
+        mid = propAtCell({ x: Math.floor(p0.x) + 0.5, y: Math.floor(p0.y) + 0.5 });
+      }
+      if (mid && MOVABLE.indexOf(mid) >= 0 && propEls[mid]) startDrag(mid, px, py);
+      e.preventDefault();
+      return;
+    }
+    gesture.pts[e.pointerId] = { x: px, y: py };
+    gesture.hit = hit;
     gestureAnchor();
     e.preventDefault();
   }
   function onPointerMove(e) {
+    if (moveMode) {
+      if (!drag) return;
+      var sr0 = stage.getBoundingClientRect();
+      updateDrag(e.clientX - sr0.left, e.clientY - sr0.top);
+      e.preventDefault();
+      return;
+    }
     if (!gesture.pts[e.pointerId] || !gesture.start) return;
     var sr = stage.getBoundingClientRect();
     gesture.pts[e.pointerId] = { x: e.clientX - sr.left, y: e.clientY - sr.top };
@@ -623,35 +652,43 @@ window.ShopView = (function () {
     e.preventDefault();
   }
   function onPointerUp(e) {
+    if (moveMode) {
+      // 置ける場所(緑)で離したら確定、置けない場所(赤)や中断(pointercancel)なら元の位置へ戻す
+      if (drag) { endDrag(e.type !== "pointercancel"); e.preventDefault(); }
+      return;
+    }
     if (!gesture.pts[e.pointerId]) return;
     var was = gesture.start;
     delete gesture.pts[e.pointerId];
     if (!ptList().length && was && !was.moved && was.x != null) {
-      // v48-4a(§72): 配置モードが先に取る(立ち物の選択・光ったマスで確定・それ以外で解除)。
-      // 取ったときはダブルタップの初期表示戻しを数えない(「物をタップ→マスをタップ」が戻しに化けないように)
-      if (onTap(was.x, was.y, gesture.hit)) {
+      // v49-8(§1): 配置モードの横取りは無くなった(通常時の機器タップでは何も起きない)。
+      // タップ。300ms以内・近い場所の2回目なら初期表示へ戻す
+      var now = Date.now();
+      if (now - gesture.lastTapAt < 300 && Math.hypot(was.x - gesture.lastTapX, was.y - gesture.lastTapY) < 30) {
+        camTouched = false;
+        fitCamera();
+        applyCamera();
         gesture.lastTapAt = 0;
       } else {
-        // タップ。300ms以内・近い場所の2回目なら初期表示へ戻す
-        var now = Date.now();
-        if (now - gesture.lastTapAt < 300 && Math.hypot(was.x - gesture.lastTapX, was.y - gesture.lastTapY) < 30) {
-          camTouched = false;
-          fitCamera();
-          applyCamera();
-          gesture.lastTapAt = 0;
-        } else {
-          gesture.lastTapAt = now; gesture.lastTapX = was.x; gesture.lastTapY = was.y;
-        }
+        gesture.lastTapAt = now; gesture.lastTapX = was.x; gesture.lastTapY = was.y;
       }
     }
     gesture.hit = null;
     gestureAnchor();
   }
 
-  // ---------- v48-4a(§72): 配置モード(プレイヤーが立ち物を動かす) ----------
-  // 型: 立ち物をタップ → 置けるマスが光る → マスをタップで確定。ドラッグは使わない(カメラのドラッグと衝突する)。
-  // 営業中もそのまま動く。客・従業員・タイマーには触らない(組み直さない)。
-  var placing = null; // { id, cells: [{x,y}], marks: [el] } 選択中だけ持つ
+  // ---------- v49-8(§1): 移動モード(プレイヤーが立ち物を動かす。v48-4a の配置モードの置き換え) ----------
+  // v48-4a の型は「立ち物をタップ → 置けるマスが光る → マスをタップで確定」だった。実機で2つ問題が出た:
+  //   ① 台をタップすると**配膳のつもりが配置モードに入る**(v49-7 で丼の当たりを最前面にしてもなお、
+  //      当たりの外側を押すと台が選ばれる)。
+  //   ② 「選んでから置き場所をタップ」は**狙った位置に置けない**(光るマスは 64×32px の菱形で、
+  //      指の腹より小さい)。
+  // v49-8 の型: **通常時は機器のタップで何も起きない。** 設備パネルの「機器の移動」で移動モードに入り、
+  // そのあいだだけ **機器を指で押さえてスライド**する(足元のマスが緑/赤でライブに出る)。
+  // 移動モード中は営業を止め(loop.js の pause("move"))、カメラのドラッグも切る。
+  // 置ける条件(canPlace)・ストック台の 2×1 の扱いは v48-4a/v49-5 のまま1文字も変えていない。
+  var moveMode = false;
+  var drag = null; // { id, cand: {x,y}, ok: bool, marks: [el] } 掴んでいるあいだだけ持つ
   function cellSym(x, y) {
     var room = roomDef(), col = Math.floor(x), row = Math.floor(y);
     if (col < 0 || row < 0 || col >= room.cols || row >= room.rows) return null;
@@ -731,49 +768,95 @@ window.ShopView = (function () {
     }
     return false;
   }
-  // 置ける先の一覧 [{cell, to}]: cell = 光らせる・タップで当てるマス、to = 確定時に state.props へ書く値。
-  // 立ち物は cell=to。卓(v48-4d)は「左マスを起点にしたアンカー」ごとに左右2マスを光らせ、どちらをタップしても同じアンカーに解決する
-  function placeableTargets(id) {
-    var room = roomDef(), out = [];
-    for (var row = 0; row < room.rows; row++) for (var col = 0; col < room.cols; col++) {
-      if (PROPS[id].table || PROPS[id].stock) {
-        var anchor = { x: col + 1.0, y: row + 0.5 }; // 左マス (col,row) から。v49-5: ストック台も同じ型(2マスの境目がアンカー)
-        if (canPlace(id, anchor)) tableCells(anchor).forEach(function (c) { out.push({ cell: c, to: anchor }); });
-      } else {
-        var c = { x: col + 0.5, y: row + 0.5 };
-        if (canPlace(id, c)) out.push({ cell: c, to: c });
-      }
-    }
-    return out;
-  }
-  function startPlacing(id) {
-    clearPlacing();
-    var targets = placeableTargets(id);
-    // 光るマス: 床と同じ菱形(clip-path)を世界の物より上(z 900)に敷く。タップは通す(マスは座標から特定する)。
-    // 卓は隣り合うアンカーでマスを共有する(同じマスが一方の右マスで他方の左マス)ので、光らせるのは1マス1枚
-    var marks = [], seen = {};
-    targets.forEach(function (t) {
-      var key = t.cell.x + "," + t.cell.y;
-      if (seen[key]) return;
-      seen[key] = true;
-      var m = block("sv-place-cell", {
-        left: toPxX(t.cell.x, t.cell.y) + "px", top: toPxY(t.cell.x, t.cell.y) + "px", width: (TW + 2) + "px", height: (TH + 1) + "px"
-      });
-      cameraEl.appendChild(m);
-      marks.push(m);
-    });
-    propEls[id].classList.add("selected");
-    placing = { id: id, targets: targets, marks: marks };
-  }
   // v48-4d: 卓は2席とも空いているときだけ動かせる(客が向かっている途中も occupant が立っているので含む。4c と同じ規則)
   function tableFree(id) {
     return seats.every(function (s) { return s.table !== id || !s.occupant; });
   }
-  function clearPlacing() {
-    if (!placing) return;
-    placing.marks.forEach(function (m) { if (m.parentNode) m.parentNode.removeChild(m); });
-    if (propEls[placing.id]) propEls[placing.id].classList.remove("selected");
-    placing = null;
+  // 移動モードの出入り。loop.js の「設備 → 機器の移動 / 完了」から呼ぶ(営業の停止も loop.js 側)。
+  function setMoveMode(on) {
+    moveMode = !!on;
+    endDrag(false); // 掴んだままモードが切れたら元の位置へ
+    if (stage) stage.classList.toggle("move-mode", moveMode);
+    // 動かせる機器にだけ印を付ける(入口は MOVABLE ではない。客のいる卓もこの間は掴ませない)
+    MOVABLE.forEach(function (id) {
+      var el = propEls[id];
+      if (!el) return;
+      el.classList.toggle("movable", moveMode && !(PROPS[id].table && !tableFree(id)));
+    });
+    renderStockBowls(); // 丼の当たりを出し直す(移動モード中は CSS で隠れる。戻ったら今の位置で作り直す)
+  }
+  // 指の下の連続マス座標(カメラの translate と scale を戻す。一時停止の復帰と同じ逆変換)
+  function dragPoint(sx, sy) { return fromPx((sx - CAM.x) / CAM.s, (sy - CAM.y) / CAM.s); }
+  // 指の位置 → 置き先の候補。2×1(卓・ストック台)はアンカーが**マスの境目**なので、
+  // 連続座標を四捨五入して**指をまたぐ**ように置く(左マス起点だと絵が指の右へずれて狙えない)。
+  function candidateCell(id, p) {
+    if (PROPS[id].table || PROPS[id].stock) return { x: Math.round(p.x), y: Math.floor(p.y) + 0.5 };
+    return { x: Math.floor(p.x) + 0.5, y: Math.floor(p.y) + 0.5 };
+  }
+  // 指の下のマスに立っている機器を探す。**絵の当たりだけに頼らないための保険**——
+  // ストック台の手前半分はカウンターの部品の箱と重なっていて、そこを押すと部品が指を受ける
+  // (絵は透明でも箱で当たる。v49-5 で実測済み)。足元のマスで引き当てれば、機器の絵のどこを
+  // 押しても、その機器が立っている床を押しても掴める。
+  function propAtCell(cell) {
+    for (var i = 0; i < MOVABLE.length; i++) {
+      var id = MOVABLE[i];
+      if (!propEls[id]) continue;
+      if (PROPS[id].table && TABLE_IDS.indexOf(id) >= tablesDrawn) continue; // まだ描いていない卓は掴めない
+      var c = propCell(id);
+      var cells = (PROPS[id].table || PROPS[id].stock) ? tableCells(c) : [c];
+      var hit = false;
+      cells.forEach(function (cc) { if (sameCell(cc, cell)) hit = true; });
+      if (hit) return id;
+    }
+    return null;
+  }
+  function clearDragMarks() {
+    if (!drag) return;
+    drag.marks.forEach(function (m) { if (m.parentNode) m.parentNode.removeChild(m); });
+    drag.marks = [];
+  }
+  // 足元のマスを緑(置ける)/赤(置けない)でライブ表示。判定は canPlace 1つだけ(色と確定が食い違わない)
+  function drawDragMarks() {
+    clearDragMarks();
+    if (!drag || !drag.cand || !cameraEl) return;
+    var cells = (PROPS[drag.id].table || PROPS[drag.id].stock) ? tableCells(drag.cand) : [drag.cand];
+    cells.forEach(function (c) {
+      var m = block("sv-place-cell " + (drag.ok ? "ok" : "ng"), {
+        left: toPxX(c.x, c.y) + "px", top: toPxY(c.x, c.y) + "px", width: (TW + 2) + "px", height: (TH + 1) + "px"
+      });
+      cameraEl.appendChild(m);
+      drag.marks.push(m);
+    });
+  }
+  function startDrag(id, sx, sy) {
+    if (PROPS[id].table && !tableFree(id)) return false; // 客のいる卓は掴めない(v48-4d の規則のまま)
+    endDrag(false);
+    drag = { id: id, cand: null, ok: false, marks: [] };
+    propEls[id].classList.add("dragging");
+    updateDrag(sx, sy);
+    return true;
+  }
+  // 追従はマス単位で吸い付かせる(**置き先そのものを見せる**ので、離す前に結果が分かる)。
+  // state はまだ書かない——確定は endDrag の moveProp だけ。
+  function updateDrag(sx, sy) {
+    if (!drag) return;
+    var cell = candidateCell(drag.id, dragPoint(sx, sy));
+    if (drag.cand && sameCell(drag.cand, cell)) return;
+    drag.cand = cell;
+    drag.ok = canPlace(drag.id, cell);
+    var ap = PROPS[drag.id].stock ? { x: cell.x, y: cell.y + 0.5 } : cell; // propAnchorPoint と同じ規則
+    if (propEls[drag.id]) placeAt(propEls[drag.id], ap.x, ap.y);
+    drawDragMarks();
+  }
+  function endDrag(commit) {
+    if (!drag) return;
+    var id = drag.id, ok = drag.ok, cell = drag.cand;
+    clearDragMarks();
+    if (propEls[id]) propEls[id].classList.remove("dragging");
+    drag = null;
+    if (commit && ok && cell) { moveProp(id, cell); return; }
+    var ap = propAnchorPoint(id); // 置けない場所で離した/掴んだまま抜けた → 元の位置へ戻す
+    if (propEls[id]) placeAt(propEls[id], ap.x, ap.y);
   }
   // 確定: state に書く → GEO を書き直す → 要素を置き直す → 保存。組み直さないので客・従業員・タイマーはそのまま
   function moveProp(id, cell) {
@@ -792,33 +875,10 @@ window.ShopView = (function () {
     if (id === "stock_counter") renderStockBowls();
     if (window.GameState && window.GameState.save) window.GameState.save();
   }
-  // タップ点(舞台内 px)→マス。カメラ層の translate と scale を戻してから fromPx(一時停止の復帰と同じ逆変換)
-  function tapCell(sx, sy) {
-    var p = fromPx((sx - CAM.x) / CAM.s, (sy - CAM.y) / CAM.s);
-    return { x: Math.floor(p.x) + 0.5, y: Math.floor(p.y) + 0.5 };
-  }
-  // タップを配置モードが取るなら true(ダブルタップの初期表示戻しには数えない)
-  function onTap(sx, sy, hit) {
-    var id = (hit && hit.dataset) ? hit.dataset.prop : null;
-    if (placing) {
-      var cell = tapCell(sx, sy);
-      // 当たった候補のうち、卓なら「タップしたマスが左マス」の候補を優先(v48-4d 調査 1-3: 曖昧なら左優先)。無ければ右マスの候補
-      var hitT = null;
-      placing.targets.forEach(function (t) {
-        if (!sameCell(t.cell, cell)) return;
-        if (!hitT || (t.to.x - 0.5 === t.cell.x && hitT.to.x - 0.5 !== hitT.cell.x)) hitT = t;
-      });
-      if (hitT) moveProp(placing.id, hitT.to);
-      clearPlacing(); // 光っていない場所・別の立ち物・舞台の外は解除
-      return true;
-    }
-    if (id && MOVABLE.indexOf(id) >= 0 && propEls[id]) {
-      if (PROPS[id].table && !tableFree(id)) return true; // v48-4d: 座っている(向かっている)客がいる卓は反応しない
-      startPlacing(id);
-      return true;
-    }
-    return false;
-  }
+  // v49-8(§1): tapCell / onTap は廃止した(参照0件。§34)。**通常時の機器タップでは何も起きない**——
+  // 機器を動かすのは移動モードのドラッグだけになったので、タップから置き場所を決める経路が要らない
+  // (「配膳のつもりが配置モードに入る」も構造ごと消える)。将来「機器をタップして情報を出す」を
+  // 足すなら、onPointerUp の「動いていない1本指」のところが入口になる。
   function bindGestures() {
     stage.addEventListener("pointerdown", onPointerDown);
     stage.addEventListener("pointermove", onPointerMove);
@@ -1196,7 +1256,7 @@ window.ShopView = (function () {
     actors = [];
     staffActors = [];
     queue = [];
-    propEls = {}; anchored = []; placing = null; // v48-4a: 要素ごと消えるので参照と選択も捨てる
+    propEls = {}; anchored = []; drag = null; // v48-4a/v49-8: 要素ごと消えるので参照と掴みかけも捨てる
     stock = []; pendingCook = []; // v49-5: 台の中身は一時値(組み直しで消える。v49-2 の割り切りと同じ)
     // v49-6: **未着手の注文も同じ扱いにした。** 組み直しで actors は空になる(上)ので、残った注文は
     // もう居ない客を指したまま——札は消えた席の座標に浮き、従業員は届かない丼を作り続けていた。
@@ -3009,6 +3069,8 @@ window.ShopView = (function () {
     stock = [];
     pendingCook = [];
     orderSeq = 0;
+    moveMode = false;   // v49-8: 移動モードのまま画面を離れても持ち越さない
+    drag = null;
     player = null;      // v49-1: 俳優は cameraEl ごと消えるので、参照を切るだけでよい
     hitLayer = null;
     playerTags = {};
@@ -3043,6 +3105,10 @@ window.ShopView = (function () {
   return {
     mount: mount, update: update, syncSpeed: syncSpeed, destroy: destroy, setPaused: setPaused,
     openBand: openBand, closeBand: closeBand, skipSeatPop: skipSeatPop,
+    // v49-8(§1): 移動モードの出入り。呼ぶのは loop.js の「設備 → 機器の移動 / 完了」だけ
+    // (営業を止める・戻すのは loop.js の pause("move")/resume("move") 側の仕事)
+    setMoveMode: setMoveMode,
+    isMoveMode: function () { return moveMode; },
     clearSeatedWaiters: clearSeatedWaiters, // v25(追補§B-2): 週の切り替わりの安全弁
     getLifecycleLog: function () { return lifecycleLog; }, // v15-6: 確認用(客ごとの着席/注文/丼受取/食事開始/退店ログ)
     getStockCount: function () { return stock.length; }, // v49-5: 確認用(台の上の丼の数。読み取り専用)

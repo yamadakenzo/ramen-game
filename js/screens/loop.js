@@ -977,7 +977,30 @@ window.ScreenLoop = (function () {
   // v09-1: 開いている間は時間を止める(「パネルを読んでいる間に日付が進む」不具合の本体だった)。
   // ただし止まるのは時間の進行だけで、パネル自体はいつでも操作できる。レシピを変えた瞬間に
   // 上の店で客の反応が変わって見えるのは、時間が止まっていても refreshShop() が反映するので変わらない。
+  // ---------- v49-8(docs/指示書/v49-8_移動モードと吹き出し位置_指示書.md §1): 機器の移動モード ----------
+  // 舞台側(js/screens/shop-view.js)は「掴んでスライドして置く」だけを持ち、**営業を止めるのはここ**。
+  // 既存の pauseReasons をそのまま使う(新しい停止の仕組みは作らない)。
+  var moveModeOn = false;
+  function enterMoveMode() {
+    if (moveModeOn) return;
+    closeSheet();      // パネルを畳む(resume("panel") もここで起きる)
+    moveModeOn = true;
+    pause("move");     // 営業を止める。時計も客も従業員も止まる(パネルを開いたときと同じ扱い)
+    window.ShopView.setMoveMode(true);
+    var bar = document.getElementById("move-bar");
+    if (bar) bar.classList.add("open");
+  }
+  function exitMoveMode() {
+    if (!moveModeOn) return;
+    moveModeOn = false;
+    window.ShopView.setMoveMode(false);
+    var bar = document.getElementById("move-bar");
+    if (bar) bar.classList.remove("open");
+    resume("move");
+  }
+
   function openSheet(key, title, builder) {
+    if (moveModeOn) exitMoveMode(); // 移動モードのままパネルを開いたら移動モードは畳む
     // v22 §1: 開発パネルを開いたまま別のパネルへ直接切り替えた場合も「閉じた」扱いにし、
     // 速度・チュートリアルの状態を戻す(closeSheet()を経由しないルートのため、ここでも呼ぶ)。
     if (key !== "develop") abandonDevelopIfNeeded();
@@ -1662,6 +1685,11 @@ window.ScreenLoop = (function () {
   function panelEquipment() {
     var box = h("div", {});
     box.appendChild(h("p", {}, ["所持金: ", h("span", { className: "money", text: U.formatMoney(state.money) })]));
+    // v49-8(§1): 機器の移動はここから入る。**通常時は機器をタップしても動かない**(配膳の指と衝突しないため)。
+    box.appendChild(h("div", { className: "equip-move" }, [
+      h("button", { className: "btn small primary", text: "🛠 機器の移動", onclick: enterMoveMode }),
+      h("div", { className: "sub", text: "営業が止まり、機器を指で押さえてスライドできます（緑のマスで離すと移動）" })
+    ]));
     var grid = h("div", { className: "choice-grid" });
     PROPERTY_DATA.equipment.forEach(function (eq) {
       var owned = state.equipment.indexOf(eq.id) >= 0;
@@ -1959,6 +1987,11 @@ window.ScreenLoop = (function () {
     root.appendChild(h("div", { className: "shop-fill", id: "shop-fill" }));
     root.appendChild(h("div", { className: "top-bar", id: "top-bar" }));
     root.appendChild(h("div", { className: "float-layer", id: "float-layer" }));
+    // v49-8(§1): 移動モードのバー。ふだんは畳んである(.open が付いたときだけ出る)
+    root.appendChild(h("div", { className: "move-bar", id: "move-bar" }, [
+      h("span", { className: "move-hint", text: "動かす機器を指で押さえてスライド" }),
+      h("button", { className: "btn small primary", text: "完了", onclick: exitMoveMode })
+    ]));
     root.appendChild(h("div", { className: "speed-dock", id: "speed-dock" }));
     root.appendChild(h("div", { className: "fab-col", id: "fab-col" }));
     G.mountBubble(root);
@@ -1978,6 +2011,7 @@ window.ScreenLoop = (function () {
     weekRevenueSkipCount = 0;
     openSheetKey = null;
     sheetBuilder = null;
+    moveModeOn = false;   // v49-8: 移動モードも持ち越さない(バーは今作り直したので閉じている)
     pauseReasons.clear(); // 前回のプレイの一時停止理由を持ち越さない(念のため)
 
     // v22: 「ラーメン開発」まわりの一時状態も持ち越さない。devPointerEl・完成演出オーバーレイは

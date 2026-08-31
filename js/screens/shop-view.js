@@ -787,6 +787,9 @@ window.ShopView = (function () {
     anchored.forEach(function (a) { var p = a.at(); placeAt(a.el, p.x, p.y); });
     // v48-4d: 卓なら、その卓の2席の座標を書き換える(seats[] は作り直さない——a.seat / order.seat の参照が切れないように)
     if (PROPS[id].table) seats.forEach(function (s) { if (s.table === id) { s.x = c.x + s.side; s.y = c.y + 0.2; } });
+    // v49-7(§1-a): 丼の絵は台の子なので一緒に動くが、**当たりは .sv-hits に別に置いてある**ので
+    // 台を動かしたら描き直す(そうしないと当たりだけ旧位置に取り残される)。
+    if (id === "stock_counter") renderStockBowls();
     if (window.GameState && window.GameState.save) window.GameState.save();
   }
   // タップ点(舞台内 px)→マス。カメラ層の translate と scale を戻してから fromPx(一時停止の復帰と同じ逆変換)
@@ -1685,7 +1688,7 @@ window.ShopView = (function () {
     if (slot < 0) return false;
     var e = { order: order, slot: slot, claimed: false, free: false };
     stock.push(e);
-    armGrace(e); // v49-6(§3): 置かれてから2秒はプレイヤーの取り分(従業員は手を出さない)
+    armGrace(e, 2); // v49-6(§3)/v49-7(§1-d): 置かれてから**4秒**(猶予の2倍)はプレイヤーの取り分
     renderStockBowls();
     dispatchOrders(); // 待っているホール役がすぐ取れるように
     return true;
@@ -1705,11 +1708,13 @@ window.ShopView = (function () {
   }
   // v49-6(§3): プレイヤー優先の猶予を1つ仕掛ける。明けたら dispatchOrders() で従業員に配り直す。
   // later() 経由なので一時停止で止まり、速度倍率にも追随する(舞台の他の尺と同じ扱い)。
-  function armGrace(o) {
+  // v49-7(§1-d): mult は猶予の**係数**(定数は増やさない)。台の丼だけ2倍(=4秒)にする——
+  // 実機で「押そうとしたらリンが先に持って行った」が起きていた。注文札は従来どおり1倍(2秒)。
+  function armGrace(o, mult) {
     if (!o || o.graceArmed) return;
     o.graceArmed = true;
     o.free = false;
-    later(function () { o.free = true; dispatchOrders(); }, PLAYER_GRACE_MS);
+    later(function () { o.free = true; dispatchOrders(); }, PLAYER_GRACE_MS * (mult || 1));
   }
   // 従業員が取れる注文(= 猶予の明けたもの)を1件、orderQueue から抜く。無ければ null。
   // **まだ席に着いていない客の注文もここでは取れない**(猶予は札が出る=着席の瞬間から始まるので、
@@ -1731,7 +1736,10 @@ window.ShopView = (function () {
   // z は台と同じ行(親の z を継ぐ)。**タップはプレイヤーの「取る」**(丼側で stopPropagation するので、
   // 台本体のタップ=配置モードの選択とは衝突しない)。
   var BOWL_SLOT_EM = 0.30; // 丼の大きさ(台のキャンバス高に対する比。丸座の間隔≒0.27 に合わせた)
+  // v49-7(§1-a): 指1本の的の最小(画面px)。丼の絵は画面上 22px しかなく、実機で押しづらかった。
+  var HIT_MIN_PX = 44;
   function renderStockBowls() {
+    clearStockHits(); // 台が無い/丼が無いときも当たりは必ず消す(古い当たりが宙に残らないように)
     var root = propEls.stock_counter;
     if (!root) return;
     var olds = root.querySelectorAll(".sv-slot-bowl");
@@ -1739,15 +1747,56 @@ window.ShopView = (function () {
     var pr = PROPS.stock_counter;
     var fontPx = propFontPx(pr);
     var cw = fontPx * pr.W / pr.H; // キャンバスの画面上の幅
+    // v49-7(§1-c): 予約中の印は**いちばん古い未予約の丼**に付ける(取るのはその丼だから)。
+    var mark = (player && player.pendingPick) ? stock.filter(function (e) { return !e.claimed; })[0] : null;
+    var made = [];
     stock.forEach(function (e) {
       var sl = pr.slots[e.slot];
-      var b = h("span", { className: "sv-slot-bowl" + (e.claimed ? " claimed" : "") }, [AI.node(stageDef("bowl", "🍜"))]);
+      var cls = "sv-slot-bowl" + (e.claimed ? " claimed" : " pickable") + (e === mark ? " reserved" : "");
+      var b = h("span", { className: cls }, [AI.node(stageDef("bowl", "🍜"))]);
       b.style.left = (sl.u * cw) + "px";
       b.style.top = (sl.v * fontPx) + "px";
       b.style.fontSize = (fontPx * BOWL_SLOT_EM) + "px";
+      // 絵そのものにも当たりは残す(当たりの矩形と二重でも、取る処理は同じ playerBowlTap で冪等)
       b.addEventListener("pointerdown", function (ev) { ev.stopPropagation(); ev.preventDefault(); });
       b.addEventListener("pointerup", function (ev) { ev.stopPropagation(); ev.preventDefault(); playerBowlTap(); });
       root.appendChild(b);
+      if (!e.claimed) made.push({ e: e, el: b, v: sl.v });
+    });
+    renderStockHits(made);
+  }
+
+  // v49-7(§1-a/b): **丼の当たりは絵ではなく .sv-hits の中の透明な矩形が受ける。**
+  // 丼の絵は台(.sv-prop)の子で、台が z-index を持つ=スタッキング文脈を作るので、
+  // 丼は吹き出し・札(z 1000)より前へは出られない(指も絵も奥に埋もれる)。当たりだけ層を移し、
+  // 大きさを最低 HIT_MIN_PX にする。位置はカメラ層の座標で持つので、寄り引き・移動に自動で追随する。
+  function clearStockHits() {
+    if (!hitLayer) return;
+    var olds = hitLayer.querySelectorAll(".sv-tag-bowlhit");
+    for (var i = 0; i < olds.length; i++) hitLayer.removeChild(olds[i]);
+  }
+  function renderStockHits(made) {
+    if (!hitLayer || !cameraEl || !made.length) return;
+    var s = CAM.s || 1;
+    var cr = cameraEl.getBoundingClientRect(); // transform-origin:0 0 なので、これがカメラ座標の原点
+    // カメラ座標へ直すと 44/s。0.1px 単位で**切り上げる**——そのまま割ると、拡大で掛け直したときに
+    // 43.99998px になって「最低44px」を1/100px 割る(実測)。
+    var min = Math.ceil(HIT_MIN_PX / s * 10) / 10;
+    // **手前(丸座の v が大きい)ほど後に足す** = 当たりが重なったら手前の丼が指を受ける(§1-a)
+    made.slice().sort(function (a, b) { return a.v - b.v; }).forEach(function (m) {
+      var br = m.el.getBoundingClientRect();
+      if (!br.width) return;
+      var w = Math.max(min, br.width / s), hgt = Math.max(min, br.height / s);
+      var cx = (br.left + br.width / 2 - cr.left) / s;
+      var cy = (br.top + br.height / 2 - cr.top) / s;
+      var hit = h("div", { className: "sv-tag-bowlhit" });
+      hit.style.left = (cx - w / 2) + "px";
+      hit.style.top = (cy - hgt / 2) + "px";
+      hit.style.width = w + "px";
+      hit.style.height = hgt + "px";
+      hit.addEventListener("pointerdown", function (ev) { ev.stopPropagation(); ev.preventDefault(); });
+      hit.addEventListener("pointerup", function (ev) { ev.stopPropagation(); ev.preventDefault(); playerBowlTap(); });
+      hitLayer.appendChild(hit);
     });
   }
 
@@ -1877,6 +1926,7 @@ window.ShopView = (function () {
       stateEl: el.querySelector(".sv-player-state"),
       fillEl: el.querySelector(".sv-gauge-fill"),
       state: PL_IDLE,
+      pendingPick: false, // v49-7(§1-c): 手がふさがっているあいだに受けた「台の丼を運ぶ」の予約
       order: null,   // いま抱えている注文(1件だけ。(1)〜(3)のあいだ)。丼は共有ストック(stock)へ置く
       cookTimer: null, tgtY: home.y, tagSig: null
     };
@@ -2054,6 +2104,15 @@ window.ShopView = (function () {
   // **満杯待ちの最中(台の前で丼を持って立っている)なら「入れ替え」**——待っていた丼を台に置き、
   // 最古の丼を持ってそのまま運ぶ。従業員0のとき、6杯貯めて7杯目を作ると「置けない・運べない」の
   // 手詰まりになる(誰も運ばないので永遠に空かない)。その脱出口で、実店舗の動きとしても自然。
+  // v49-7(§1-c): 手がふさがっているあいだのタップは**捨てずに1件だけ予約**する
+  // (次に手が空いた瞬間に運ぶ)。真偽値1つなので二重には積まれない。印は最古の未予約の丼に付く。
+  function reserveStockPick() {
+    if (!player || !playerEnabled()) return;
+    if (!stock.some(function (e) { return !e.claimed; })) return; // 取れる丼が無いなら予約もしない
+    player.pendingPick = true;
+    renderStockBowls(); // 予約の印(.reserved)を出す
+  }
+
   function playerBowlTap() {
     if (!player) return;
     if (player.state === PL_TO_PLATE && player.order && !stockHasRoom()) {
@@ -2076,6 +2135,7 @@ window.ShopView = (function () {
       });
       return;
     }
+    if (!playerIdle()) { reserveStockPick(); return; } // v49-7(§1-c)
     playerPickStock();
   }
 
@@ -2110,6 +2170,11 @@ window.ShopView = (function () {
     setPlayerState(PL_TO_HOME);
     movePlayer(GEO.playerHome.x, GEO.playerHome.y, function () {
       setPlayerState(PL_IDLE);
+      // v49-7(§1-c): 手がふさがっているあいだに丼をタップしてあったら、ここで運びに行く。
+      // 取れる丼がもう無ければ(リンが持って行った)何も起きず、手あきのまま。
+      var wanted = player.pendingPick;
+      player.pendingPick = false;
+      if (wanted) { renderStockBowls(); playerPickStock(); }
       dispatchOrders(); // 手が空いたので札を出し直す(従業員への配りも兼ねる既存の入口)
     });
   }
@@ -2721,7 +2786,9 @@ window.ShopView = (function () {
       armGrace(order);
       renderPlayerTags(); // 札が出た瞬間に描く(次の dispatchOrders を待たない=猶予の2秒を丸ごと使える)
       setBubbleText(a, "🕐");
-      a.bubble.className = "sv-bubble mood-neutral";
+      // v49-7(§2): **待ちの🕐だけ**を 1/3 の大きさにする(退店の表情・😡 はそのまま)。
+      // 印は .wait の1つだけで、次に className を書き替える場所(退店・待ちきれず)で自動的に外れる。
+      a.bubble.className = "sv-bubble mood-neutral wait";
       a.el.classList.add("show-bubble");
       // v25(指示書§2): 着席した客は丼が届くまで必ず待つ(待ちきれずに席を立つ経路を廃止)。
       // a.waitingは「まだ丼を受け取っていない着席客」の目印として残す

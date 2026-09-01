@@ -63,11 +63,18 @@ window.ShopView = (function () {
   var WALK_STAFF_ID = "yuta";
   var WALK_STAFF_FRAMES = ["character/walk_yuta_a", "character/walk_yuta_b"];
   function staffWalkFontEm() { return STAFF_VISIBLE_RATIO / WALK_VISIBLE_RATIO; }
+  // v49-9: 店主(プレイヤー)の正面/背中の2コマずつ(img/character/walk_owner_*.webp、147×256)。
+  // 4コマとも源の共通枠(y=218〜1781・幅900px)で切り出してあり比率1.0(下端=枠の下端、上端=頭頂)。
+  // 正面と背中の頭頂・背丈が一致するので、向きの切替瞬間に頭が縮まない(§51-4 の対策と同じ型)。
+  // 客と同じく walk.back で正面/背中を選ぶが、素材は客の既定(WALK_FRAMES/WALK_BACK_FRAMES)ではなく
+  // walk.frontFrames/backFrames に持たせる(setWalkFrame の1行拡張。ゆうたの frames 固定・客の既定は不変)。
+  var WALK_OWNER_FRAMES = ["character/walk_owner_a", "character/walk_owner_b"];
+  var WALK_OWNER_BACK_FRAMES = ["character/walk_owner_back_a", "character/walk_owner_back_b"];
   function walkImgDef(def, i, frames) { return { img: (frames || WALK_FRAMES)[i], emoji: def.emoji, name: def.name }; }
   function setWalkFrame(a, i) {
     if (!a.walk) return;
     var back = !a.walk.frames && a.walk.back; // v37-4: 正面固定の素材(従業員)は向きを見ない
-    var frames = a.walk.frames || (back ? WALK_BACK_FRAMES : WALK_FRAMES);
+    var frames = a.walk.frames || (back ? (a.walk.backFrames || WALK_BACK_FRAMES) : (a.walk.frontFrames || WALK_FRAMES)); // v49-9: 店主は自前の組
     var key = (back ? "b" : "f") + i; // 向きが変わったときはコマ番号が同じでも描き直す
     if (a.walk.key === key) return;
     a.walk.frame = i; a.walk.key = key;
@@ -1968,8 +1975,12 @@ window.ShopView = (function () {
   // **プレイヤーが歩いてもそのまま付いてくる**——札(.sv-hits)と違って位置を書き直さなくてよい。
   function buildPlayer() {
     var home = GEO.playerHome;
-    var el = h("div", { className: "sv-player" }, [
-      h("span", { className: "sv-body" }, [h("span", { className: "sv-player-box", text: "店主" })]),
+    // v49-9: 矩形(.sv-player-box)を歩行スプライトの<img>に差し替え。根の印クラス .walk は
+    // 反転CSS(.sv-player.walk.flip .sv-body)を効かせるため(§53-2 と同じ限定の仕方)。
+    // def に emoji は持たせない(🧑‍🍳はサブセットフォントに無い。読めないときは無表示でよい)。
+    var ownerDef = { name: "店主" };
+    var el = h("div", { className: "sv-player walk" }, [
+      h("span", { className: "sv-body" }, [AI.node({ img: WALK_OWNER_FRAMES[0], name: ownerDef.name })]),
       h("span", { className: "sv-player-bowl emoji-font", text: "🍜" }),
       h("span", { className: "sv-player-state", text: PL_LABEL[PL_IDLE] }),
       // ゲージは見せるだけ(タップを受けない)。満ちる動きは CSS アニメーションで、
@@ -1977,12 +1988,19 @@ window.ShopView = (function () {
       h("span", { className: "sv-player-gauge" }, [h("span", { className: "sv-gauge-fill" })])
     ]);
     el.style.fontSize = staffFontEm() + "em"; // 従業員と同じ背丈の基準
+    var body = el.querySelector(".sv-body");
+    body.style.fontSize = staffWalkFontEm() + "em"; // v49-9: 比率1.0の絵を背丈60pxに(ゆうた§53と同じ入れ子)
     placeAt(el, home.x, home.y);
     setActorZ(el, home.x, home.y);
     el.dataset.x = home.x;
     actorLayer.appendChild(el);
     player = {
-      el: el, body: el.querySelector(".sv-body"), walk: null, gone: false,
+      // v49-9: walk を非 null に。frames は付けない(=客と同じく back で正面/背中を選ぶ)。
+      // 素材だけ自前の組(frontFrames/backFrames)。movePlayer→move→trackZ→stepWalk が既に通っているので
+      // これだけで歩行コマ・向き・停止時の正面a固定(stopWalk)が乗る(§1 調査 3)。
+      el: el, body: body, gone: false,
+      walk: { frame: 0, key: "f0", back: false, def: ownerDef, acc: 0, last: null,
+              frontFrames: WALK_OWNER_FRAMES, backFrames: WALK_OWNER_BACK_FRAMES },
       stateEl: el.querySelector(".sv-player-state"),
       fillEl: el.querySelector(".sv-gauge-fill"),
       state: PL_IDLE,
